@@ -2,7 +2,7 @@ import os
 from models.senn import SENNGC
 import torch.nn as nn
 import torch
-from utils.utils import (compute_kl_divergence_old, sliding_window_view_torch,
+from utils.utils import (compute_kl_divergence_old,compute_correlated_kl, sliding_window_view_torch,
                          eval_causal_structure, eval_causal_structure_binary,
                          pot, topk, topk_at_step)
 from numpy.lib.stride_tricks import sliding_window_view
@@ -127,8 +127,18 @@ class AERCA(nn.Module):
         # --- Encoding (must stay in torch) ---
         us, encoder_coeffs,lag_outputs, attn_weights, nexts, winds = self.encoding(x)  # us: (batch, latent_dim) or reshape accordingly
         # --- KL divergence with full/structured covariance prior ---\
-        kl_div = compute_kl_divergence_old(us,self.device)  
-        
+        kl_indep = compute_kl_divergence_old(us,self.device)  
+        latent_dim = us.shape[1]
+        split = latent_dim // 2
+        u_indep = us[:, :split]       # for independent prior
+        u_corr = us[:, split:]        # for correlated prior
+        lambda_indep=1.0
+        lambda_corr=1.0
+        shrinkage=0.07
+        #kl_indep = compute_independent_kl(u_indep)
+        kl_corr = compute_correlated_kl(us, shrinkage=shrinkage)
+        # Weighted combination
+        kl_div = lambda_indep * kl_indep + lambda_corr * kl_corr
         # --- Decoding ---
         nexts_hat, decoder_coeffs, prev_coeffs = self.decoding(us, winds, add_u=add_u)
 
