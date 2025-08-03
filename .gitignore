@@ -1,0 +1,6 @@
+/datasets
+*.pyc
+*.log
+*.pkl
+/saved_models/
+__pycache__/

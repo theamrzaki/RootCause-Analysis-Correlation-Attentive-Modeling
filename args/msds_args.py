@@ -18,7 +18,7 @@ def create_arg_parser():
     parser.add_argument('--shuffle', type=int, default=1, help='Flag for shuffling data (default: 1)')
 
     # Meta arguments
-    parser.add_argument('--seed', type=int, default=1, help='Random seed (default: 1)')
+    parser.add_argument('--seed', type=int, default=5, help='Random seed (default: 1)')
     parser.add_argument('--device', type=str, default='cuda', help='Device to use (default: cuda)')
     parser.add_argument('--dataset_name', type=str, default='msds', help='Dataset name (default: msds)')
 
