@@ -1,0 +1,96 @@
+
+1 , 1
+Root cause analysis AC@1: 1.00000
+Root cause analysis AC@3: 1.00000
+Root cause analysis AC@5: 1.00000
+Root cause analysis AC@10: 1.00000
+Root cause analysis Avg@10: 0.99950
+Root cause analysis AC*@1: 0.37000
+Root cause analysis AC*@10: 0.70167
+Root cause analysis AC*@100: 0.79667
+Root cause analysis AC*@500: 0.87333
+Root cause analysis Avg*@500: 0.83152
+
+
+
+
+
+1,0.5
+Root cause analysis AC@1: 0.98000
+Root cause analysis AC@3: 1.00000
+Root cause analysis AC@5: 1.00000
+Root cause analysis AC@10: 1.00000
+Root cause analysis Avg@10: 0.99700
+Root cause analysis AC*@1: 0.31000
+Root cause analysis AC*@10: 0.83917
+Root cause analysis AC*@100: 0.88500
+Root cause analysis AC*@500: 0.90583
+Root cause analysis Avg*@500: 0.89128
+
+
+
+
+1,0.3
+Root cause analysis AC@1: 0.98000
+Root cause analysis AC@3: 1.00000
+Root cause analysis AC@5: 1.00000
+Root cause analysis AC@10: 1.00000
+Root cause analysis Avg@10: 0.99750
+Root cause analysis AC*@1: 0.15000
+Root cause analysis AC*@10: 0.78083
+Root cause analysis AC*@100: 0.87417
+Root cause analysis AC*@500: 0.90083
+Root cause analysis Avg*@500: 0.87828
+Done testing for root cause analysis
+
+
+
+
+0.5,1
+Root cause analysis AC@1: 0.00000
+Root cause analysis AC@3: 0.00000
+Root cause analysis AC@5: 0.05776
+Root cause analysis AC@10: 1.00000
+Root cause analysis Avg@10: 0.42376
+Root cause analysis AC*@1: 0.22772
+Root cause analysis AC*@10: 1.00000
+Root cause analysis AC*@100: 1.00000
+Root cause analysis AC*@500: 1.00000
+Root cause analysis Avg*@500: 0.99686
+Done testing for root cause analysis
+done
+
+
+
+
+1,1 (shirkage 0.08)
+Root cause analysis AC@1: 1.00000
+Root cause analysis AC@3: 1.00000
+Root cause analysis AC@5: 1.00000
+Root cause analysis AC@10: 1.00000
+Root cause analysis Avg@10: 0.99950
+Root cause analysis AC*@1: 0.35000
+Root cause analysis AC*@10: 0.68583
+Root cause analysis AC*@100: 0.80167
+Root cause analysis AC*@500: 0.87333
+Root cause analysis Avg*@500: 0.83368
+Done testing for root cause analysis
+done
+
+
+
+
+
+1,1 (shirkage 0.1) learnable split
+Root cause analysis AC@1: 0.00000
+Root cause analysis AC@3: 0.00495
+Root cause analysis AC@5: 0.00495
+Root cause analysis AC@10: 1.00000
+Root cause analysis Avg@10: 0.44868
+Root cause analysis AC*@1: 0.22772
+Root cause analysis AC*@10: 1.00000
+Root cause analysis AC*@100: 1.00000
+Root cause analysis AC*@500: 1.00000
+Root cause analysis Avg*@500: 0.99686
+Done testing for root cause analysis
+done

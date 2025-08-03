@@ -150,7 +150,7 @@ def main(argv):
         print('Start training AERCA model...')
         aerca_model._training(training_data)
         print('Done training')
-
+    aerca_model.example_normal_window = data_class.data_dict['x_n_list'][0]
     # Testing phase for causal discovery (applies only if slicing is used).
     if mapping["use_slice"]:
         test_causal = data_class.data_dict['x_n_list'][options['training_size']:]
