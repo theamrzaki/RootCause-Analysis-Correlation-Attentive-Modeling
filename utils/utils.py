@@ -549,7 +549,9 @@ def write_results(args, ac_at,k_at_step_all, file_name='result.csv'):
 
     if args['correlated_KL'] == 1:
         scheme_name += "correlated_KL_"
-        scheme_name += f"{args['lambda_indep']},{args['lambda_corr']}_{args['shrinkage']}_"
+        scheme_name += f"{args['lambda_indep']}_{args['lambda_corr']}_{args['shrinkage']}_"
+    else:
+        scheme_name += "normal_KL_"
     scheme_name += f"{args['seed']}_"
     
     row = {
