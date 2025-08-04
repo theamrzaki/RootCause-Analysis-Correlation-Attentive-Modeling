@@ -1,0 +1,2 @@
+scheme,dataset_name,seed,correlated_KL,lambda_indep,lambda_corr,shrinkage,gloabl_attention_over_all_lag,local_attention_per_lag,AC@1,AC@3,AC@5,AC@10,Avg@10
+msds_global_attention_1_,msds,1,0,1.0,1.0,0.07,1,0,0.7029702970297029,0.9884488448844884,0.9966996699669968,1.0,0.9437293729372938
