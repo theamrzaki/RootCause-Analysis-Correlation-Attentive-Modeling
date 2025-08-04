@@ -18,7 +18,7 @@ def create_arg_parser():
     parser.add_argument('--shuffle', type=int, default=1, help='Flag for shuffling data (default: 1)')
 
     # Meta arguments
-    parser.add_argument('--seed', type=int, default=4, help='Random seed (default: 1)')
+    parser.add_argument('--seed', type=int, default=7, help='Random seed (default: 1)')
     parser.add_argument('--device', type=str, default='cuda', help='Device to use (default: cuda)')
     parser.add_argument('--dataset_name', type=str, default='msds', help='Dataset name (default: msds)')
 
@@ -45,6 +45,15 @@ def create_arg_parser():
     parser.add_argument('--initial_level', type=float, default=0.00, help='Initial level (default: 0.00)')
     parser.add_argument('--num_candidates', type=int, default=100, help='Number of candidates (default: 100)')
 
+    # Dual KL arguments
+    parser.add_argument('--correlated_KL', type=int, default=1, help='Flag for correlated KL (default: 1)')
+    parser.add_argument('--lambda_indep', type=float, default=1.0, help='Lambda for independence (default: 1.0)')
+    parser.add_argument('--lambda_corr', type=float, default=1.0, help='Lambda for correlated (default: 1.0)')
+    parser.add_argument('--shrinkage', type=float, default=0.07, help='Shrinkage factor (default: 0.07)') 
+    
+    # Attention arguments
+    parser.add_argument('--gloabl_attention_over_all_lag', type=int, default=1, help='Flag for using global attention over all lag (default: 1)')
+    parser.add_argument('--local_attention_per_lag', type=int, default=0, help='Flag for using local attention per lag (default: 0)')
     return parser
 
 if __name__ == "__main__":

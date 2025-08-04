@@ -35,7 +35,7 @@ def main(argv):
     )
     pre_args, remaining_args = pre_parser.parse_known_args(argv[1:])
     dataset_name = pre_args.dataset_name.lower()
-
+    print("Selected dataset:", dataset_name)
     # Map dataset names to their configuration: argument parser, dataset class, log file, and slicing flag.
     dataset_mapping = {
         "linear": {
@@ -137,7 +137,8 @@ def main(argv):
         root_cause_threshold_decoder=options['root_cause_threshold_decoder'],
         risk=options['risk'],
         initial_level=options['initial_level'],
-        num_candidates=options['num_candidates']
+        num_candidates=options['num_candidates'],
+        options=options
     )
 
     # Training phase: train the model if enabled.

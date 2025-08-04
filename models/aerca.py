@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch
 from utils.utils import (compute_kl_divergence_old,compute_correlated_kl, sliding_window_view_torch,
                          eval_causal_structure, eval_causal_structure_binary,
-                         pot, topk, topk_at_step)
+                         pot, topk, topk_at_step, write_results)
 from numpy.lib.stride_tricks import sliding_window_view
 import logging
 import numpy as np
@@ -27,7 +27,7 @@ class AERCA(nn.Module):
                  recon_threshold: float = 0.95, data_name: str = 'ld',
                  causal_quantile: float = 0.80, root_cause_threshold_encoder: float = 0.95,
                  root_cause_threshold_decoder: float = 0.95, initial_z_score: float = 3.0,
-                 risk: float = 1e-2, initial_level: float = 0.98, num_candidates: int = 100):
+                 risk: float = 1e-2, initial_level: float = 0.98, num_candidates: int = 100, options=None):
         super(AERCA, self).__init__()
         self.example_normal_window = None  # Placeholder for the normal window example
         self.encoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, device)
@@ -79,8 +79,9 @@ class AERCA(nn.Module):
                         sparsity_threshold=0.0     # ✅ Retain all weak signal components
                     )
         self.texfilter.to(self.device)
-        self.linear_layer = nn.Linear(12,10)
+        self.linear_layer = nn.Linear(6,10)
         self.linear_layer.to(self.device)
+        self.options = options if options is not None else {}
         # Create an absolute path for saving models and thresholds
         self.save_dir = os.path.join(os.getcwd(), 'saved_models')
         os.makedirs(self.save_dir, exist_ok=True)
@@ -124,21 +125,43 @@ class AERCA(nn.Module):
         return nexts_hat, coeffs, prev_coeffs
     
     def forward(self, x, add_u=True):
+        ## Ensure input `x` is a PyTorch tensor (if it's a numpy array, convert it)
+        #if isinstance(x, np.ndarray):
+        #    x = torch.from_numpy(x).to(self.device)  # Convert numpy array to tensor
+        #
+        ## Step 1: FFT along the time dimension (assumed dim=1)
+        #x_fft = torch.fft.rfft(x, dim=1)  # Now works because `x` is a tensor
+        #x_fft = x_fft * self.texfilter(x_fft.unsqueeze(0))
+#
+        ## Convert complex to real for linear layer input: e.g., concat real+imag
+        #feat = torch.cat([x_fft.real], dim=-1)  # shape: (..., freq_bins*2)
+#
+        ## Optionally match expected input shape for linear layer
+        #feat = feat.squeeze(0) if feat.dim() == 3 and self.linear_layer.in_features == feat.shape[-1] else feat
+        #feat = feat.to(dtype=self.linear_layer.weight.dtype)
+        #x_proj = self.linear_layer(feat)  # stays on device
+
+
         # --- Encoding (must stay in torch) ---
-        us, encoder_coeffs,lag_outputs, attn_weights, nexts, winds = self.encoding(x)  # us: (batch, latent_dim) or reshape accordingly
-        # --- KL divergence with full/structured covariance prior ---\
-        kl_indep = compute_kl_divergence_old(us,self.device)  
-        latent_dim = us.shape[1]
-        split = latent_dim // 2
-        u_indep = us[:, :split]       # for independent prior
-        u_corr = us[:, split:]        # for correlated prior
-        lambda_indep=1.0
-        lambda_corr=1.0
-        shrinkage=0.07
-        #kl_indep = compute_independent_kl(u_indep)
-        kl_corr = compute_correlated_kl(us, shrinkage=shrinkage)
-        # Weighted combination
-        kl_div = lambda_indep * kl_indep + lambda_corr * kl_corr
+        #us, encoder_coeffs,lag_outputs, attn_weights, nexts, winds = self.encoding(x_proj.cpu().detach().numpy())  # us: (batch, latent_dim) or reshape accordingly
+        us, encoder_coeffs,lag_outputs, attn_weights, nexts, winds = self.encoding(x)
+        if(self.options["correlated_KL"] == 1):
+            # --- KL divergence with full/structured covariance prior ---\
+            kl_indep = compute_kl_divergence_old(us,self.device)  
+            latent_dim = us.shape[1]
+            split = latent_dim // 2
+            u_indep = us[:, :split]       # for independent prior
+            u_corr = us[:, split:]        # for correlated prior
+            lambda_indep=self.options["lambda_indep"]
+            lambda_corr=self.options["lambda_corr"]
+            shrinkage=self.options["shrinkage"]
+            #kl_indep = compute_independent_kl(u_indep)
+            kl_corr = compute_correlated_kl(us, shrinkage=shrinkage)
+            # Weighted combination
+            kl_div = lambda_indep * kl_indep + lambda_corr * kl_corr
+        else:
+            # --- KL divergence with independent prior ---
+            kl_div = compute_kl_divergence_old(us, self.device)
         # --- Decoding ---
         nexts_hat, decoder_coeffs, prev_coeffs = self.decoding(us, winds, add_u=add_u)
 
@@ -181,10 +204,10 @@ class AERCA(nn.Module):
         x_proj = self.linear_layer(feat)  # stays on device
 
         # Step 2: Proceed with encoding/decoding
-        us, encoder_coeffs, nexts, winds = self.encoding(x_proj)  # Or x_fft_magnitude
+        us, encoder_coeffs, nexts, winds = self.encoding(x_proj.cpu().detach().numpy())  # Or x_fft_magnitude
         
         # Step 3: Compute KL divergence (ensure `us` is a tensor)
-        #kl_div = compute_kl_divergence_old(us)  # uses N(0, I) prior by default, covariance-aware
+        kl_indep = compute_kl_divergence_old(us,self.device)  # uses N(0, I) prior by default, covariance-aware
                 # Split latent: e.g., half independent, half correlated
         latent_dim = us.shape[1]
         split = latent_dim // 2
@@ -193,7 +216,7 @@ class AERCA(nn.Module):
         lambda_indep=1.0
         lambda_corr=1.0
         shrinkage=0.07
-        kl_indep = compute_independent_kl(u_indep)
+        #kl_indep = compute_independent_kl(u_indep)
         kl_corr = compute_correlated_kl(u_corr, shrinkage=shrinkage)
         # Weighted combination
         kl_div = lambda_indep * kl_indep + lambda_corr * kl_corr
@@ -567,7 +590,8 @@ class AERCA(nn.Module):
         self._log_and_print('Root cause analysis AC*@100: {:.5f}', ac_star_at[2])
         self._log_and_print('Root cause analysis AC*@500: {:.5f}', ac_star_at[3])
         self._log_and_print('Root cause analysis Avg*@500: {:.5f}', np.mean(k_all))
-    
+        write_results(self.options,ac_at,k_at_step_all,'./result.csv')
+
     
     """
         Root cause analysis AC@1: 0.02970

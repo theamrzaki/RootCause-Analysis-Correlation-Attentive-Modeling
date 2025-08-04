@@ -5,7 +5,7 @@ import random
 import numpy as np
 from sklearn.metrics import roc_auc_score, average_precision_score, accuracy_score, balanced_accuracy_score, \
     precision_score, recall_score
-
+import os
 
 def compute_kl_divergence_old(us, device: torch.device):
     """
@@ -532,4 +532,50 @@ def topk_at_step(scores, labels, k_range=10):
                 count = [1 if i in label_ind else 0 for i in ranking[-k:]]
                 k_lst.append(sum(count) / min(k, len(label_ind)))
     return np.array(k_lst).reshape(-1, k_range).mean(axis=0)
+
+
+def write_results(args, ac_at,k_at_step_all, file_name='result.csv'):
+    file_path = file_name
+    #infodict = {'pr':ps, 'rc':rs, 'auc':auc, 'ap':ap, 'f1':effection}
+    
+    ac_at = [k_at_step_all[0], k_at_step_all[2], k_at_step_all[4], k_at_step_all[9]]
+    
+    scheme_name = ""
+    scheme_name += f"{args['dataset_name']}_"
+    if args['gloabl_attention_over_all_lag'] == 1:
+        scheme_name += "global_attention_"
+    if args['local_attention_per_lag'] == 1:
+        scheme_name += "local_attention_"
+
+    if args['correlated_KL'] == 1:
+        scheme_name += "correlated_KL_"
+        scheme_name += f"{args['lambda_indep']},{args['lambda_corr']}_{args['shrinkage']}_"
+    scheme_name += f"{args['seed']}_"
+    
+    row = {
+        'scheme': scheme_name,
+        'dataset_name': args['dataset_name'],
+        'seed': args['seed'],
+
+        'correlated_KL': args['correlated_KL'],
+        'lambda_indep': args['lambda_indep'],
+        'lambda_corr': args['lambda_corr'],
+        'shrinkage': args['shrinkage'],
+
+        'gloabl_attention_over_all_lag': args['gloabl_attention_over_all_lag'],
+        'local_attention_per_lag': args['local_attention_per_lag'],
+
+        'AC@1': ac_at[0],
+        'AC@3': ac_at[1],
+        'AC@5': ac_at[2],
+        'AC@10': ac_at[3],
+        'Avg@10': np.mean(k_at_step_all),
+    }
+    
+
+    if not os.path.exists(file_path):
+        with open(file_path, 'w') as f:
+            f.write(','.join(row.keys()) + '\n')
+    with open(file_path, 'a') as f:
+        f.write(','.join([str(value) for value in row.values()]) + '\n')
 
