@@ -90,13 +90,14 @@ import torch
 import torch.nn.functional as F
 
 class SENNGC(nn.Module):
-    def __init__(self, num_vars: int, order: int, hidden_layer_size: int, num_hidden_layers: int, device: torch.device):
+    def __init__(self, num_vars: int, order: int, hidden_layer_size: int, num_hidden_layers: int, device: torch.device, use_attention: bool = True):
         super().__init__()
         self.num_vars = num_vars  # p
         self.order = order        # K
         self.device = device
         self.hidden_layer_size = hidden_layer_size
         self.num_hidden_layers = num_hidden_layers
+        self.use_attention = use_attention
 
         # Per-lag coefficient generators: x_{t-k} -> flattened p x p matrix
         self.coeff_nets = nn.ModuleList()
@@ -177,13 +178,20 @@ class SENNGC(nn.Module):
             yk = torch.matmul(coeff_k, lag_vec.unsqueeze(-1)).squeeze(-1)  # [B, p]
             lag_outputs.append(yk.unsqueeze(1))  # [B,1,p]
 
-            x_for_attn = lag_vec.unsqueeze(1)  # [B, 1, p] for Conv1d
-            score_k = self.lag_attn(x_for_attn)  # [B,1]
-            attn_logits.append(score_k)
+            if self.use_attention:
+                x_for_attn = lag_vec.unsqueeze(1)  # [B, 1, p] for Conv1d
+                score_k = self.lag_attn(x_for_attn)  # [B,1]
+                attn_logits.append(score_k)
+            else:
+                attn_logits.append(torch.zeros((B, 1), device=inputs.device))
 
         lag_outputs = torch.cat(lag_outputs, dim=1)     # [B, order, p]
         attn_logits = torch.cat(attn_logits, dim=1)     # [B, order]
-        attn_weights = F.softmax(attn_logits, dim=1).unsqueeze(-1)  # [B, order, 1]
+        if self.use_attention:
+            attn_weights = F.softmax(attn_logits, dim=1).unsqueeze(-1)  # [B, order, 1]
+        else:
+            attn_weights = torch.full((B, self.order, 1), 1.0 / self.order, device=inputs.device)
+
 
         preds = (attn_weights * lag_outputs).sum(dim=1)  # [B, p]
         coeffs = torch.cat(coeffs_list, dim=1)           # [B, order, p, p]

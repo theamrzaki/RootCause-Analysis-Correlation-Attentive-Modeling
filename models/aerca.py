@@ -30,9 +30,10 @@ class AERCA(nn.Module):
                  risk: float = 1e-2, initial_level: float = 0.98, num_candidates: int = 100, options=None):
         super(AERCA, self).__init__()
         self.example_normal_window = None  # Placeholder for the normal window example
-        self.encoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, device)
-        self.decoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, device)
-        self.decoder_prev = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, device)
+        self.use_global_attention = options.get("gloabl_attention_over_all_lag") == 1
+        self.encoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, device, self.use_global_attention)
+        self.decoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, device, self.use_global_attention)
+        self.decoder_prev = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, device, self.use_global_attention)
         self.device = device
         self.num_vars = num_vars
         self.hidden_layer_size = hidden_layer_size
@@ -523,38 +524,38 @@ class AERCA(nn.Module):
         #idi PART SHOULD COME HERE (1)
 
         # Combine all latent representations for POT threshold computation.
-        """
-        us_all = np.concatenate(us_list, axis=0).reshape(-1, self.num_vars)
-        self._log_and_print('=' * 50)
-        us_all_z_score = (-(us_all - self.us_mean_encoder) / self.us_std_encoder)
-        us_all_z_score_pot = []
-        for i in range(self.num_vars):
-            pot_val, _ = pot(us_all_z_score[:, i], self.risk, self.initial_level, self.num_candidates)
-            us_all_z_score_pot.append(pot_val)
-        us_all_z_score_pot = np.array(us_all_z_score_pot)
-        """
-        # Combine latent representations and their attention weights to compute weighted latent vectors
-        us_weighted_list = []
-        for us, attn_w in zip(us_list, attention_list):
-            attn_confidence = attn_w.squeeze(-1).mean(axis=1)  # [T], average over lags
-            attn_confidence = attn_confidence / (attn_confidence.max() + 1e-8)  # normalize
-            weighted_us = us * attn_confidence[:, None]  # broadcast multiply [T, num_vars]
-            us_weighted_list.append(weighted_us)
+        if not self.use_global_attention:
+            us_all = np.concatenate(us_list, axis=0).reshape(-1, self.num_vars)
+            self._log_and_print('=' * 50)
+            us_all_z_score = (-(us_all - self.us_mean_encoder) / self.us_std_encoder)
+            us_all_z_score_pot = []
+            for i in range(self.num_vars):
+                pot_val, _ = pot(us_all_z_score[:, i], self.risk, self.initial_level, self.num_candidates)
+                us_all_z_score_pot.append(pot_val)
+            us_all_z_score_pot = np.array(us_all_z_score_pot)
+        else:
+            # Combine latent representations and their attention weights to compute weighted latent vectors
+            us_weighted_list = []
+            for us, attn_w in zip(us_list, attention_list):
+                attn_confidence = attn_w.squeeze(-1).mean(axis=1)  # [T], average over lags
+                attn_confidence = attn_confidence / (attn_confidence.max() + 1e-8)  # normalize
+                weighted_us = us * attn_confidence[:, None]  # broadcast multiply [T, num_vars]
+                us_weighted_list.append(weighted_us)
 
-        # Concatenate all weighted latent vectors
-        us_all_weighted = np.concatenate(us_weighted_list, axis=0).reshape(-1, self.num_vars)
+            # Concatenate all weighted latent vectors
+            us_all_weighted = np.concatenate(us_weighted_list, axis=0).reshape(-1, self.num_vars)
 
-        self._log_and_print('=' * 50)
+            self._log_and_print('=' * 50)
 
-        # Compute z-scores on weighted latent vectors
-        us_all_weighted_z_score = (-(us_all_weighted - self.us_mean_encoder) / self.us_std_encoder)
+            # Compute z-scores on weighted latent vectors
+            us_all_weighted_z_score = (-(us_all_weighted - self.us_mean_encoder) / self.us_std_encoder)
 
-        # Calculate POT thresholds on weighted z-scores
-        us_all_z_score_pot = []
-        for i in range(self.num_vars):
-            pot_val, _ = pot(us_all_weighted_z_score[:, i], self.risk, self.initial_level, self.num_candidates)
-            us_all_z_score_pot.append(pot_val)
-        us_all_z_score_pot = np.array(us_all_z_score_pot)
+            # Calculate POT thresholds on weighted z-scores
+            us_all_z_score_pot = []
+            for i in range(self.num_vars):
+                pot_val, _ = pot(us_all_weighted_z_score[:, i], self.risk, self.initial_level, self.num_candidates)
+                us_all_z_score_pot.append(pot_val)
+            us_all_z_score_pot = np.array(us_all_z_score_pot)
 
         #OR idi PART SHOULD COME HERE (2)
         
@@ -563,13 +564,14 @@ class AERCA(nn.Module):
         k_at_step_all = []
         for i in range(len(xs)):
             us_sample = us_sample_list[i]
-            #z_scores = (-(us_sample - self.us_mean_encoder) / self.us_std_encoder)
-
-            attn_confidence = attention_list[i].squeeze(-1).mean(axis=1)  # [T]
-            attn_confidence = attn_confidence / (attn_confidence.max() + 1e-8)            
-            # combine with z-scores: boost high-confidence steps
-            z_scores = (-(us_sample - self.us_mean_encoder) / self.us_std_encoder)  # [T, num_vars]
-            weighted_z = z_scores * attn_confidence[:, None]  # broadcast to [T, num_vars]
+            if not self.use_global_attention:
+                weighted_z = (-(us_sample - self.us_mean_encoder) / self.us_std_encoder)
+            else:
+                attn_confidence = attention_list[i].squeeze(-1).mean(axis=1)  # [T]
+                attn_confidence = attn_confidence / (attn_confidence.max() + 1e-8)            
+                # combine with z-scores: boost high-confidence steps
+                z_scores = (-(us_sample - self.us_mean_encoder) / self.us_std_encoder)  # [T, num_vars]
+                weighted_z = z_scores * attn_confidence[:, None]  # broadcast to [T, num_vars]
 
             k_lst = topk(weighted_z, labels[i][self.window_size * 2:], us_all_z_score_pot)
             k_at_step = topk_at_step(weighted_z, labels[i][self.window_size * 2:])
