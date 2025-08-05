@@ -90,16 +90,28 @@ import torch
 import torch.nn.functional as F
 
 class SENNGC(nn.Module):
-    def __init__(self, num_vars: int, order: int, hidden_layer_size: int, num_hidden_layers: int, device: torch.device, use_attention: bool = True):
+    def __init__(
+        self,
+        num_vars: int,
+        order: int,
+        hidden_layer_size: int,
+        num_hidden_layers: int,
+        device: torch.device,
+        use_attention: str = "both",  # options: "none", "global", "self", "both"
+        attn_blend_init: float = 0.5,
+        num_heads: int = 2,
+    ):
         super().__init__()
-        self.num_vars = num_vars  # p
-        self.order = order        # K
+        print(f"use_attention: {use_attention}")
+        assert use_attention in {"none", "global", "self", "both"}, "Invalid use_attention flag"
+        self.num_vars = num_vars
+        self.order = order
         self.device = device
         self.hidden_layer_size = hidden_layer_size
         self.num_hidden_layers = num_hidden_layers
         self.use_attention = use_attention
 
-        # Per-lag coefficient generators: x_{t-k} -> flattened p x p matrix
+        # Per-lag coefficient generators
         self.coeff_nets = nn.ModuleList()
         for _ in range(order):
             layers = [nn.Linear(self.num_vars, hidden_layer_size), nn.ReLU()]
@@ -108,16 +120,29 @@ class SENNGC(nn.Module):
             layers += [nn.Linear(hidden_layer_size, self.num_vars ** 2)]
             self.coeff_nets.append(nn.Sequential(*layers))
 
-        # Attention over lags: score each lag vector to get weights
-        self.lag_attn = nn.Sequential(
-            nn.Conv1d(in_channels=1, out_channels=16, kernel_size=4, padding=1),  # local context across variables
-            nn.ReLU(),
-            nn.AdaptiveAvgPool1d(1),  # aggregate to single feature per channel
-            nn.Flatten(),             # [B, 16]
-            nn.Linear(16, self.hidden_layer_size),
-            nn.ReLU(),
-            nn.Linear(self.hidden_layer_size, 1)  # scalar score per lag
-        )
+        # Scalar lag attention
+        if use_attention in {"scalar", "both"}:
+            self.lag_attn = nn.Sequential(
+                nn.Conv1d(in_channels=1, out_channels=16, kernel_size=4, padding=1),
+                nn.ReLU(),
+                nn.AdaptiveAvgPool1d(1),
+                nn.Flatten(),
+                nn.Linear(16, self.hidden_layer_size),
+                nn.ReLU(),
+                nn.Linear(self.hidden_layer_size, 1)
+            )
+
+        # Self-attention over lags
+        if use_attention in {"self", "both"}:
+            self.self_attn = nn.MultiheadAttention(embed_dim=self.num_vars, num_heads=num_heads, batch_first=True)
+            self.self_attn_score = nn.Sequential(
+                nn.Linear(self.num_vars, self.hidden_layer_size),
+                nn.ReLU(),
+                nn.Linear(self.hidden_layer_size, 1)
+            )
+
+        # blend parameter between learned attention and uniform
+        self.attn_blend = nn.Parameter(torch.tensor(attn_blend_init))
 
     def init_weights(self):
         for m in self.modules():
@@ -126,48 +151,16 @@ class SENNGC(nn.Module):
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0.0)
 
-    def forward_original_output(self, inputs: torch.Tensor):
+    def forward(self, inputs: torch.Tensor):
         # inputs: [B, order, p]
         if inputs.dim() != 3 or inputs.shape[1:] != (self.order, self.num_vars):
             raise ValueError(f"Expected input shape [B, {self.order}, {self.num_vars}], got {tuple(inputs.shape)}")
         B = inputs.shape[0]
         device = inputs.device
 
-        lag_outputs = []   # per-lag y^{(k)}: [B, 1, p]
-        attn_logits = []  # [B, order]
-        coeffs_list = []  # to build coeffs tensor
-
-        for k in range(self.order):
-            lag_vec = inputs[:, k, :]  # [B, p]
-            coeff_flat = self.coeff_nets[k](lag_vec)  # [B, p^2]
-            coeff_k = coeff_flat.view(B, self.num_vars, self.num_vars)  # [B, p, p]
-            coeffs_list.append(coeff_k.unsqueeze(1))  # for stacking later
-
-            yk = torch.matmul(coeff_k, lag_vec.unsqueeze(-1)).squeeze(-1)  # [B, p]
-            lag_outputs.append(yk.unsqueeze(1))  # [B,1,p]
-
-            score_k = self.lag_attn(lag_vec)  # [B,1]
-            attn_logits.append(score_k)
-
-        lag_outputs = torch.cat(lag_outputs, dim=1)     # [B, order, p]
-        attn_logits = torch.cat(attn_logits, dim=1)     # [B, order]
-        attn_weights = F.softmax(attn_logits, dim=1).unsqueeze(-1)  # [B, order, 1]
-
-        # Weighted sum across lags
-        preds = (attn_weights * lag_outputs).sum(dim=1)  # [B, p]
-
-        coeffs = torch.cat(coeffs_list, dim=1)  # [B, order, p, p]
-        return preds, coeffs
-
-    def forward(self, inputs: torch.Tensor):
-        # inputs: [B, order, p]
-        if inputs.dim() != 3 or inputs.shape[1:] != (self.order, self.num_vars):
-            raise ValueError(...)
-        B = inputs.shape[0]
-
-        lag_outputs = []   # per-lag contributions y^{(k)}: [B, 1, p]
-        attn_logits = []   # raw scores before softmax: [B, order]
-        coeffs_list = []   # will become [B, order, p, p]
+        lag_outputs = []
+        scalar_logits = []
+        coeffs_list = []
 
         for k in range(self.order):
             lag_vec = inputs[:, k, :]  # [B, p]
@@ -178,22 +171,41 @@ class SENNGC(nn.Module):
             yk = torch.matmul(coeff_k, lag_vec.unsqueeze(-1)).squeeze(-1)  # [B, p]
             lag_outputs.append(yk.unsqueeze(1))  # [B,1,p]
 
-            if self.use_attention:
-                x_for_attn = lag_vec.unsqueeze(1)  # [B, 1, p] for Conv1d
-                score_k = self.lag_attn(x_for_attn)  # [B,1]
-                attn_logits.append(score_k)
+            if self.use_attention in {"scalar", "both"}:
+                score_k = self.lag_attn(lag_vec.unsqueeze(1))  # [B,1]
+                scalar_logits.append(score_k)
             else:
-                attn_logits.append(torch.zeros((B, 1), device=inputs.device))
+                scalar_logits.append(torch.zeros(B, 1, device=device))
 
         lag_outputs = torch.cat(lag_outputs, dim=1)     # [B, order, p]
-        attn_logits = torch.cat(attn_logits, dim=1)     # [B, order]
-        if self.use_attention:
-            attn_weights = F.softmax(attn_logits, dim=1).unsqueeze(-1)  # [B, order, 1]
+        coeffs = torch.cat(coeffs_list, dim=1)          # [B, order, p, p]
+        scalar_logits = torch.cat(scalar_logits, dim=1)  # [B, order]
+
+        # compute scalar attention weights
+        if self.use_attention in {"scalar", "both"}:
+            scalar_attn = F.softmax(scalar_logits, dim=1)  # [B, order]
         else:
-            attn_weights = torch.full((B, self.order, 1), 1.0 / self.order, device=inputs.device)
+            scalar_attn = torch.full((B, self.order), 0.0, device=device)
 
+        # compute self-attention weights
+        if self.use_attention in {"self", "both"}:
+            self_attn_out, _ = self.self_attn(inputs, inputs, inputs, need_weights=False)  # [B, order, p]
+            self_scores = self.self_attn_score(self_attn_out).squeeze(-1)  # [B, order]
+            self_attn_weights = F.softmax(self_scores, dim=1)
+        else:
+            self_attn_weights = torch.full((B, self.order), 0.0, device=device)
 
+        # combine according to flag
+        if self.use_attention == "none":
+            final_attn = torch.full((B, self.order), 1.0 / self.order, device=device)
+        else:
+            learned = scalar_attn + self_attn_weights  # sum contributions (handles scalar/self/both)
+            learned = learned / (learned.sum(dim=1, keepdim=True) + 1e-8)  # normalize
+            uniform = torch.full((B, self.order), 1.0 / self.order, device=device)
+            mix = torch.sigmoid(self.attn_blend)
+            final_attn = mix * learned + (1 - mix) * uniform  # [B, order]
+
+        attn_weights = final_attn.unsqueeze(-1)  # [B, order, 1]
         preds = (attn_weights * lag_outputs).sum(dim=1)  # [B, p]
-        coeffs = torch.cat(coeffs_list, dim=1)           # [B, order, p, p]
 
         return preds, coeffs, lag_outputs, attn_weights

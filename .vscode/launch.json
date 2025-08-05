@@ -10,7 +10,8 @@
             "request": "launch",
             "program": "main.py",
             "args": [
-                "--dataset_name", "msds"
+                "--dataset_name", "msds",
+                "--gloabl_attention_over_all_lag", "self",
             ],
             "console": "integratedTerminal"
         },
