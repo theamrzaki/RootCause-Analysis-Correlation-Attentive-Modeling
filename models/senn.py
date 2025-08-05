@@ -97,13 +97,13 @@ class SENNGC(nn.Module):
         hidden_layer_size: int,
         num_hidden_layers: int,
         device: torch.device,
-        use_attention: str = "both",  # options: "none", "global", "self", "both"
         attn_blend_init: float = 0.5,
         num_heads: int = 2,
+        use_attention: str = "both",  # options: "none", "global", "self", "both"
     ):
         super().__init__()
         print(f"use_attention: {use_attention}")
-        assert use_attention in {"none", "global", "self", "both"}, "Invalid use_attention flag"
+        assert use_attention in {"global","self","both", "none"}, "Invalid use_attention flag"
         self.num_vars = num_vars
         self.order = order
         self.device = device
@@ -121,7 +121,7 @@ class SENNGC(nn.Module):
             self.coeff_nets.append(nn.Sequential(*layers))
 
         # Scalar lag attention
-        if use_attention in {"scalar", "both"}:
+        if use_attention in {"global", "both"}:
             self.lag_attn = nn.Sequential(
                 nn.Conv1d(in_channels=1, out_channels=16, kernel_size=4, padding=1),
                 nn.ReLU(),
@@ -171,7 +171,7 @@ class SENNGC(nn.Module):
             yk = torch.matmul(coeff_k, lag_vec.unsqueeze(-1)).squeeze(-1)  # [B, p]
             lag_outputs.append(yk.unsqueeze(1))  # [B,1,p]
 
-            if self.use_attention in {"scalar", "both"}:
+            if self.use_attention in {"global", "both"}:
                 score_k = self.lag_attn(lag_vec.unsqueeze(1))  # [B,1]
                 scalar_logits.append(score_k)
             else:
@@ -182,7 +182,7 @@ class SENNGC(nn.Module):
         scalar_logits = torch.cat(scalar_logits, dim=1)  # [B, order]
 
         # compute scalar attention weights
-        if self.use_attention in {"scalar", "both"}:
+        if self.use_attention in {"global", "both"}:
             scalar_attn = F.softmax(scalar_logits, dim=1)  # [B, order]
         else:
             scalar_attn = torch.full((B, self.order), 0.0, device=device)
