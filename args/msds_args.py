@@ -52,7 +52,7 @@ def create_arg_parser():
     parser.add_argument('--shrinkage', type=float, default=0.07, help='Shrinkage factor (default: 0.07)') 
     
     # Attention arguments
-    parser.add_argument('--gloabl_attention_over_all_lag', type=int, default=1, help='Flag for using global attention over all lag (default: 1)')
+    parser.add_argument('--gloabl_attention_over_all_lag', type=str)
     parser.add_argument('--local_attention_per_lag', type=int, default=0, help='Flag for using local attention per lag (default: 0)')
     return parser
 

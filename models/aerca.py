@@ -30,7 +30,7 @@ class AERCA(nn.Module):
                  risk: float = 1e-2, initial_level: float = 0.98, num_candidates: int = 100, options=None):
         super(AERCA, self).__init__()
         self.example_normal_window = None  # Placeholder for the normal window example
-        self.use_global_attention = options.get("gloabl_attention_over_all_lag") == 1
+        self.use_global_attention = options.get("gloabl_attention_over_all_lag")
         self.encoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, device, self.use_global_attention)
         self.decoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, device, self.use_global_attention)
         self.decoder_prev = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, device, self.use_global_attention)
@@ -524,7 +524,7 @@ class AERCA(nn.Module):
         #idi PART SHOULD COME HERE (1)
 
         # Combine all latent representations for POT threshold computation.
-        if not self.use_global_attention:
+        if self.use_global_attention not in {"global","self","both"}:
             us_all = np.concatenate(us_list, axis=0).reshape(-1, self.num_vars)
             self._log_and_print('=' * 50)
             us_all_z_score = (-(us_all - self.us_mean_encoder) / self.us_std_encoder)
@@ -564,7 +564,7 @@ class AERCA(nn.Module):
         k_at_step_all = []
         for i in range(len(xs)):
             us_sample = us_sample_list[i]
-            if not self.use_global_attention:
+            if self.use_global_attention not in {"global","self","both"}:
                 weighted_z = (-(us_sample - self.us_mean_encoder) / self.us_std_encoder)
             else:
                 attn_confidence = attention_list[i].squeeze(-1).mean(axis=1)  # [T]
