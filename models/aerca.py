@@ -30,10 +30,11 @@ class AERCA(nn.Module):
                  risk: float = 1e-2, initial_level: float = 0.98, num_candidates: int = 100, options=None):
         super(AERCA, self).__init__()
         self.example_normal_window = None  # Placeholder for the normal window example
-        self.use_global_attention = options.get("gloabl_attention_over_all_lag")
-        self.encoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, device, self.use_global_attention)
-        self.decoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, device, self.use_global_attention)
-        self.decoder_prev = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, device, self.use_global_attention)
+        self.use_global_attention = options.get("global_attention_over_all_lag")
+        print(f'Using global attention AERCA: {self.use_global_attention}')
+        self.encoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, device, use_attention = self.use_global_attention)
+        self.decoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, device, use_attention = self.use_global_attention)
+        self.decoder_prev = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, device, use_attention = self.use_global_attention)
         self.device = device
         self.num_vars = num_vars
         self.hidden_layer_size = hidden_layer_size

@@ -542,7 +542,7 @@ def write_results(args, ac_at,k_at_step_all, file_name='result.csv'):
     
     scheme_name = ""
     scheme_name += f"{args['dataset_name']}_"
-    scheme_name += args['gloabl_attention_over_all_lag']
+    scheme_name += args['global_attention_over_all_lag']
 
     if args['correlated_KL'] == 1:
         scheme_name += "correlated_KL_"
@@ -561,7 +561,7 @@ def write_results(args, ac_at,k_at_step_all, file_name='result.csv'):
         'lambda_corr': args['lambda_corr'],
         'shrinkage': args['shrinkage'],
 
-        'gloabl_attention_over_all_lag': args['gloabl_attention_over_all_lag'],
+        'global_attention_over_all_lag': args['global_attention_over_all_lag'],
         'local_attention_per_lag': args['local_attention_per_lag'],
 
         'AC@1': ac_at[0],
