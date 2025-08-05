@@ -136,6 +136,8 @@ class MSDS:
         df_normal = pd.read_csv(os.path.join(self.data_dir, 'train.csv'))
         df_abnormal = pd.read_csv(os.path.join(self.data_dir, 'test.csv'))
 
+        # ::5 ->  downsampling by a factor of 5 (keeping every 5th row)
+        # 1: -> skipping the first column (timestamp)
         df_normal, df_abnormal = df_normal.values[::5, 1:], df_abnormal.values[::5, 1:]
         df_label = df_label.values[::5, 1:]
         labels = np.max(df_label, axis=1)

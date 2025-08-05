@@ -1,5 +1,5 @@
 import os
-from models.senn import SENNGC
+from models.senn import SENNGC, MultiModalSENNGC
 import torch.nn as nn
 import torch
 from utils.utils import (compute_kl_divergence_old,compute_correlated_kl, sliding_window_view_torch,
@@ -31,9 +31,29 @@ class AERCA(nn.Module):
         super(AERCA, self).__init__()
         self.example_normal_window = None  # Placeholder for the normal window example
         self.use_global_attention = options.get("gloabl_attention_over_all_lag")
-        self.encoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, device, self.use_global_attention)
-        self.decoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, device, self.use_global_attention)
-        self.decoder_prev = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, device, self.use_global_attention)
+        if options.get("num_modalities") == 1:
+            self.encoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, device, self.use_global_attention)
+            self.decoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, device, self.use_global_attention)
+            self.decoder_prev = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, device, self.use_global_attention)
+        else:
+            self.encoder = MultiModalSENNGC(
+                num_vars_node, num_vars_edge, num_vars_log,
+                window_size, hidden_layer_size, num_hidden_layers,
+                device, use_attention="both"
+            )
+
+            self.decoder = MultiModalSENNGC(
+                num_vars_node, num_vars_edge, num_vars_log,
+                window_size, hidden_layer_size, num_hidden_layers,
+                device, use_attention="both"
+            )
+
+            self.decoder_prev = MultiModalSENNGC(
+                num_vars_node, num_vars_edge, num_vars_log,
+                window_size, hidden_layer_size, num_hidden_layers,
+                device, use_attention="both"
+            )
+
         self.device = device
         self.num_vars = num_vars
         self.hidden_layer_size = hidden_layer_size
@@ -102,28 +122,89 @@ class AERCA(nn.Module):
         return torch.norm(coeffs[:, 1:, :, :] - coeffs[:, :-1, :, :], dim=1).mean()
 
     def encoding(self, xs):
-        windows = sliding_window_view(xs, (self.window_size + 1, self.num_vars))[:, 0, :, :]
-        winds = windows[:, :-1, :]
-        nexts = windows[:, -1, :]
-        winds = torch.tensor(winds).float().to(self.device)
-        nexts = torch.tensor(nexts).float().to(self.device)
-        preds, coeffs,lag_outputs, attn_weights = self.encoder(winds)
-        us = preds - nexts
-        return us, coeffs,lag_outputs, attn_weights, nexts[self.window_size:], winds[:-self.window_size]
+        if self.options.get("num_modalities") == 1:
+            windows = sliding_window_view(xs, (self.window_size + 1, self.num_vars))[:, 0, :, :]
+            winds = windows[:, :-1, :]
+            nexts = windows[:, -1, :]
+            winds = torch.tensor(winds).float().to(self.device)
+            nexts = torch.tensor(nexts).float().to(self.device)
+            preds, coeffs,lag_outputs, attn_weights = self.encoder(winds)
+            us = preds - nexts
+            return us, coeffs,lag_outputs, attn_weights, nexts[self.window_size:], winds[:-self.window_size]
+        else:
+            xs_node, xs_edge, xs_log = xs  # unpack
+
+            # Generate sliding windows: [B, num_windows, window_size+1, D]
+            windows_node = sliding_window_view(xs_node, (self.window_size + 1, self.num_vars_node))[:, 0, :, :]
+            windows_edge = sliding_window_view(xs_edge, (self.window_size + 1, self.num_vars_edge))[:, 0, :, :]
+            windows_log  = sliding_window_view(xs_log,  (self.window_size + 1, self.num_vars_log))[:, 0, :, :]
+
+            # Split inputs: past windows and next-step targets
+            winds_node = torch.tensor(windows_node[:, :-1, :]).float().to(self.device)
+            winds_edge = torch.tensor(windows_edge[:, :-1, :]).float().to(self.device)
+            winds_log  = torch.tensor(windows_log[:, :-1, :]).float().to(self.device)
+
+            nexts_node = torch.tensor(windows_node[:, -1, :]).float().to(self.device)
+            nexts_edge = torch.tensor(windows_edge[:, -1, :]).float().to(self.device)
+            nexts_log  = torch.tensor(windows_log[:, -1, :]).float().to(self.device)
+
+            preds, coeffs, lag_outputs, attn_weights = self.encoder(winds_node, winds_edge, winds_log)
+
+            # Compute residuals (you can apply this per modality if needed)
+            us_node = preds["node"] - nexts_node
+            us_edge = preds["edge"] - nexts_edge
+            us_log  = preds["log"]  - nexts_log
+
+            return (us_node, us_edge, us_log), coeffs, lag_outputs, attn_weights, \
+                (nexts_node, nexts_edge, nexts_log), (winds_node, winds_edge, winds_log)
 
     def decoding(self, us, winds, add_u=True):
-        u_windows = sliding_window_view_torch(us, self.window_size + 1)
-        u_winds = u_windows[:, :-1, :]
-        u_next = u_windows[:, -1, :]
+        if self.options.get("num_modalities") == 1:
+            u_windows = sliding_window_view_torch(us, self.window_size + 1)
+            u_winds = u_windows[:, :-1, :]
+            u_next = u_windows[:, -1, :]
 
-        preds, coeffs,_,_ = self.decoder(u_winds)
-        prev_preds, prev_coeffs,_,_ = self.decoder_prev(winds)
+            preds, coeffs,_,_ = self.decoder(u_winds)
+            prev_preds, prev_coeffs,_,_ = self.decoder_prev(winds)
 
-        if add_u:
-            nexts_hat = preds + u_next + prev_preds
+            if add_u:
+                nexts_hat = preds + u_next + prev_preds
+            else:
+                nexts_hat = preds + prev_preds
+            return nexts_hat, coeffs, prev_coeffs
         else:
-            nexts_hat = preds + prev_preds
-        return nexts_hat, coeffs, prev_coeffs
+            # us and winds are tuples: (us_node, us_edge, us_log), (winds_node, winds_edge, winds_log)
+            us_node, us_edge, us_log = us
+            winds_node, winds_edge, winds_log = winds
+
+            # Compute sliding windows for each modality (shape: [B, win+1, dim])
+            u_windows_node = sliding_window_view_torch(us_node, self.window_size + 1)
+            u_windows_edge = sliding_window_view_torch(us_edge, self.window_size + 1)
+            u_windows_log  = sliding_window_view_torch(us_log,  self.window_size + 1)
+
+            # Split into current inputs and next-step inputs
+            u_winds_node = u_windows_node[:, :-1, :]
+            u_next_node  = u_windows_node[:, -1, :]
+
+            u_winds_edge = u_windows_edge[:, :-1, :]
+            u_next_edge  = u_windows_edge[:, -1, :]
+
+            u_winds_log  = u_windows_log[:, :-1, :]
+            u_next_log   = u_windows_log[:, -1, :]
+
+            # Run decoder and decoder_prev for all 3 modalities
+            preds, coeffs, _, _ = self.decoder(u_winds_node, u_winds_edge, u_winds_log)
+            prev_preds, prev_coeffs, _, _ = self.decoder_prev(winds_node, winds_edge, winds_log)
+
+            # Combine predictions per modality
+            nexts_hat = {}
+            for mod in ['node', 'edge', 'log']:
+                if add_u:
+                    nexts_hat[mod] = preds[mod] + {'node': u_next_node, 'edge': u_next_edge, 'log': u_next_log}[mod] + prev_preds[mod]
+                else:
+                    nexts_hat[mod] = preds[mod] + prev_preds[mod]
+
+            return nexts_hat, coeffs, prev_coeffs
     
     def forward(self, x, add_u=True):
         ## Ensure input `x` is a PyTorch tensor (if it's a numpy array, convert it)
@@ -168,79 +249,9 @@ class AERCA(nn.Module):
 
         return nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us,lag_outputs, attn_weights
 
-    def forward_old(self, x, add_u=True):
-        us, encoder_coeffs, nexts, winds = self.encoding(x)
-        #kl_div = compute_kl_divergence(us)
-
-        # Split latent: e.g., half independent, half correlated
-        latent_dim = us.shape[1]
-        split = latent_dim // 2
-        u_indep = us[:, :split]       # for independent prior
-        u_corr = us[:, split:]        # for correlated prior
-        lambda_indep=1.0
-        lambda_corr=1.0
-        shrinkage=0.1
-        kl_indep = compute_independent_kl(u_indep)
-        kl_corr = compute_correlated_kl(u_corr, shrinkage=shrinkage)
-        # Weighted combination
-        kl_div = lambda_indep * kl_indep + lambda_corr * kl_corr
-
-        nexts_hat, decoder_coeffs, prev_coeffs = self.decoding(us, winds, add_u=add_u)
-        return nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us
-    def forwardaa(self, x, add_u=True):
-        # Ensure input `x` is a PyTorch tensor (if it's a numpy array, convert it)
-        if isinstance(x, np.ndarray):
-            x = torch.from_numpy(x).to(self.device)  # Convert numpy array to tensor
-        
-        # Step 1: FFT along the time dimension (assumed dim=1)
-        x_fft = torch.fft.rfft(x, dim=1)  # Now works because `x` is a tensor
-        x_fft = x_fft * self.texfilter(x_fft.unsqueeze(0))
-
-        # Convert complex to real for linear layer input: e.g., concat real+imag
-        feat = torch.cat([x_fft.real, x_fft.imag], dim=-1)  # shape: (..., freq_bins*2)
-
-        # Optionally match expected input shape for linear layer
-        feat = feat.squeeze(0) if feat.dim() == 3 and self.linear_layer.in_features == feat.shape[-1] else feat
-        feat = feat.to(dtype=self.linear_layer.weight.dtype)
-        x_proj = self.linear_layer(feat)  # stays on device
-
-        # Step 2: Proceed with encoding/decoding
-        us, encoder_coeffs, nexts, winds = self.encoding(x_proj.cpu().detach().numpy())  # Or x_fft_magnitude
-        
-        # Step 3: Compute KL divergence (ensure `us` is a tensor)
-        kl_indep = compute_kl_divergence_old(us,self.device)  # uses N(0, I) prior by default, covariance-aware
-                # Split latent: e.g., half independent, half correlated
-        latent_dim = us.shape[1]
-        split = latent_dim // 2
-        u_indep = us[:, :split]       # for independent prior
-        u_corr = us[:, split:]        # for correlated prior
-        lambda_indep=1.0
-        lambda_corr=1.0
-        shrinkage=0.07
-        #kl_indep = compute_independent_kl(u_indep)
-        kl_corr = compute_correlated_kl(u_corr, shrinkage=shrinkage)
-        # Weighted combination
-        kl_div = lambda_indep * kl_indep + lambda_corr * kl_corr
-
-
-        # Step 4: Decoding
-        nexts_hat, decoder_coeffs, prev_coeffs = self.decoding(us, winds, add_u=add_u)
-        
-        return nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us
-
-    def compute_spectral_kl_divergence(self,us_fft, device):
-        # Compute power spectral density (PSD)
-        psd = torch.abs(us_fft) ** 2
-        psd_normalized = psd / psd.sum(dim=1, keepdim=True)  # Normalize
-        
-        # Target distribution (e.g., uniform PSD)
-        target_psd = torch.ones_like(psd_normalized) / psd_normalized.shape[1]
-        
-        # KL divergence between PSDs
-        kl = (psd_normalized * (torch.log(psd_normalized + 1e-10) - torch.log(target_psd + 1e-10))).sum(dim=1)
-        return kl.mean()
-
     def _training_step(self, x, add_u=True):
+        if self.options.get("num_modalities") != 1:
+            x
         nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us,lag_outputs, attn_weights = self.forward(x, add_u=add_u)
         loss_recon = self.mse_loss(nexts_hat, nexts)
         logging.info('Reconstruction loss: %s', loss_recon.item())

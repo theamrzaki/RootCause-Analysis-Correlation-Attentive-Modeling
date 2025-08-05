@@ -209,3 +209,150 @@ class SENNGC(nn.Module):
         preds = (attn_weights * lag_outputs).sum(dim=1)  # [B, p]
 
         return preds, coeffs, lag_outputs, attn_weights
+
+
+
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class MultiModalSENNGC(nn.Module):
+    def __init__(
+        self,
+        num_vars_node: int,
+        num_vars_edge: int,
+        num_vars_log: int,
+        order: int,
+        hidden_layer_size: int,
+        num_hidden_layers: int,
+        device: torch.device,
+        use_attention: str = "both",  # "none", "scalar", "self", "both"
+        attn_blend_init: float = 0.5,
+        num_heads: int = 2,
+    ):
+        super().__init__()
+        assert use_attention in {"none", "scalar", "self", "both"}, "Invalid use_attention flag"
+
+        self.order = order
+        self.hidden_layer_size = hidden_layer_size
+        self.num_hidden_layers = num_hidden_layers
+        self.use_attention = use_attention
+        self.device = device
+
+        # Store modality dimensions
+        self.dims = {
+            'node': num_vars_node,
+            'edge': num_vars_edge,
+            'log': num_vars_log
+        }
+
+        # Build coefficient nets per modality
+        self.coeff_nets = nn.ModuleDict({
+            mod: nn.ModuleList([
+                self._make_coeff_net(self.dims[mod])
+                for _ in range(order)
+            ]) for mod in self.dims
+        })
+
+        # Scalar attention (shared or per modality)
+        if use_attention in {"scalar", "both"}:
+            self.scalar_attn = nn.ModuleDict({
+                mod: nn.Sequential(
+                    nn.Conv1d(1, 16, kernel_size=4, padding=1),
+                    nn.ReLU(),
+                    nn.AdaptiveAvgPool1d(1),
+                    nn.Flatten(),
+                    nn.Linear(16, hidden_layer_size),
+                    nn.ReLU(),
+                    nn.Linear(hidden_layer_size, 1)
+                ) for mod in self.dims
+            })
+
+        # Self-attention (shared or per modality)
+        if use_attention in {"self", "both"}:
+            self.self_attn = nn.ModuleDict({
+                mod: nn.MultiheadAttention(embed_dim=self.dims[mod], num_heads=num_heads, batch_first=True)
+                for mod in self.dims
+            })
+            self.self_attn_score = nn.ModuleDict({
+                mod: nn.Sequential(
+                    nn.Linear(self.dims[mod], hidden_layer_size),
+                    nn.ReLU(),
+                    nn.Linear(hidden_layer_size, 1)
+                ) for mod in self.dims
+            })
+
+        # Blend parameter for attention
+        self.attn_blend = nn.Parameter(torch.tensor(attn_blend_init))
+
+    def _make_coeff_net(self, input_dim):
+        layers = [nn.Linear(input_dim, self.hidden_layer_size), nn.ReLU()]
+        for _ in range(self.num_hidden_layers - 1):
+            layers += [nn.Linear(self.hidden_layer_size, self.hidden_layer_size), nn.ReLU()]
+        layers += [nn.Linear(self.hidden_layer_size, input_dim ** 2)]
+        return nn.Sequential(*layers)
+
+    def forward(self, x_node, x_edge, x_log):
+        inputs = {'node': x_node, 'edge': x_edge, 'log': x_log}
+        preds, coeffs, lag_outputs, attn_weights = {}, {}, {}, {}
+
+        B = x_node.shape[0]
+        device = x_node.device
+
+        for mod, x in inputs.items():
+            dim = self.dims[mod]
+            lag_outputs_mod = []
+            coeffs_mod = []
+            scalar_logits = []
+
+            for k in range(self.order):
+                xk = x[:, k, :]  # [B, dim]
+                coeff_flat = self.coeff_nets[mod][k](xk)  # [B, dim^2]
+                coeff_mat = coeff_flat.view(B, dim, dim)  # [B, dim, dim]
+                coeffs_mod.append(coeff_mat.unsqueeze(1))
+
+                out = torch.matmul(coeff_mat, xk.unsqueeze(-1)).squeeze(-1)  # [B, dim]
+                lag_outputs_mod.append(out.unsqueeze(1))
+
+                if self.use_attention in {"scalar", "both"}:
+                    score_k = self.scalar_attn[mod](xk.unsqueeze(1))  # [B, 1]
+                    scalar_logits.append(score_k)
+                else:
+                    scalar_logits.append(torch.zeros(B, 1, device=device))
+
+            lag_outputs_mod = torch.cat(lag_outputs_mod, dim=1)  # [B, order, dim]
+            coeffs_mod = torch.cat(coeffs_mod, dim=1)  # [B, order, dim, dim]
+            scalar_logits = torch.cat(scalar_logits, dim=1)  # [B, order]
+
+            if self.use_attention in {"scalar", "both"}:
+                scalar_attn = F.softmax(scalar_logits, dim=1)
+            else:
+                scalar_attn = torch.full((B, self.order), 1.0 / self.order, device=device)
+
+            if self.use_attention in {"self", "both"}:
+                self_out, _ = self.self_attn[mod](x, x, x, need_weights=False)  # [B, order, dim]
+                score = self.self_attn_score[mod](self_out).squeeze(-1)  # [B, order]
+                self_attn_weights = F.softmax(score, dim=1)
+            else:
+                self_attn_weights = torch.full((B, self.order), 0.0, device=device)
+
+            if self.use_attention == "none":
+                final_attn = torch.full((B, self.order), 1.0 / self.order, device=device)
+            else:
+                learned = scalar_attn + self_attn_weights
+                learned = learned / (learned.sum(dim=1, keepdim=True) + 1e-8)
+                uniform = torch.full((B, self.order), 1.0 / self.order, device=device)
+                mix = torch.sigmoid(self.attn_blend)
+                final_attn = mix * learned + (1 - mix) * uniform
+
+            attn_w = final_attn.unsqueeze(-1)  # [B, order, 1]
+            pred = (attn_w * lag_outputs_mod).sum(dim=1)  # [B, dim]
+
+            # Save outputs
+            preds[mod] = pred
+            coeffs[mod] = coeffs_mod
+            lag_outputs[mod] = lag_outputs_mod
+            attn_weights[mod] = attn_w
+
+        return preds, coeffs, lag_outputs, attn_weights
