@@ -542,10 +542,7 @@ def write_results(args, ac_at,k_at_step_all, file_name='result.csv'):
     
     scheme_name = ""
     scheme_name += f"{args['dataset_name']}_"
-    if args['gloabl_attention_over_all_lag'] == 1:
-        scheme_name += "global_attention_"
-    if args['local_attention_per_lag'] == 1:
-        scheme_name += "local_attention_"
+    scheme_name += args['gloabl_attention_over_all_lag']
 
     if args['correlated_KL'] == 1:
         scheme_name += "correlated_KL_"
