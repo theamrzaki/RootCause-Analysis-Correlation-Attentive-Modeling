@@ -104,7 +104,7 @@ def main(argv):
     # Set the random seed for reproducibility.
     utils.set_seed(options['seed'])
     print('Set seed: {}'.format(options['seed']))
-
+    print(f"shrinkage :{options['shrinkage']}")
     # Instantiate the dataset class and generate or load data based on the preprocessing flag.
     data_class = mapping["dataset_class"](options)
     if options['preprocessing_data'] == 1:
