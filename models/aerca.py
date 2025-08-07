@@ -2,7 +2,7 @@ import os
 from models.senn import SENNGC
 import torch.nn as nn
 import torch
-from utils.utils import (compute_kl_divergence_old,compute_correlated_kl, sliding_window_view_torch,
+from utils.utils import (compute_mmd,compute_kl_divergence_old,compute_correlated_kl, sliding_window_view_torch,
                          eval_causal_structure, eval_causal_structure_binary,
                          pot, topk, topk_at_step, write_results)
 from numpy.lib.stride_tricks import sliding_window_view
@@ -56,7 +56,15 @@ class AERCA(nn.Module):
         self.initial_z_score = initial_z_score
         self.mse_loss = nn.MSELoss()
         self.mse_loss_wo_reduction = nn.MSELoss(reduction='none')
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=lr)
+        self.log_lambda_indep = nn.Parameter(torch.tensor(0.5))  # log of lambda_indep
+        self.log_lambda_corr = nn.Parameter(torch.tensor(0.5))   # log of lambda_corr
+        self.log_lambda_mmd = nn.Parameter(torch.tensor(0.5))     # log of lambda_mmd
+        self.compress_us_layer = nn.Sequential(
+            nn.Linear(num_vars, num_vars // 5),
+            nn.LayerNorm(num_vars // 5),
+            nn.Tanh()  # Optional
+        ).to(self.device)
+        
         self.encoder.to(self.device)
         self.decoder.to(self.device)
         self.decoder_prev.to(self.device)
@@ -72,7 +80,7 @@ class AERCA(nn.Module):
         self.initial_level = initial_level
         self.num_candidates = num_candidates
         self.texfilter =    TexFilter(
-                        embed_size=6,#TODO: make it a parameter
+                        embed_size=26,#TODO: make it a parameter
                         use_gelu=True,             # or use_swish=True for smoother nonlinearity
                         use_skip=True,             # ✅ Preserve original signal paths
                         use_layernorm=True,        # ✅ Stabilize across frequency bins
@@ -81,11 +89,12 @@ class AERCA(nn.Module):
                         sparsity_threshold=0.0     # ✅ Retain all weak signal components
                     )
         self.texfilter.to(self.device)
-        self.linear_layer = nn.Linear(6,10)
+        self.linear_layer = nn.Linear(26*2,10)
         self.linear_layer.to(self.device)
         self.options = options if options is not None else {}
         # Create an absolute path for saving models and thresholds
         self.save_dir = os.path.join(os.getcwd(), 'saved_models')
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=lr)
         os.makedirs(self.save_dir, exist_ok=True)
 
     def _log_and_print(self, msg, *args):
@@ -134,33 +143,60 @@ class AERCA(nn.Module):
         ## Step 1: FFT along the time dimension (assumed dim=1)
         #x_fft = torch.fft.rfft(x, dim=1)  # Now works because `x` is a tensor
         #x_fft = x_fft * self.texfilter(x_fft.unsqueeze(0))
-#
+##
         ## Convert complex to real for linear layer input: e.g., concat real+imag
-        #feat = torch.cat([x_fft.real], dim=-1)  # shape: (..., freq_bins*2)
-#
+        #feat = torch.cat([x_fft.real,x_fft.imag], dim=-1)  # shape: (..., freq_bins*2)
+##
         ## Optionally match expected input shape for linear layer
         #feat = feat.squeeze(0) if feat.dim() == 3 and self.linear_layer.in_features == feat.shape[-1] else feat
         #feat = feat.to(dtype=self.linear_layer.weight.dtype)
         #x_proj = self.linear_layer(feat)  # stays on device
-
-
-        # --- Encoding (must stay in torch) ---
+#
+#
+        ## --- Encoding (must stay in torch) ---
         #us, encoder_coeffs,lag_outputs, attn_weights, nexts, winds = self.encoding(x_proj.cpu().detach().numpy())  # us: (batch, latent_dim) or reshape accordingly
         us, encoder_coeffs,lag_outputs, attn_weights, nexts, winds = self.encoding(x)
         if(self.options["correlated_KL"] == 1):
             # --- KL divergence with full/structured covariance prior ---\
+            ##us_expand = self.compress_us_layer(us)
+            
+            ## Step 1: FFT along the time dimension (assumed dim=1)
+            #us_fft = torch.fft.rfft(us, dim=1)  # Now works because `x` is a tensor
+            #us_fft = us_fft * self.texfilter(us_fft.unsqueeze(0))
+    #
+            ## Convert complex to real for linear layer input: e.g., concat real+imag
+            #feat = torch.cat([us_fft.real,us_fft.imag], dim=-1)  # shape: (..., freq_bins*2)
+    #
+            ## Optionally match expected input shape for linear layer
+            #feat = feat.squeeze(0) if feat.dim() == 3 and self.linear_layer.in_features == feat.shape[-1] else feat
+            #feat = feat.to(dtype=self.linear_layer.weight.dtype)
+            #us_fft = self.linear_layer(feat)  # stays on device
+
+
             kl_indep = compute_kl_divergence_old(us,self.device)  
             latent_dim = us.shape[1]
             split = latent_dim // 2
             u_indep = us[:, :split]       # for independent prior
             u_corr = us[:, split:]        # for correlated prior
-            lambda_indep=self.options["lambda_indep"]
-            lambda_corr=self.options["lambda_corr"]
+            #lambda_indep=self.options["lambda_indep"]
+            #lambda_corr=self.options["lambda_corr"]
+            lambda_indep = torch.exp(self.log_lambda_indep)
+            lambda_corr = torch.exp(self.log_lambda_corr)
+            lambda_mmd = torch.exp(self.log_lambda_mmd)
             shrinkage=self.options["shrinkage"]
             #kl_indep = compute_independent_kl(u_indep)
             kl_corr = compute_correlated_kl(us, shrinkage=shrinkage)
             # Weighted combination
+            s = (us[:, 0] > us[:, 0].median()).long()
+
+            us_0 = us[s == 0]
+            us_1 = us[s == 1]
+
+            fair_loss = compute_mmd(us_0, us_1)  # MMD loss between the two groups
+
             kl_div = lambda_indep * kl_indep + lambda_corr * kl_corr
+            kl_div = kl_div + lambda_mmd * fair_loss
+
         else:
             # --- KL divergence with independent prior ---
             kl_div = compute_kl_divergence_old(us, self.device)
@@ -334,12 +370,14 @@ class AERCA(nn.Module):
         ## Could add auxiliary loss encouraging consistency between z and observed extremes, etc.
 
 
+        reg_lambda = 0.01 * (self.log_lambda_indep ** 2 + self.log_lambda_corr ** 2)
         loss = (loss_recon +
                 self.encoder_lambda * loss_encoder_coeffs +
                 self.decoder_lambda * (loss_decoder_coeffs + loss_prev_coeffs) +
                 self.encoder_gamma * loss_encoder_smooth +
                 self.decoder_gamma * (loss_decoder_smooth + loss_prev_smooth) +
-                self.beta * loss_kl  )  # evt_weight is a hyperparameter)
+                loss_kl +
+                reg_lambda )  # evt_weight is a hyperparameter)
         logging.info('Total loss: %s', loss.item())
 
         return loss
@@ -439,12 +477,14 @@ class AERCA(nn.Module):
         loss_kl = kl_div
         logging.info('KL loss: %s', loss_kl.item())
 
+        reg_lambda = 0.01 * (self.log_lambda_indep ** 2 + self.log_lambda_corr ** 2)
         loss = (loss_recon +
                 self.encoder_lambda * loss_encoder_coeffs +
                 self.decoder_lambda * (loss_decoder_coeffs + loss_prev_coeffs) +
                 self.encoder_gamma * loss_encoder_smooth +
                 self.decoder_gamma * (loss_decoder_smooth + loss_prev_smooth) +
-                self.beta * loss_kl)
+                loss_kl +
+                reg_lambda )  # evt_weight is a hyperparameter)
         logging.info('Total loss: %s', loss.item())
 
         return loss, nexts_hat, nexts, encoder_coeffs, decoder_coeffs, kl_div, preprocessed_label, us,lag_outputs, attn_weights

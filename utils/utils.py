@@ -533,6 +533,20 @@ def topk_at_step(scores, labels, k_range=10):
                 k_lst.append(sum(count) / min(k, len(label_ind)))
     return np.array(k_lst).reshape(-1, k_range).mean(axis=0)
 
+def compute_mmd(x, y, kernel='rbf', gamma=1.0):
+    """MMD between two sets of samples"""
+    def pairwise_dist(a, b):
+        return ((a.unsqueeze(1) - b.unsqueeze(0)) ** 2).sum(2)
+
+    if kernel == 'rbf':
+        Kxx = torch.exp(-pairwise_dist(x, x) * gamma).mean()
+        Kyy = torch.exp(-pairwise_dist(y, y) * gamma).mean()
+        Kxy = torch.exp(-pairwise_dist(x, y) * gamma).mean()
+        return Kxx + Kyy - 2 * Kxy
+    else:
+        raise NotImplementedError("Only RBF kernel is implemented")
+    
+
 
 def write_results(args, ac_at,k_at_step_all, file_name='result.csv'):
     file_path = file_name

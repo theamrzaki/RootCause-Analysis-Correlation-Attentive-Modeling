@@ -1,17 +1,17 @@
 #!/bin/bash
 
 seeds=(3 4)
-attention_modes=("global" "none")
+attention_modes=("global")
 
-for correlated_KL in 0 1; do
+for correlated_KL in 1; do
   for attention_mode in "${attention_modes[@]}"; do
     for seed in "${seeds[@]}"; do
       echo "Running with correlated_KL=$correlated_KL, seed=$seed, global_attention_over_all_lag=$attention_mode"
       python3 main.py \
         --correlated_KL="$correlated_KL" \
         --seed="$seed" \
-        --dataset="msds" \
-        --lambda_indep=1.0 \
+        --dataset="swat" \
+        --lambda_indep=0.5 \
         --lambda_corr=1.0 \
         --global_attention_over_all_lag="$attention_mode"
     done
