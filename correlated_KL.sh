@@ -1,7 +1,7 @@
 #!/bin/bash
 
-seeds=(3 4)
-attention_modes=("global")
+seeds=(4)
+attention_modes=("none")
 
 for correlated_KL in 1; do
   for attention_mode in "${attention_modes[@]}"; do

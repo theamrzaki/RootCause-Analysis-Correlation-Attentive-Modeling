@@ -89,6 +89,51 @@ import torch.nn as nn
 import torch
 import torch.nn.functional as F
 
+
+
+class LowRankCoeffNet(nn.Module):
+    def __init__(self, p, hidden_dim, num_hidden_layers, rank):
+        super().__init__()
+        layers = [nn.Linear(p, hidden_dim), nn.ReLU()]
+        for _ in range(num_hidden_layers - 1):
+            layers += [nn.Linear(hidden_dim, hidden_dim), nn.ReLU()]
+        self.net = nn.Sequential(*layers)
+        self.left = nn.Linear(hidden_dim, p * rank)
+        self.right = nn.Linear(hidden_dim, rank * p)
+        self.p = p
+        self.rank = rank
+
+    def forward(self, x):  # x: [B, p]
+        h = self.net(x)  # [B, hidden_dim]
+        left = self.left(h).view(-1, self.p, self.rank)  # [B, p, r]
+        right = self.right(h).view(-1, self.rank, self.p)  # [B, r, p]
+        coeff_matrix = torch.bmm(left, right)  # [B, p, p]
+        return coeff_matrix
+
+
+class GRUCoeffNet(nn.Module):
+    def __init__(self, num_vars, hidden_layer_size, num_hidden_layers, latent_dim):
+        super().__init__()
+        self.num_vars = num_vars
+        self.latent_dim = latent_dim
+        
+        # GRU layer(s) to process the lag sequence
+        self.gru = nn.GRU(input_size=num_vars, hidden_size=latent_dim, num_layers=num_hidden_layers, batch_first=True)
+        
+        # Map GRU outputs (latent_dim) to flattened coeffs (num_vars^2)
+        self.fc = nn.Linear(latent_dim, num_vars * num_vars)
+
+    def forward(self, x):
+        """
+        x: shape (batch, order, num_vars)
+        returns: coeffs tensor of shape (batch, order, num_vars, num_vars)
+        """
+        gru_out, _ = self.gru(x)  # (batch, order, latent_dim)
+        coeffs_flat = self.fc(gru_out)  # (batch, order, num_vars^2)
+        coeffs = coeffs_flat.view(x.size(0), x.size(1), self.num_vars, self.num_vars)  # reshape
+        return coeffs
+    
+    
 class SENNGC(nn.Module):
     def __init__(
         self,
@@ -112,14 +157,18 @@ class SENNGC(nn.Module):
         self.use_attention = use_attention
 
         # Per-lag coefficient generators
-        self.coeff_nets = nn.ModuleList()
-        for _ in range(order):
-            layers = [nn.Linear(self.num_vars, hidden_layer_size), nn.ReLU()]
-            for _ in range(self.num_hidden_layers - 1):
-                layers += [nn.Linear(hidden_layer_size, hidden_layer_size), nn.ReLU()]
-            layers += [nn.Linear(hidden_layer_size, self.num_vars ** 2)]
-            self.coeff_nets.append(nn.Sequential(*layers))
-
+        #self.coeff_nets = nn.ModuleList()
+        #for _ in range(order):
+        #    layers = [nn.Linear(self.num_vars, hidden_layer_size), nn.ReLU()]
+        #    for _ in range(self.num_hidden_layers - 1):
+        #        layers += [nn.Linear(hidden_layer_size, hidden_layer_size), nn.ReLU()]
+        #    layers += [nn.Linear(hidden_layer_size, self.num_vars ** 2)]
+        #    self.coeff_nets.append(nn.Sequential(*layers))
+        rank = 512  # or smaller/larger depending on tradeoff
+        self.coeff_nets = nn.ModuleList([
+            LowRankCoeffNet(self.num_vars, self.hidden_layer_size, self.num_hidden_layers, rank)
+            for _ in range(order)
+        ])
         # Scalar lag attention
         if use_attention in {"global", "both"}:
             self.lag_attn = nn.Sequential(

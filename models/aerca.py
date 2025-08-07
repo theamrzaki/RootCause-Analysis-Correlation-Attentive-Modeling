@@ -17,6 +17,7 @@ import torch
 from collections import defaultdict
 from dowhy.gcm.shapley import estimate_shapley_values
 from dowhy.gcm.shapley import ShapleyConfig, ShapleyApproximationMethods
+import math
 
 class AERCA(nn.Module):
     def __init__(self, num_vars: int, hidden_layer_size: int, num_hidden_layers: int, device: torch.device,
@@ -50,6 +51,7 @@ class AERCA(nn.Module):
         self.beta = beta
         self.lr = lr
         self.epochs = epochs
+        self.current_epoch = 0
         self.recon_threshold = recon_threshold
         self.root_cause_threshold_encoder = root_cause_threshold_encoder
         self.root_cause_threshold_decoder = root_cause_threshold_decoder
@@ -173,29 +175,52 @@ class AERCA(nn.Module):
             #us_fft = self.linear_layer(feat)  # stays on device
 
 
-            kl_indep = compute_kl_divergence_old(us,self.device)  
+            # epoch should be passed into forward() or stored in self.current_epoch
+            # warmup settings (tune for SWaT)
+            def cosine_warmup(epoch, start_epoch, warmup_epochs):
+                if epoch < start_epoch:
+                    return 0.0
+                progress = (epoch - start_epoch) / warmup_epochs
+                progress = min(progress, 1.0)
+                return 0.5 * (1 - math.cos(math.pi * progress))
+
+            kl_warmup_epochs   = 50
+            corr_start_epoch   = 100
+            mmd_start_epoch    = 200
+            warmup_for_corr    = 50
+            warmup_for_mmd     = 50
+            max_lambda         = 10.0
+
+
+            # Independent KL
             latent_dim = us.shape[1]
             split = latent_dim // 2
-            u_indep = us[:, :split]       # for independent prior
-            u_corr = us[:, split:]        # for correlated prior
-            #lambda_indep=self.options["lambda_indep"]
-            #lambda_corr=self.options["lambda_corr"]
-            lambda_indep = torch.exp(self.log_lambda_indep)
-            lambda_corr = torch.exp(self.log_lambda_corr)
-            lambda_mmd = torch.exp(self.log_lambda_mmd)
-            shrinkage=self.options["shrinkage"]
-            #kl_indep = compute_independent_kl(u_indep)
-            kl_corr = compute_correlated_kl(us, shrinkage=shrinkage)
-            # Weighted combination
+            u_indep = us[:, :split]
+            u_corr = us[:, split:]
+
+            kl_indep = compute_kl_divergence_old(u_indep, self.device)
+
+            # Correlated KL (more stable shrinkage for SWaT)
+            shrinkage = self.options.get("shrinkage", 0.1)
+            kl_corr = compute_correlated_kl(u_corr, shrinkage=shrinkage)
+
+            # Fairness loss
             s = (us[:, 0] > us[:, 0].median()).long()
+            us_0, us_1 = us[s == 0], us[s == 1]
+            fair_loss = compute_mmd(us_0, us_1)
 
-            us_0 = us[s == 0]
-            us_1 = us[s == 1]
+            # weights
+            kl_weight   = cosine_warmup(self.current_epoch, 0, kl_warmup_epochs)
+            corr_weight = cosine_warmup(self.current_epoch, corr_start_epoch, warmup_for_corr)
+            mmd_weight  = cosine_warmup(self.current_epoch, mmd_start_epoch, warmup_for_mmd)
 
-            fair_loss = compute_mmd(us_0, us_1)  # MMD loss between the two groups
+            lambda_indep = torch.clamp(torch.exp(self.log_lambda_indep), 0.0, max_lambda)
+            lambda_corr  = torch.clamp(torch.exp(self.log_lambda_corr),  0.0, max_lambda)
+            lambda_mmd   = torch.clamp(torch.exp(self.log_lambda_mmd),   0.0, max_lambda)
 
-            kl_div = lambda_indep * kl_indep + lambda_corr * kl_corr
-            kl_div = kl_div + lambda_mmd * fair_loss
+            kl_div = kl_weight * lambda_indep * kl_indep \
+                + kl_weight * corr_weight * lambda_corr * kl_corr \
+                + kl_weight * mmd_weight  * lambda_mmd  * fair_loss
 
         else:
             # --- KL divergence with independent prior ---
@@ -411,6 +436,7 @@ class AERCA(nn.Module):
         count = 0
         for epoch in tqdm(range(self.epochs), desc=f'Epoch'):
             count += 1
+            self.current_epoch = epoch
             epoch_loss = 0
             self.train()
             for x in xs_train:
