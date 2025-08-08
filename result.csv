@@ -83,3 +83,4 @@ swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.15,0.2,0.2
 swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.35,0.35,0.4,0.4,0.38499999999999995,rank256 window size 1
 swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.22000000000000003,0.29,0.31,0.31,0.29000000000000004,rank256 GRU window size 5
 swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.4,0.45,0.5,0.55,0.48, rank 512
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.45,0.45,0.475,0.55,0.485
