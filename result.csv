@@ -83,4 +83,66 @@ swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.15,0.2,0.2
 swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.35,0.35,0.4,0.4,0.38499999999999995,rank256 window size 1
 swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.22000000000000003,0.29,0.31,0.31,0.29000000000000004,rank256 GRU window size 5
 swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.4,0.45,0.5,0.55,0.48, rank 512
-swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.45,0.45,0.475,0.55,0.485
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.45,0.45,0.475,0.55,0.485, rank 512 window size 2, 8 layers
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.3,0.35,0.4,0.4,0.38, rank 512 window size 2, 4 layers
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.35,0.35,0.35,0.425,0.36749999999999994,rank 256 window size 2, 8 layers
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.3,0.3,0.325,0.35,0.32250000000000006,rank 256 window size 2, 8 layers, 512 hidden
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.3,0.3,0.3,0.35,0.3175, rank 512 window size 2, 8 layers, 512 hidden
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.1,0.25,0.375,0.45,0.3425, new architecture
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.2,0.25,0.4,0.425,0.3475
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.225,0.25,0.25,0.3125,0.26, simple GNN window 2
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.1,0.225,0.325,0.525,0.33749999999999997, simple GNN window 1
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.05,0.1,0.11000000000000001,0.11000000000000001,0.097, simple GNN window 5
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.16666666666666666,0.3,0.36666666666666664,0.4166666666666667,0.34333333333333327, simple GNN window 3
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.15,0.15,0.175,0.325,0.22000000000000003, simple GNN window 2 node embedding 256
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.175,0.275,0.275,0.3,0.26999999999999996, simple GNN window 2 node embedding 56
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.2,0.4,0.45,0.55,0.44000000000000006, with sinsodial 64
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.0,0.0,0.025,0.175,0.07750000000000001, with sinsodial 32
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.0,0.0375,0.1625,0.1875,0.12375, with sinsodial 128
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.2,0.4,0.45,0.55,0.44000000000000006, with sinsodial 64
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.0,0.025,0.125,0.15,0.0925, with sinsodiial hidden 64
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.0,0.125,0.125,0.175,0.12875
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.075,0.25,0.25,0.3375,0.25125
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.2,0.225,0.275,0.35,0.28500000000000003, hidden size 128, 3 hidden layers, lr bigger
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.275,0.35,0.375,0.5375,0.39875000000000005
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.45,0.45,0.45,0.525,0.47000000000000003, no changes to the commit
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.2,0.225,0.275,0.4,0.275
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.27,0.43,0.45,0.475,0.433
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.2,0.225,0.225,0.3,0.25
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.15,0.3,0.4,0.425,0.355
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.3,0.45,0.5,0.5,0.45999999999999996
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.3,0.35,0.375,0.475,0.385
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.27999999999999997,0.345,0.35,0.36,0.34249999999999997
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.31,0.365,0.38249999999999995,0.41999999999999993,0.37699999999999995, 20 window size, 8 head size
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.305,0.3475,0.38499999999999995,0.445,0.37875, 20 window size, 32 head size
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.2925,0.3175,0.35,0.385,0.34775, 20 window size, 4 head size
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.19,0.27,0.31,0.41000000000000003,0.31625000000000003, dff(2500), d_model 512
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.27999999999999997,0.3325,0.3725,0.41500000000000004,0.36425, smaller d_ff(4*128), d_model 128
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.1125,0.21000000000000002,0.26,0.34375000000000006,0.253375, smaller d_ff(4*64), d_model 64
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.255,0.34,0.3775,0.4175000000000001,0.36350000000000005, smaller d_ff(4*128), d_model 128, old KL
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.16999999999999998,0.3,0.355,0.395,0.3315, smaller d_ff(4*128), d_model 128, new KL, window size 10
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.042499999999999996,0.14499999999999996,0.25,0.425,0.246
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.26,0.34500000000000003,0.36,0.41,0.35775
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.2975,0.3875,0.40750000000000003,0.4800000000000001,0.41125000000000006, coeff per lag
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.275,0.315,0.3475,0.3975,0.35150000000000003
+msds_nonecorrelated_KL_0.5_1.0_0.07_4_,msds,4,1,0.5,1.0,0.07,none,0,0.0,0.12698412698412698,0.6904761904761905,1.0,0.5642857142857143
+msds_nonecorrelated_KL_0.5_1.0_0.07_4_,msds,4,1,0.5,1.0,0.07,none,0,0.0,0.25396825396825395,0.7063492063492064,1.0,0.6365079365079366
+msds_nonecorrelated_KL_0.5_1.0_0.07_4_,msds,4,1,0.5,1.0,0.07,none,0,0.5238095238095238,0.6904761904761905,0.7698412698412699,1.0,0.8230158730158731
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.05,0.1,0.225,0.35,0.22000000000000003
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.125,0.125,0.125,0.15,0.13499999999999998
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.225,0.3,0.35,0.45,0.35500000000000004
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.15,0.2,0.3,0.35,0.27999999999999997
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.2,0.225,0.325,0.5,0.3375
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.175,0.3,0.325,0.45,0.34
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.15,0.225,0.25,0.3,0.24999999999999994
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.2,0.275,0.325,0.4,0.3175
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.05,0.075,0.225,0.4,0.22000000000000003
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.45,0.45,0.45,0.55,0.4875
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.45,0.45,0.475,0.5,0.47750000000000004, low rank coeff (window 2) 100 epoch
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.25,0.3,0.3,0.35,0.30250000000000005, original coeff (window 2) 100 epoch
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.3,0.3,0.3,0.3,0.29999999999999993, original coeff (window 1) 100 epoch
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.25,0.3,0.3,0.3,0.2899999999999999, original coeff (window 1) 122 epoch
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.25,0.3,0.3,0.3,0.2899999999999999, tried to remove correlation (but wasnt removed)
+
+
+swat_nonecorrelated_KL_0.5_1.0_0.01_4_,swat,4,1,0.5,1.0,0.01,none,0,0.2,0.35,0.45,0.45,0.4,epoch1310 32min the very orignal (i havent included the correlated KL eventhough it is set 1)
