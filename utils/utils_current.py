@@ -7,7 +7,7 @@ from sklearn.metrics import roc_auc_score, average_precision_score, accuracy_sco
     precision_score, recall_score
 import os
 
-def compute_kl_divergence(us, device: torch.device):
+def compute_kl_divergence_old(us, device: torch.device):
     """
     Compute the KL divergence between the empirical distribution of the input samples
     and an isotropic standard Gaussian distribution using PyTorch.
@@ -63,6 +63,194 @@ def compute_kl_divergence(us, device: torch.device):
 
 
     return kl_div
+
+
+
+
+def empirical_covariance(x, shrinkage=0.1, eps=1e-6):
+    # x: (batch, dim)
+    if not torch.is_tensor(x):
+        x = torch.as_tensor(x, dtype=torch.float32)
+    batch, dim = x.shape
+    mean = x.mean(dim=0, keepdim=True)  # (1, dim)
+    x_centered = x - mean
+    emp_cov = (x_centered.T @ x_centered) / (batch - 1)  # unbiased
+    diag = torch.diag(torch.diag(emp_cov))
+    cov_shrunk = (1 - shrinkage) * emp_cov + shrinkage * diag
+    cov_shrunk = cov_shrunk + eps * torch.eye(dim, device=x.device)
+    return mean.squeeze(0), cov_shrunk  # mean: (dim,), cov: (dim, dim)
+
+def kl_multivariate_normal(mean_q, cov_q, mean_p, cov_p):
+    # ensure all are tensors
+    for name, tensor in [('mean_q', mean_q), ('cov_q', cov_q), ('mean_p', mean_p), ('cov_p', cov_p)]:
+        if not torch.is_tensor(tensor):
+            raise TypeError(f"{name} must be a tensor, got {type(tensor)}")
+
+    d = mean_q.shape[0]
+    # Cholesky for stability; assume covariances are PSD and well-regularized
+    Lp = torch.linalg.cholesky(cov_p)  # lower triangular
+    Lq = torch.linalg.cholesky(cov_q)
+
+    log_det_p = 2 * torch.sum(torch.log(torch.diagonal(Lp)))
+    log_det_q = 2 * torch.sum(torch.log(torch.diagonal(Lq)))
+
+    inv_Lp = torch.linalg.inv(Lp)
+    middle = inv_Lp @ cov_q @ inv_Lp.T
+    trace_term = torch.trace(middle)
+
+    delta = (mean_p - mean_q).unsqueeze(1)  # (d,1)
+    # use solve instead of cholesky_solve for modern API
+    # Solve Sigma_p^{-1} delta: first solve Lp y = delta, then Lp^T x = y
+    y = torch.triangular_solve(delta, Lp, upper=False).solution
+    tmp = torch.triangular_solve(y, Lp.T, upper=True).solution
+    mahalanobis = (delta.squeeze(1) * tmp.squeeze(1)).sum()
+
+    kl = 0.5 * (trace_term + mahalanobis - d + (log_det_p - log_det_q))
+    return kl
+
+def compute_kl_divergence(us, prior_mean=None, prior_cov=None, shrinkage=0.1):
+   
+    #us: tensor of shape (batch, latent_dim)
+    #prior_mean: tensor of shape (latent_dim,) or None
+    #prior_cov: tensor of shape (latent_dim, latent_dim) or None
+    
+    if not torch.is_tensor(us):
+        us = torch.as_tensor(us, dtype=torch.float32)
+    device = us.device
+    mean_q, cov_q = empirical_covariance(us, shrinkage=shrinkage)
+    latent_dim = mean_q.shape[0]
+
+    if prior_mean is None:
+        prior_mean = torch.zeros_like(mean_q, device=device)
+    else:
+        if not torch.is_tensor(prior_mean):
+            prior_mean = torch.as_tensor(prior_mean, dtype=mean_q.dtype, device=device)
+        prior_mean = prior_mean.to(device)
+
+    if prior_cov is None:
+        prior_cov = torch.eye(latent_dim, device=device)
+    else:
+        if not torch.is_tensor(prior_cov):
+            prior_cov = torch.as_tensor(prior_cov, dtype=cov_q.dtype, device=device)
+        prior_cov = prior_cov.to(device)
+
+    kl = kl_multivariate_normal(mean_q, cov_q, prior_mean, prior_cov)
+    return kl
+
+
+def empirical_covariance(x, shrinkage=0.1, eps=1e-6):
+    batch, dim = x.shape
+    mean = x.mean(dim=0, keepdim=True)
+    x_centered = x - mean
+    emp_cov = (x_centered.T @ x_centered) / (batch - 1)
+    diag = torch.diag(torch.diag(emp_cov))
+    cov_shrunk = (1 - shrinkage) * emp_cov + shrinkage * diag
+    cov_shrunk = cov_shrunk + eps * torch.eye(dim, device=x.device)
+    return mean.squeeze(0), cov_shrunk
+
+def kl_gaussian(mean_q, cov_q, mean_p, cov_p):
+    d = mean_q.shape[0]
+    Lp = torch.linalg.cholesky(cov_p)
+    Lq = torch.linalg.cholesky(cov_q)
+
+    log_det_p = 2 * torch.sum(torch.log(torch.diagonal(Lp)))
+    log_det_q = 2 * torch.sum(torch.log(torch.diagonal(Lq)))
+
+    inv_Lp = torch.linalg.inv(Lp)
+    middle = inv_Lp @ cov_q @ inv_Lp.T
+    trace_term = torch.trace(middle)
+
+    delta = (mean_p - mean_q).unsqueeze(1)
+    y = torch.triangular_solve(delta, Lp, upper=False).solution
+    tmp = torch.triangular_solve(y, Lp.T, upper=True).solution
+    mahalanobis = (delta.squeeze(1) * tmp.squeeze(1)).sum()
+
+    kl = 0.5 * (trace_term + mahalanobis - d + (log_det_p - log_det_q))
+    return kl
+
+def compute_independent_kl(us):
+    # prior is standard normal; posterior approximated per-dimension as Gaussian with diag covariance
+    # us: (batch, latent_dim)
+    mean = us.mean(dim=0)
+    var = us.var(dim=0, unbiased=False) + 1e-6  # variance per-dim
+    # KL between N(mean, var) and N(0,1): sum over dims
+    kl = 0.5 * torch.sum(var + mean**2 - 1 - torch.log(var))
+    return kl
+
+def compute_correlated_kl(us, shrinkage=0.1):
+    mean_q, cov_q = empirical_covariance(us, shrinkage=shrinkage)
+    latent_dim = mean_q.shape[0]
+    prior_mean = torch.zeros(latent_dim, device=us.device)
+    prior_cov = torch.eye(latent_dim, device=us.device)
+    kl = kl_gaussian(mean_q, cov_q, prior_mean, prior_cov)
+    return kl
+
+
+#-----> deepseek utils <-----
+import torch
+import torch.distributions as dist
+
+def kl_multivariate_normal_deepseek(mean_1, cov_1, mean_2, cov_2):
+    """
+    Compute KL divergence between two multivariate Gaussians.
+    
+    Args:
+        mean_1: (d,) tensor - mean of learned distribution.
+        cov_1:  (d, d) tensor - covariance of learned distribution.
+        mean_2: (d,) tensor - mean of prior distribution.
+        cov_2:  (d, d) tensor - covariance of prior distribution.
+    
+    Returns:
+        KL( N(mean_1, cov_1) || N(mean_2, cov_2) )
+    """
+    # Ensure inputs are tensors
+    mean_1 = torch.as_tensor(mean_1)
+    cov_1 = torch.as_tensor(cov_1)
+    mean_2 = torch.as_tensor(mean_2)
+    cov_2 = torch.as_tensor(cov_2)
+    
+    # Add small diagonal noise to covariances for numerical stability
+    eps = 1e-6
+    cov_1 = cov_1 + eps * torch.eye(cov_1.shape[0], device=cov_1.device)
+    cov_2 = cov_2 + eps * torch.eye(cov_2.shape[0], device=cov_2.device)
+    
+    # Compute terms
+    dim = mean_1.shape[-1]
+    cov_2_inv = torch.linalg.inv(cov_2)
+    diff = mean_2 - mean_1
+    
+    # Trace term: tr(Σ₂⁻¹ Σ₁)
+    trace_term = torch.trace(cov_2_inv @ cov_1)
+    
+    # Quadratic term: (μ₂ - μ₁)ᵀ Σ₂⁻¹ (μ₂ - μ₁)
+    quadratic_term = diff.T @ cov_2_inv @ diff
+    
+    # Log determinant term: ln(det(Σ₂)/det(Σ₁)) = ln(det(Σ₂)) - ln(det(Σ₁))
+    logdet_cov2 = torch.logdet(cov_2)
+    logdet_cov1 = torch.logdet(cov_1)
+    logdet_term = logdet_cov2 - logdet_cov1
+    
+    # Combine all terms
+    kl = 0.5 * (trace_term + quadratic_term - dim + logdet_term)
+    return kl
+
+def compute_kl_divergence_deepseek(us, device):
+    """Compute KL between learned exogenous vars and prior N(0, I)."""
+    us = torch.tensor(us, device=device).float()  # (batch, time, dim)
+    batch, dim = us.shape
+    
+    # Reshape to (batch*time, dim)
+    us_flat = us.reshape(-1, dim)
+    
+    # Compute mean and covariance
+    mean = torch.mean(us_flat, dim=0)  # (dim,)
+    cov = torch.cov(us_flat.T)         # (dim, dim)
+    
+    # Prior: N(0, I)
+    prior_mean = torch.zeros(dim, device=device)
+    prior_cov = torch.eye(dim, device=device)
+    
+    return kl_multivariate_normal(mean, cov, prior_mean, prior_cov)
 
 
 def set_seed(seed=42):
@@ -344,6 +532,20 @@ def topk_at_step(scores, labels, k_range=10):
                 count = [1 if i in label_ind else 0 for i in ranking[-k:]]
                 k_lst.append(sum(count) / min(k, len(label_ind)))
     return np.array(k_lst).reshape(-1, k_range).mean(axis=0)
+
+def compute_mmd(x, y, kernel='rbf', gamma=1.0):
+    """MMD between two sets of samples"""
+    def pairwise_dist(a, b):
+        return ((a.unsqueeze(1) - b.unsqueeze(0)) ** 2).sum(2)
+
+    if kernel == 'rbf':
+        Kxx = torch.exp(-pairwise_dist(x, x) * gamma).mean()
+        Kyy = torch.exp(-pairwise_dist(y, y) * gamma).mean()
+        Kxy = torch.exp(-pairwise_dist(x, y) * gamma).mean()
+        return Kxx + Kyy - 2 * Kxy
+    else:
+        raise NotImplementedError("Only RBF kernel is implemented")
+    
 
 
 def write_results(args, ac_at,k_at_step_all, file_name='result.csv'):

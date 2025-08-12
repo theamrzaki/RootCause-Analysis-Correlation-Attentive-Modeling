@@ -23,7 +23,7 @@ def create_arg_parser():
     parser.add_argument('--dataset_name', type=str, default='msds', help='Dataset name (default: msds)')
 
     # AERCA arguments
-    parser.add_argument('--window_size', type=int, default=1, help='Window size (default: 1)')
+    parser.add_argument('--window_size', type=int, default=2, help='Window size (default: 1)')
     parser.add_argument('--stride', type=int, default=1, help='Stride (default: 1)')
     parser.add_argument('--encoder_alpha', type=float, default=0.5, help='Encoder alpha (default: 0.5)')
     parser.add_argument('--decoder_alpha', type=float, default=0.5, help='Decoder alpha (default: 0.5)')
@@ -33,7 +33,7 @@ def create_arg_parser():
     parser.add_argument('--decoder_lambda', type=float, default=0.5, help='Decoder lambda (default: 0.5)')
     parser.add_argument('--beta', type=float, default=0.5, help='Beta (default: 0.5)')
     parser.add_argument('--lr', type=float, default=0.000001, help='Learning rate (default: 0.000001)')
-    parser.add_argument('--epochs', type=int, default=5000, help='Number of epochs (default: 5000)')
+    parser.add_argument('--epochs', type=int, default=1000, help='Number of epochs (default: 5000)')
     parser.add_argument('--hidden_layer_size', type=int, default=1000, help='Hidden layer size (default: 1000)')
     parser.add_argument('--num_hidden_layers', type=int, default=4, help='Number of hidden layers (default: 4)')
     parser.add_argument('--recon_threshold', type=float, default=0.95, help='Reconstruction threshold (default: 0.95)')
