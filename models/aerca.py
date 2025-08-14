@@ -2,9 +2,11 @@ import os
 from models.senn import SENNGC
 import torch.nn as nn
 import torch
+import math
 from utils.utils import (compute_kl_divergence, sliding_window_view_torch,
                          eval_causal_structure, eval_causal_structure_binary,
                          pot, topk, topk_at_step,write_results)
+from utils.utils_current import compute_correlated_kl, compute_mmd
 from numpy.lib.stride_tricks import sliding_window_view
 import logging
 import numpy as np
@@ -23,9 +25,9 @@ class AERCA(nn.Module):
                  root_cause_threshold_decoder: float = 0.95, initial_z_score: float = 3.0,
                  risk: float = 1e-2, initial_level: float = 0.98, num_candidates: int = 100, options=None):
         super(AERCA, self).__init__()
-        self.encoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, device)
-        self.decoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, device)
-        self.decoder_prev = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, device)
+        self.encoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers,args=options, device=device)
+        self.decoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, args=options, device=device)
+        self.decoder_prev = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, args=options, device=device)
         self.options = options if options is not None else {}
         self.device = device
         self.num_vars = num_vars
@@ -39,6 +41,7 @@ class AERCA(nn.Module):
         self.decoder_gamma = decoder_gamma
         self.encoder_lambda = encoder_lambda
         self.decoder_lambda = decoder_lambda
+        self.current_epoch = 0
         self.beta = beta
         self.lr = lr
         self.epochs = epochs
@@ -48,6 +51,9 @@ class AERCA(nn.Module):
         self.initial_z_score = initial_z_score
         self.mse_loss = nn.MSELoss()
         self.mse_loss_wo_reduction = nn.MSELoss(reduction='none')
+        self.log_lambda_indep = nn.Parameter(torch.tensor(0.0))  # log of lambda_indep
+        self.log_lambda_corr = nn.Parameter(torch.tensor(0.0))   # log of lambda_corr
+        self.log_lambda_mmd = nn.Parameter(torch.tensor(0.0))     # log of lambda_mmd        
         self.optimizer = torch.optim.Adam(self.parameters(), lr=lr)
         self.encoder.to(self.device)
         self.decoder.to(self.device)
@@ -67,13 +73,14 @@ class AERCA(nn.Module):
         # Create an absolute path for saving models and thresholds
         self.save_dir = os.path.join(os.getcwd(), 'saved_models')
         os.makedirs(self.save_dir, exist_ok=True)
-        family_of_exp = 'SWAT_AERCADefault_'
+        correlated_KL =  "correlated_&_normal" if self.options['correlated_KL'] == 1 else "normal_KL"
+        family_of_exp = data_name + '_' + str(self.options["coeff_architecture"]) + '_' + correlated_KL
         from datetime import datetime
         now = datetime.now()
         datetime_str = now.strftime("%d_%H%M%S_")
 
-        local_model_name =family_of_exp + datetime_str+ f"{str(window_size)}_{str(lr)}_{str(hidden_layer_size)}_{str(num_hidden_layers)}" 
-        self.writer = SummaryWriter(log_dir=os.path.join(self.save_dir, "runs", local_model_name))
+        self.local_model_name =family_of_exp + datetime_str+ f"{str(window_size)}_{str(lr)}_{str(self.options['seed'])}" 
+        self.writer = SummaryWriter(log_dir=os.path.join(self.save_dir, "runs", self.local_model_name))
 
     def _log_and_print(self, msg, *args):
         """Helper method to log and print testing results."""
@@ -115,7 +122,30 @@ class AERCA(nn.Module):
 
     def forward(self, x, add_u=True):
         us, encoder_coeffs, nexts, winds = self.encoding(x)
-        kl_div = compute_kl_divergence(us, self.device)
+        if(self.options["correlated_KL"] == 1):
+            kl_indep = compute_kl_divergence(us,self.device)  
+            latent_dim = us.shape[1]
+            split = latent_dim // 2
+            
+            lambda_indep = torch.exp(self.log_lambda_indep)
+            lambda_corr = torch.exp(self.log_lambda_corr)
+            lambda_mmd = torch.exp(self.log_lambda_mmd)
+            shrinkage=self.options["shrinkage"]
+            
+            kl_corr = compute_correlated_kl(us, shrinkage=shrinkage)
+            # Weighted combination
+            s = (us[:, 0] > us[:, 0].median()).long()
+
+            us_0 = us[s == 0]
+            us_1 = us[s == 1]
+
+            #fair_loss = compute_mmd(us_0, us_1)  # MMD loss between the two groups
+
+            kl_div = lambda_indep * kl_indep + lambda_corr * kl_corr
+            #kl_div = kl_div + lambda_mmd * fair_loss
+        else:
+            # --- KL divergence with independent prior ---
+            kl_div = compute_kl_divergence(us, self.device)
         nexts_hat, decoder_coeffs, prev_coeffs = self.decoding(us, winds, add_u=add_u)
         return nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us
 
@@ -145,12 +175,15 @@ class AERCA(nn.Module):
         loss_kl = kl_div
         logging.info('KL loss: %s', loss_kl.item())
 
+        
+        reg_lambda = 0.01 * (self.log_lambda_indep ** 2 + self.log_lambda_corr ** 2)
         loss = (loss_recon +
                 self.encoder_lambda * loss_encoder_coeffs +
                 self.decoder_lambda * (loss_decoder_coeffs + loss_prev_coeffs) +
                 self.encoder_gamma * loss_encoder_smooth +
                 self.decoder_gamma * (loss_decoder_smooth + loss_prev_smooth) +
-                self.beta * loss_kl)
+                self.beta * loss_kl+
+                reg_lambda)
         logging.info('Total loss: %s', loss.item())
         losses_dict = {
             "loss_recon": loss_recon.item(),
@@ -161,6 +194,7 @@ class AERCA(nn.Module):
             "loss_decoder_smooth": loss_decoder_smooth.item(),
             "loss_prev_smooth": loss_prev_smooth.item(),
             "loss_kl": loss_kl.item(),
+            "reg_lambda": reg_lambda.item()
         }
         return loss, losses_dict
 
@@ -176,6 +210,7 @@ class AERCA(nn.Module):
         for epoch in tqdm(range(self.epochs), desc=f'Epoch'):
             count += 1
             epoch_loss = 0
+            self.current_epoch = epoch
             self.train()
             for x in xs_train:
                 self.optimizer.zero_grad()
@@ -367,7 +402,7 @@ class AERCA(nn.Module):
         self._log_and_print('Root cause analysis AC*@100: {:.5f}', ac_star_at[2])
         self._log_and_print('Root cause analysis AC*@500: {:.5f}', ac_star_at[3])
         self._log_and_print('Root cause analysis Avg*@500: {:.5f}', np.mean(k_all))
-        write_results(self.options,ac_at,k_at_step_all,'./result.csv')
+        write_results(self.options,self.local_model_name,ac_at,k_at_step_all,'./result_2.csv')
 
     def _testing_causal_discover(self, xs, causal_struct_value):
         self.load_state_dict(torch.load(os.path.join(self.save_dir, f'{self.model_name}.pt'),

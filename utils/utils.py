@@ -346,35 +346,21 @@ def topk_at_step(scores, labels, k_range=10):
     return np.array(k_lst).reshape(-1, k_range).mean(axis=0)
 
 
-def write_results(args, ac_at,k_at_step_all, file_name='result.csv'):
+def write_results(args, local_model_name, ac_at,k_at_step_all, file_name='result.csv'):
     file_path = file_name
     #infodict = {'pr':ps, 'rc':rs, 'auc':auc, 'ap':ap, 'f1':effection}
     
     ac_at = [k_at_step_all[0], k_at_step_all[2], k_at_step_all[4], k_at_step_all[9]]
     
-    scheme_name = ""
-    scheme_name += f"{args['dataset_name']}_"
-    scheme_name += args['global_attention_over_all_lag']
-
-    if args['correlated_KL'] == 1:
-        scheme_name += "correlated_KL_"
-        scheme_name += f"{args['lambda_indep']}_{args['lambda_corr']}_{args['shrinkage']}_"
-    else:
-        scheme_name += "normal_KL_"
-    scheme_name += f"{args['seed']}_"
+    scheme_name = local_model_name
     
     row = {
         'scheme': scheme_name,
         'dataset_name': args['dataset_name'],
         'seed': args['seed'],
 
-        'correlated_KL': args['correlated_KL'],
-        'lambda_indep': args['lambda_indep'],
-        'lambda_corr': args['lambda_corr'],
-        'shrinkage': args['shrinkage'],
-
-        'global_attention_over_all_lag': args['global_attention_over_all_lag'],
-        'local_attention_per_lag': args['local_attention_per_lag'],
+        'correlated_KL': "correlated_&_normal" if args['correlated_KL'] == 1 else "normal_KL",
+        'architecture': args['coeff_architecture'],
 
         'AC@1': ac_at[0],
         'AC@3': ac_at[1],
