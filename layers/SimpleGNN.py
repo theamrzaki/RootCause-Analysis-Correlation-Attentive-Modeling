@@ -61,7 +61,7 @@ class SimpleCoeffGNN(nn.Module):
     
 
 class AttentionCoeffGNN(nn.Module):
-    def __init__(self, num_vars: int, rank: int, hidden_dim: int = 64):
+    def __init__(self, num_vars: int, rank: int, hidden_dim: int = 128):
         """
         Attention-based GNN coefficient generator for one lag.
         - num_vars: number of variables (p)
@@ -97,12 +97,10 @@ class AttentionCoeffGNN(nn.Module):
         B, p = x.shape
 
         # Compute Q, K, V
-        Q = self.q(x)  # (B, hidden_dim)
-        K = self.k(x)  # (B, hidden_dim)
-        V = self.v(x)  # (B, hidden_dim)
-
-        # Compute attention weights (scaled dot-product)
-        attn_logits = torch.bmm(Q.unsqueeze(2), K.unsqueeze(1)) / (self.rank ** 0.5)  # (B, p, p)
+        Q = self.q(x)       # (B, num_vars)
+        K = self.k(x)       # (B, num_vars)
+        V = self.v(x)       # (B, num_vars)
+        attn_logits = torch.bmm(Q.unsqueeze(2), K.unsqueeze(1)) / (self.num_vars ** 0.5)  # (B, num_vars, num_vars)
         attn_weights = F.softmax(attn_logits, dim=-1)
 
         # Aggregate values
@@ -125,4 +123,167 @@ class AttentionCoeffGNN(nn.Module):
 
 
 
+class AttentionCoeffGNN_multihead(nn.Module):
+    def __init__(self, num_vars, rank, hidden_dim=64, heads=8, extra_layers=1):
+        super().__init__()
+        self.num_vars = num_vars
+        self.rank = rank
+        self.heads = heads
+        assert hidden_dim % heads == 0, "hidden_dim must be divisible by heads"
+        self.head_dim = hidden_dim // heads
 
+        # Q, K, V projections
+        self.q = nn.Linear(1, hidden_dim)
+        self.k = nn.Linear(1, hidden_dim)
+        self.v = nn.Linear(1, hidden_dim)
+
+        # LayerNorm after attention
+        self.norm1 = nn.LayerNorm(hidden_dim)
+
+        # Build MLP as one ModuleList
+        mlp_layers = []
+        mlp_layers.append(nn.Linear(hidden_dim, hidden_dim))
+        mlp_layers.append(nn.ReLU())
+        for _ in range(extra_layers):
+            mlp_layers.append(nn.Linear(hidden_dim, hidden_dim))
+            mlp_layers.append(nn.ReLU())
+        mlp_layers.append(nn.Linear(hidden_dim, 2 * num_vars * rank))
+        self.mlp = nn.ModuleList(mlp_layers)
+
+        # Optional scaling parameter
+        self.global_scale = nn.Parameter(torch.tensor(0.1))
+
+    def forward(self, x):
+        """
+        x: (B, p)
+        returns: coeffs_k: (B, p, p)
+        """
+        B, p = x.shape
+
+        x_unsq = x.unsqueeze(-1)  # (B, p, 1)
+
+        Q = self.q(x_unsq)  # (B, p, hidden_dim)
+        K = self.k(x_unsq)  # (B, p, hidden_dim)
+        V = self.v(x_unsq)  # (B, p, hidden_dim)
+
+        # Split into heads
+        Q = Q.view(B, p, self.heads, self.head_dim).transpose(1, 2)  # (B, heads, p, head_dim)
+        K = K.view(B, p, self.heads, self.head_dim).transpose(1, 2)  # (B, heads, p, head_dim)
+        V = V.view(B, p, self.heads, self.head_dim).transpose(1, 2)  # (B, heads, p, head_dim)
+        
+        # Compute scaled dot-product attention for each head
+        attn_logits = torch.matmul(Q, K.transpose(-2, -1)) / (self.num_vars ** 0.5)  # (B, heads, p, p)
+        attn_weights = F.softmax(attn_logits, dim=-1)
+
+        # Aggregate values
+        h = torch.matmul(attn_weights, V)  # (B, heads, p, head_dim)
+
+        # Merge heads: (B, p, hidden_dim)
+        h = h.transpose(1, 2).contiguous().view(B, p, self.heads * self.head_dim)
+
+        # Mean-pool across p to get global vector: (B, hidden_dim)
+        h = h.mean(dim=1)
+
+        # Norm
+        h = self.norm1(h)
+
+        # Pass through MLP
+        for layer in self.mlp:
+            h = layer(h)
+
+        # Split into U and V
+        U_flat, V_flat = torch.split(h, self.num_vars * self.rank, dim=1)
+        U = U_flat.view(B, self.num_vars, self.rank)
+        V = V_flat.view(B, self.num_vars, self.rank)
+
+        # Reconstruct coefficient matrix
+        coeffs_k = torch.bmm(U, V.transpose(1, 2))
+        return coeffs_k
+    
+    
+class AttentionCoeffGNN_multihead_fixed(nn.Module):
+    def __init__(self, num_vars, rank, hidden_dim=64, heads=2, extra_layers=1):
+        """
+        Multi-head attention coefficient generator (fixed version).
+        - Avoids mean pooling to preserve mid-ranked signals.
+        - Adds residual connection to maintain weaker correlations.
+        """
+        super().__init__()
+        self.num_vars = num_vars
+        self.rank = rank
+        self.heads = heads
+        assert hidden_dim % heads == 0, "hidden_dim must be divisible by heads"
+        self.head_dim = hidden_dim // heads
+
+        # Q, K, V projections
+        self.q = nn.Linear(1, hidden_dim)
+        self.k = nn.Linear(1, hidden_dim)
+        self.v = nn.Linear(1, hidden_dim)
+
+        # LayerNorm after attention
+        self.norm1 = nn.LayerNorm(hidden_dim)
+
+        # Residual projection from input
+        self.residual = nn.Linear(num_vars, hidden_dim)
+
+        # Build MLP as nn.Sequential (simpler than ModuleList loop)
+        mlp_layers = [nn.Linear(num_vars * hidden_dim, hidden_dim), nn.ReLU()]
+        for _ in range(extra_layers):
+            mlp_layers.extend([nn.Linear(hidden_dim, hidden_dim), nn.ReLU()])
+        mlp_layers.append(nn.Linear(hidden_dim, 2 * num_vars * rank))
+        self.mlp = nn.Sequential(*mlp_layers)
+
+        # Optional scaling parameter
+        self.global_scale = nn.Parameter(torch.tensor(0.1))
+
+    def forward(self, x):
+        """
+        x: (B, p)
+        returns: coeffs_k: (B, p, p)
+        """
+        B, p = x.shape
+        x_unsq = x.unsqueeze(-1)  # (B, p, 1)
+
+        # Project Q, K, V
+        Q = self.q(x_unsq)
+        K = self.k(x_unsq)
+        V = self.v(x_unsq)
+
+        # Split into heads
+        Q = Q.view(B, p, self.heads, self.head_dim).transpose(1, 2)
+        K = K.view(B, p, self.heads, self.head_dim).transpose(1, 2)
+        V = V.view(B, p, self.heads, self.head_dim).transpose(1, 2)
+
+        # Attention
+        attn_logits = torch.matmul(Q, K.transpose(-2, -1)) / (self.num_vars ** 0.5)
+        attn_weights = F.softmax(attn_logits, dim=-1)
+        h = torch.matmul(attn_weights, V)  # (B, heads, p, head_dim)
+
+        # Merge heads
+        h = h.transpose(1, 2).contiguous().view(B, p, self.heads * self.head_dim)
+
+        # Residual connection (project input)
+        # Project input to hidden_dim
+        res = self.residual(x)  # (B, hidden_dim)
+
+        # Unsqueeze to match h's variable dimension
+        res = res.unsqueeze(1)  # (B, 1, hidden_dim)
+
+        # Add residual
+        h = h + res  # broadcast over p dimension (variables) # preserves weaker correlations
+
+        # Norm
+        h = self.norm1(h)
+
+        # Flatten across variables before MLP (preserves all signals)
+        h_flat = h.view(B, -1)
+        h_mlp = self.mlp(h_flat)
+
+        # Split into U and V
+        U_flat, V_flat = torch.split(h_mlp, self.num_vars * self.rank, dim=1)
+        U = U_flat.view(B, self.num_vars, self.rank)
+        V = V_flat.view(B, self.num_vars, self.rank)
+
+        # Reconstruct coefficient matrix
+        coeffs_k = torch.bmm(U, V.transpose(1, 2))
+        return coeffs_k

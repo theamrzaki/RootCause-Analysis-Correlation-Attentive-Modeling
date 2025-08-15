@@ -28,6 +28,9 @@ class AERCA(nn.Module):
         self.encoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers,args=options, device=device)
         self.decoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, args=options, device=device)
         self.decoder_prev = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, args=options, device=device)
+        self._log_and_print('Number of parameters in encoder: {}', self._count_parameters(self.encoder))
+        self._log_and_print('Number of parameters in decoder: {}', self._count_parameters(self.decoder))
+        self._log_and_print('Number of parameters in decoder_prev: {}', self._count_parameters(self.decoder_prev))
         self.options = options if options is not None else {}
         self.device = device
         self.num_vars = num_vars
@@ -74,14 +77,17 @@ class AERCA(nn.Module):
         self.save_dir = os.path.join(os.getcwd(), 'saved_models')
         os.makedirs(self.save_dir, exist_ok=True)
         correlated_KL =  "correlated_&_normal" if self.options['correlated_KL'] == 1 else "normal_KL"
-        family_of_exp = data_name + '_' + str(self.options["coeff_architecture"]) + '_' + correlated_KL
+        family_of_exp = data_name + str(self.options["coeff_architecture"]) + '_(no mean)_' + correlated_KL
         from datetime import datetime
         now = datetime.now()
         datetime_str = now.strftime("%d_%H%M%S_")
 
-        self.local_model_name =family_of_exp + datetime_str+ f"{str(window_size)}_{str(lr)}_{str(self.options['seed'])}" 
+        self.local_model_name =family_of_exp + datetime_str+ f"{str(window_size)}_{str(lr)}_{str(self.options['seed'])}_window_{str(self.window_size)}" 
         self.writer = SummaryWriter(log_dir=os.path.join(self.save_dir, "runs", self.local_model_name))
 
+    def _count_parameters(self, model):
+        return sum(p.numel() for p in model.parameters() if p.requires_grad)
+    
     def _log_and_print(self, msg, *args):
         """Helper method to log and print testing results."""
         final_msg = msg.format(*args) if args else msg
