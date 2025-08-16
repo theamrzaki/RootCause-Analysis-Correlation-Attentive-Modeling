@@ -3,3 +3,38 @@ msds_deep_mlp_normal_KL14_143816_1_0.0001_4,msds,4,normal_KL,deep_mlp,0.43564356
 msds_gnn_attention_normal_KL14_143912_1_0.0001_4,msds,4,normal_KL,gnn_attention,0.43564356435643564,0.773927392739274,0.9818481848184819,1.0,0.8757425742574257
 msds_deep_mlp_correlated_&_normal14_144011_1_0.0001_4,msds,4,correlated_&_normal,deep_mlp,0.6237623762376238,0.8135313531353136,0.9620462046204621,1.0,0.903960396039604
 msds_gnn_attention_correlated_&_normal14_144106_1_0.0001_4,msds,4,correlated_&_normal,gnn_attention,0.7722772277227723,0.773927392739274,0.9818481848184819,1.0,0.9155115511551155
+
+
+
+msdsdeep_mlp_normal_KL15_104113_1_0.0001_4_window_1,msds,4,normal_KL,deep_mlp,0.43564356435643564,0.872937293729373,0.971947194719472,1.0,0.893069306930693
+msdsgnn_attention_normal_KL15_104209_1_0.0001_4_window_1,msds,4,normal_KL,gnn_attention,0.009900990099009901,0.10726072607260727,0.8333333333333334,1.0,0.6372937293729373
+msdsgnn_attention_normal_KL15_145235_1_0.0001_4_window_1,msds,4,normal_KL,gnn_attention,0.37623762376237624,0.773927392739274,0.9818481848184819,1.0,0.864851485148515
+msdsAttentionCoeffGNN_multihead_normal_KL15_110019_1_0.0001_4_window_1,msds,4,normal_KL,AttentionCoeffGNN_multihead(4)(64),0.7425742574257426,0.7689768976897691,0.9125412541254125,1.0,0.8990099009900991
+msdsdeep_mlp_correlated_&_normal15_104307_1_0.0001_4_window_1,msds,4,correlated_&_normal,deep_mlp,0.6237623762376238,0.8135313531353136,0.9620462046204621,1.0,0.903960396039604
+msdsgnn_attention_correlated_&_normal15_104402_1_0.0001_4_window_1,msds,4,correlated_&_normal,gnn_attention,0.693069306930693,0.9785478547854785,0.9917491749174918,1.0,0.9542904290429043
+msdsgnn_attention_correlated_&_normal15_145333_1_0.0001_4_window_1,msds,4,correlated_&_normal,gnn_attention,0.7722772277227723,0.773927392739274,0.9818481848184819,1.0,0.9155115511551155
+msdsAttentionCoeffGNN_multihead_correlated_&_normal15_110109_1_0.0001_4_window_1,msds,4,correlated_&_normal,AttentionCoeffGNN_multihead(4)(64),0.7524752475247525,0.7689768976897691,0.9620462046204621,1.0,0.908910891089109
+
+msdsAttentionCoeffGNN_multihead_normal_KL15_152320_1_0.0001_4_window_1,msds,4,normal_KL,AttentionCoeffGNN_multihead(64)(4-heads),0.7425742574257426,0.7689768976897691,0.9224422442244224,1.0,0.9
+msdsAttentionCoeffGNN_multihead_correlated_&_normal15_152410_1_0.0001_4_window_1,msds,4,correlated_&_normal,AttentionCoeffGNN_multihead(64)(4-heads),0.7623762376237624,0.7689768976897691,0.9620462046204621,1.0,0.910891089108911
+msdsAttentionCoeffGNN_multihead_normal_KL15_152526_1_0.0001_4_window_1,msds,4,normal_KL,AttentionCoeffGNN_multihead(32)(4-heads),0.6039603960396039,0.7689768976897691,0.8828382838283829,1.0,0.8815181518151816
+msdsAttentionCoeffGNN_multihead_correlated_&_normal15_152632_1_0.0001_4_window_1,msds,4,correlated_&_normal,AttentionCoeffGNN_multihead(32)(4-heads),0.6633663366336634,0.7689768976897691,0.9125412541254125,1.0,0.8920792079207921
+msdsAttentionCoeffGNN_multihead_normal_KL15_152900_1_0.0001_4_window_1,msds,4,normal_KL,AttentionCoeffGNN_multihead(64)(8-heads),0.693069306930693,0.7689768976897691,0.9026402640264027,1.0,0.8925742574257427
+msdsAttentionCoeffGNN_multihead_correlated_&_normal15_153000_1_0.0001_4_window_1,msds,4,correlated_&_normal,AttentionCoeffGNN_multihead(64)(8-heads),0.7524752475247525,0.7689768976897691,0.9422442244224423,1.0,0.905940594059406
+msdsAttentionCoeffGNN_multihead_fixed_(no mean)_normal_KL15_154710_1_0.0001_7_window_1,msds,7,normal_KL,AttentionCoeffGNN_multihead_fixed,0.009900990099009901,0.7640264026402641,0.9917491749174918,1.0,0.8014851485148515
+msdsAttentionCoeffGNN_multihead_fixed_(no mean)_normal_KL15_154833_1_0.0001_4_window_1,msds,4,normal_KL,AttentionCoeffGNN_multihead_fixed,0.5247524752475248,0.7689768976897691,0.778877887788779,1.0,0.8377887788778878
+msdsAttentionCoeffGNN_multihead_fixed_(no mean)_correlated_&_normal15_154936_1_0.0001_4_window_1,msds,4,correlated_&_normal,AttentionCoeffGNN_multihead_fixed,0.5148514851485149,0.8135313531353136,0.9224422442244224,1.0,0.8806930693069308
+msdsAttentionCoeffGNN_multihead_fixed_(no mean)_normal_KL15_155120_1_0.0001_4_window_1,msds,4,normal_KL,AttentionCoeffGNN_multihead_fixed,0.0,0.5148514851485149,0.7293729372937294,1.0,0.6546204620462046
+msdsAttentionCoeffGNN_multihead_fixed_(no mean)_correlated_&_normal15_155220_1_0.0001_4_window_1,msds,4,correlated_&_normal,AttentionCoeffGNN_multihead_fixed,0.0,0.7491749174917492,0.8234323432343235,1.0,0.7922442244224422
+msdsAttentionCoeffGNN_multihead_(no mean)_normal_KL15_155617_1_0.0001_4_window_1,msds,4,normal_KL,AttentionCoeffGNN_multihead,0.693069306930693,0.7689768976897691,0.9026402640264027,1.0,0.8925742574257427
+msdsAttentionCoeffGNN_multihead_(no mean)_correlated_&_normal15_155722_1_0.0001_4_window_1,msds,4,correlated_&_normal,AttentionCoeffGNN_multihead,0.7524752475247525,0.7689768976897691,0.9422442244224423,1.0,0.905940594059406
+swatdeep_mlp_(no mean)_normal_KL15_181305_1_0.0001_4_window_1,swat,4,normal_KL,deep_mlp,0.3,0.3,0.35,0.475,0.3475
+swatgnn_attention_(no mean)_normal_KL15_181714_1_0.0001_4_window_1,swat,4,normal_KL,gnn_attention,0.25,0.35,0.35,0.4,0.345
+swatAttentionCoeffGNN_multihead_(no mean)_normal_KL15_182205_1_0.0001_4_window_1,swat,4,normal_KL,AttentionCoeffGNN_multihead,0.3,0.3,0.3,0.35,0.32
+swatdeep_mlp_(no mean)_correlated_&_normal15_183137_1_0.0001_4_window_1,swat,4,correlated_&_normal,deep_mlp,0.25,0.35,0.35,0.35,0.33999999999999997
+swatgnn_attention_(no mean)_correlated_&_normal15_185945_1_0.0001_4_window_1,swat,4,correlated_&_normal,gnn_attention,0.25,0.3,0.3,0.35,0.29999999999999993
+swatAttentionCoeffGNN_multihead_(no mean)_correlated_&_normal15_190645_1_0.0001_4_window_1,swat,4,correlated_&_normal,AttentionCoeffGNN_multihead,0.25,0.25,0.3,0.3,0.27999999999999997
+swatAttentionCoeffGNN_multihead_(no mean)_normal_KL15_195245_1_0.0001_4_window_1,swat,4,normal_KL,AttentionCoeffGNN_multihead,0.25,0.25,0.25,0.25,0.25
+swatAttentionCoeffGNN_multihead_fixed_(no mean)_normal_KL15_201305_1_0.0001_4_window_1,swat,4,normal_KL,AttentionCoeffGNN_multihead_fixed,0.25,0.3,0.3,0.35,0.32
+swatAttentionCoeffGNN_multihead_(no mean)_normal_KL15_202412_3_0.0001_4_window_3,swat,4,normal_KL,AttentionCoeffGNN_multihead,0.26666666666666666,0.33333333333333337,0.3833333333333333,0.4083333333333334,0.3683333333333333
+swatAttentionCoeffGNN_multihead_(no mean)_normal_KL15_220520_5_0.0001_4_window_5,swat,4,normal_KL,AttentionCoeffGNN_multihead,0.42000000000000004,0.5,0.5900000000000001,0.65,0.564
