@@ -36,5 +36,36 @@ swatgnn_attention_(no mean)_correlated_&_normal15_185945_1_0.0001_4_window_1,swa
 swatAttentionCoeffGNN_multihead_(no mean)_correlated_&_normal15_190645_1_0.0001_4_window_1,swat,4,correlated_&_normal,AttentionCoeffGNN_multihead,0.25,0.25,0.3,0.3,0.27999999999999997
 swatAttentionCoeffGNN_multihead_(no mean)_normal_KL15_195245_1_0.0001_4_window_1,swat,4,normal_KL,AttentionCoeffGNN_multihead,0.25,0.25,0.25,0.25,0.25
 swatAttentionCoeffGNN_multihead_fixed_(no mean)_normal_KL15_201305_1_0.0001_4_window_1,swat,4,normal_KL,AttentionCoeffGNN_multihead_fixed,0.25,0.3,0.3,0.35,0.32
-swatAttentionCoeffGNN_multihead_(no mean)_normal_KL15_202412_3_0.0001_4_window_3,swat,4,normal_KL,AttentionCoeffGNN_multihead,0.26666666666666666,0.33333333333333337,0.3833333333333333,0.4083333333333334,0.3683333333333333
-swatAttentionCoeffGNN_multihead_(no mean)_normal_KL15_220520_5_0.0001_4_window_5,swat,4,normal_KL,AttentionCoeffGNN_multihead,0.42000000000000004,0.5,0.5900000000000001,0.65,0.564
+swatAttentionCoeffGNN_multihead_(no mean)_normal_KL15_202412_3_0.0001_4_window_3,swat,4,normal_KL,AttentionCoeffGNN_multihead,0.26666666666666666,0.33333333333333337,0.3833333333333333,0.4083333333333334,0.3683333333333333, rank 20
+swatAttentionCoeffGNN_multihead_(no mean)_normal_KL15_220520_5_0.0001_4_window_5,swat,4,normal_KL,AttentionCoeffGNN_multihead,0.42000000000000004,0.5,0.5900000000000001,0.65,0.564, rank 20
+swatAttentionCoeffGNN_multihead_(no mean)_normal_KL16_000447_8_0.0001_4_window_8,swat,4,normal_KL,AttentionCoeffGNN_multihead,0.35625,0.41875,0.5,0.55625,0.478125
+swatTemporalGNN_(no mean)_normal_KL16_051759_5_0.0001_4_window_5,swat,4,normal_KL,TemporalGNN,0.26,0.36,0.375,0.425,0.3635
+swatAttentionCoeffGNN_multihead_(no mean)_normal_KL16_101716_5_0.0001_4_window_5,swat,4,normal_KL,AttentionCoeffGNN_multihead,0.28,0.29000000000000004,0.36,0.44000000000000006,0.36300000000000004, rank 5
+swatTemporalGNN_(no mean)_normal_KL16_110502_5_0.0001_4_window_5,swat,4,normal_KL,TemporalGNN,0.26,0.37,0.4149999999999999,0.43499999999999994,0.395, wiht input projection (with fixed as base)
+swatAttentionCoeffGNN_multihead_fixed_(no mean)_normal_KL16_120451_5_0.0001_4_window_5,swat,4,normal_KL,AttentionCoeffGNN_multihead_fixed,0.27,0.29,0.32999999999999996,0.36,0.32399999999999995
+swatTemporalGNN_(no mean)_normal_KL16_123859_5_0.0001_4_window_5,swat,4,normal_KL,TemporalGNN,0.14,0.25,0.25,0.33999999999999997,0.26399999999999996, wind input projection (with not fixed as base)
+swatAttentionCoeffGNN_multihead_(no mean)_correlated_&_normal16_140145_5_0.0001_4_window_5,swat,4,correlated_&_normal,AttentionCoeffGNN_multihead,0.33999999999999997,0.38,0.485,0.495,0.446
+msdsAttentionCoeffGNN_multihead_(no mean)_normal_KL16_163050_4_0.0001_4_window_4,msds,4,normal_KL,AttentionCoeffGNN_multihead,0.2,0.5142857142857142,0.7571428571428571,1.0,0.74
+msdsAttentionCoeffGNN_multihead_(no mean)_correlated_&_normal16_163427_4_0.0001_4_window_4,msds,4,correlated_&_normal,AttentionCoeffGNN_multihead,0.4857142857142857,0.5142857142857142,0.6428571428571429,1.0,0.7271428571428571
+msdsTemporalGNN_(no mean)_normal_KL16_163927_4_0.0001_4_window_4,msds,4,normal_KL,TemporalGNN,0.37142857142857144,0.5142857142857142,0.5714285714285714,1.0,0.7057142857142857
+msdsTemporalGNN_(no mean)_correlated_&_normal16_164302_4_0.0001_4_window_4,msds,4,correlated_&_normal,TemporalGNN,0.2571428571428571,0.4857142857142857,0.5714285714285714,1.0,0.6685714285714285
+msdscross_time_freq_(no mean)_normal_KL16_170559_4_0.0001_4_window_4,msds,4,normal_KL,cross_time_freq,0.07142857142857142,0.5857142857142857,0.8571428571428571,1.0,0.7628571428571428
+msdscross_time_freq_(no mean)_correlated_&_normal16_170744_4_0.0001_4_window_4,msds,4,correlated_&_normal,cross_time_freq,0.02857142857142857,0.6285714285714286,0.9142857142857143,1.0,0.7785714285714286
+msdscross_time_freq_(no mean)_normal_KL16_171358_4_0.0001_4_window_4,msds,4,normal_KL,cross_time_freq,0.15714285714285714,0.6285714285714286,0.9857142857142858,1.0,0.8
+msdscross_time_freq_(no mean)_correlated_&_normal16_171526_4_0.0001_4_window_4,msds,4,correlated_&_normal,cross_time_freq,0.14285714285714285,0.45714285714285713,0.9857142857142858,1.0,0.7614285714285713
+msdscross_time_freq_(no mean)_normal_KL16_172625_4_0.0001_4_window_4,msds,4,normal_KL,cross_time_freq,0.12857142857142856,0.6142857142857143,0.9142857142857143,1.0,0.7842857142857143
+msdscross_time_freq_(no mean)_correlated_&_normal16_172816_4_0.0001_4_window_4,msds,4,correlated_&_normal,cross_time_freq,0.2571428571428571,0.5142857142857142,0.9714285714285714,1.0,0.8042857142857143
+msdscross_time_freq_(no mean)_normal_KL16_173400_4_0.0001_4_window_4,msds,4,normal_KL,cross_time_freq,0.014285714285714285,0.5857142857142857,0.9428571428571428,1.0,0.7657142857142857
+msdscross_time_freq_(no mean)_correlated_&_normal16_173543_4_0.0001_4_window_4,msds,4,correlated_&_normal,cross_time_freq,0.1,0.7285714285714285,1.0,1.0,0.8157142857142858
+msdscross_time_freq_(no mean)_normal_KL16_174106_4_0.0001_4_window_4,msds,4,normal_KL,cross_time_freq,0.42857142857142855,0.6714285714285714,0.9857142857142858,1.0,0.8485714285714285
+msdscross_time_freq_(no mean)_correlated_&_normal16_174353_4_0.0001_4_window_4,msds,4,correlated_&_normal,cross_time_freq,0.0,0.0,0.44285714285714284,1.0,0.4128571428571428
+msdscross_time_freq_(no mean)_normal_KL16_174607_1_0.0001_4_window_1,msds,4,normal_KL,cross_time_freq,0.7722772277227723,0.7656765676567656,0.7887788778877888,1.0,0.8617161716171617
+msdscross_time_freq_(no mean)_correlated_&_normal16_174733_1_0.0001_4_window_1,msds,4,correlated_&_normal,cross_time_freq,0.06930693069306931,0.9438943894389439,0.9966996699669968,1.0,0.8569306930693068
+msdscross_attention_single_coeff_network_(no mean)_normal_KL16_180127_1_0.0001_4_window_1,msds,4,normal_KL,cross_attention_single_coeff_network(time with fixed),0.7722772277227723,0.7656765676567656,0.7887788778877888,1.0,0.8617161716171617
+msdscross_attention_single_coeff_network_(no mean)_correlated_&_normal16_180249_1_0.0001_4_window_1,msds,4,correlated_&_normal,cross_attention_single_coeff_network(time with fixed),0.19801980198019803,0.9537953795379538,0.9966996699669968,1.0,0.8910891089108912
+msdscross_attention_single_coeff_network_(no mean)_normal_KL16_180634_10_0.0001_4_window_10,msds,4,normal_KL,cross_attention_single_coeff_network(time with fixed),0.275,0.7,1.0,1.0,0.835
+msdscross_attention_single_coeff_network_(no mean)_correlated_&_normal16_181015_10_0.0001_4_window_10,msds,4,correlated_&_normal,cross_attention_single_coeff_network(time with normal),0.025,0.425,1.0,1.0,0.7633333333333333
+msdscross_attention_single_coeff_network_(no mean)_normal_KL16_181542_10_0.0001_4_window_10,msds,4,normal_KL,cross_attention_single_coeff_network,0.09166666666666666,0.35,0.95,1.0,0.7325
+msdscross_attention_single_coeff_network_(no mean)_normal_KL16_181829_10_0.0001_4_window_10,msds,4,normal_KL,cross_attention_single_coeff_network,0.0,0.0,0.675,1.0,0.4416666666666667
+msdscross_attention_single_coeff_network_(no mean)_normal_KL16_182007_1_0.0001_4_window_1,msds,4,normal_KL,cross_attention_single_coeff_network,0.7623762376237624,0.8432343234323433,0.9867986798679869,1.0,0.928052805280528
+msdscross_attention_single_coeff_network_(no mean)_correlated_&_normal16_182109_1_0.0001_4_window_1,msds,4,correlated_&_normal,cross_attention_single_coeff_network,0.7722772277227723,0.9422442244224423,0.9917491749174918,1.0,0.9524752475247524

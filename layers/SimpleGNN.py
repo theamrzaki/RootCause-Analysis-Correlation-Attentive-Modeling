@@ -202,7 +202,7 @@ class AttentionCoeffGNN_multihead(nn.Module):
     
     
 class AttentionCoeffGNN_multihead_fixed(nn.Module):
-    def __init__(self, num_vars, rank, hidden_dim=64, heads=2, extra_layers=1):
+    def __init__(self, num_vars, rank, hidden_dim=256, heads=4, extra_layers=1):
         """
         Multi-head attention coefficient generator (fixed version).
         - Avoids mean pooling to preserve mid-ranked signals.
@@ -287,3 +287,140 @@ class AttentionCoeffGNN_multihead_fixed(nn.Module):
         # Reconstruct coefficient matrix
         coeffs_k = torch.bmm(U, V.transpose(1, 2))
         return coeffs_k
+
+class RecurrentAttentionCoeffGNN(nn.Module):
+    def __init__(self, num_vars, rank, order, hidden_dim=64, num_layers=1, device="cpu"):
+        super().__init__()
+        self.num_vars = num_vars
+        self.rank = rank
+        self.order = order
+        self.device = device
+
+        # Shared GNN coeff extractor
+        self.base_net = AttentionCoeffGNN_multihead(num_vars=num_vars, rank=rank)
+
+        # RNN across lags
+        self.in_proj = nn.Linear(num_vars * num_vars, hidden_dim)  # project coeffs to hidden_dim
+        self.rnn = nn.GRU(
+            input_size=hidden_dim,   # flatten adjacency
+            hidden_size=hidden_dim,
+            num_layers=num_layers,
+            batch_first=True
+        )
+
+        # Project back to coeff matrix
+        self.out = nn.Linear(hidden_dim, num_vars * num_vars)
+
+    def forward(self, inputs: torch.Tensor):
+        """
+        inputs: (B, order, num_vars)
+        returns:
+            preds: (B, num_vars)
+            coeffs: (B, order, num_vars, num_vars)
+        """
+        B, O, P = inputs.shape
+        if (O, P) != (self.order, self.num_vars):
+            print("WARNING: inputs should be of shape BS x K x p")
+
+        coeffs_seq = []
+        for k in range(O):
+            coeff_k = self.base_net(inputs[:, k, :])    # (B, P, P)
+            coeffs_seq.append(coeff_k.view(B, -1))
+
+        # Sequence of coeffs from GNN: (B, O, P*P)
+        coeffs_seq = torch.stack(coeffs_seq, dim=1)
+
+        # Process with RNN
+        coeffs_seq = self.in_proj(coeffs_seq)  # (B, O, hidden_dim)
+        h, _ = self.rnn(coeffs_seq)  # (B, O, hidden_dim)
+        coeffs_rnn = self.out(h).view(B, O, P, P)
+
+        # Predictions (like your original loop)
+        preds = torch.zeros((B, P), device=self.device)
+        for k in range(O):
+            preds = preds + torch.matmul(
+                coeffs_rnn[:, k, :, :], inputs[:, k, :].unsqueeze(-1)
+            ).squeeze(-1)
+
+        return preds, coeffs_rnn
+
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class TemporalGNN(nn.Module):
+    def __init__(self, num_vars, rank, hidden_dim=64, heads=8, extra_layers=1, temporal_hidden=32):
+        """
+        TemporalGNN:
+        - Spatial: AttentionCoeffGNN_multihead
+        - Temporal: small GRUCell over spatial embeddings
+        - Output: preds + coeffs
+        """
+        super().__init__()
+        self.num_vars = num_vars
+        self.rank = rank
+        self.hidden_dim = hidden_dim
+        self.temporal_hidden = temporal_hidden
+
+        # Spatial GNN
+        self.spatial_gnn = AttentionCoeffGNN_multihead(
+            num_vars=num_vars,
+            rank=rank,
+            hidden_dim=hidden_dim,
+            heads=heads,
+            extra_layers=extra_layers
+        )
+
+        # Temporal projection (small recurrent model)
+        self.proj = nn.Linear(num_vars * num_vars, hidden_dim)
+        self.temporal_rnn = nn.GRUCell(hidden_dim, temporal_hidden)
+
+        # Final MLP to produce U, V for coeffs
+        self.final_mlp = nn.Sequential(
+            nn.Linear(temporal_hidden, temporal_hidden),
+            nn.ReLU(),
+            nn.Linear(temporal_hidden, 2 * num_vars * rank)
+        )
+
+    def forward(self, x_seq):
+        """
+        x_seq: (B, order, num_vars)
+        returns: preds, coeffs: (B, num_vars, num_vars)
+        """
+        B, order, p = x_seq.shape
+        device = x_seq.device
+
+        # Init temporal hidden state
+        h_t = torch.zeros(B, self.temporal_hidden, device=device)
+
+        for t in range(order):
+            x_t = x_seq[:, t, :]  # (B, num_vars)
+
+            # Spatial GNN produces coeffs
+            coeffs_k = self.spatial_gnn(x_t)  # (B, p, p)
+
+            # Flatten and project to hidden_dim
+            h_embed = self.proj(coeffs_k.view(B, -1))  # (B, hidden_dim)
+
+            # Update recurrent state
+            h_t = self.temporal_rnn(h_embed, h_t)
+
+        # Decode final hidden state into U, V
+        h_final = self.final_mlp(h_t)
+        U_flat, V_flat = torch.split(h_final, self.num_vars * self.rank, dim=1)
+        U = U_flat.view(B, self.num_vars, self.rank)
+        V = V_flat.view(B, self.num_vars, self.rank)
+
+        coeffs = torch.bmm(U, V.transpose(1, 2))  # (B, p, p)
+        preds = coeffs  # optionally you can apply some post-processing for preds
+
+        return preds, coeffs
+
+
+
+    
+
+
+
+

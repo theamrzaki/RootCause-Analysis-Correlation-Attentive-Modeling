@@ -10,9 +10,9 @@
             "request": "launch",
             "program": "main.py",
             "args": [
-                "--dataset_name", "swat",
-                "--global_attention_over_all_lag", "global",
-                "--correlated_KL","1"
+                "--dataset_name", "msds",
+                "--correlated_KL","0",
+                "--coeff_architecture","cross_time_freq"
             ],
             "console": "integratedTerminal"
         },
