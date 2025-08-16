@@ -1,7 +1,7 @@
 import torch.nn as nn
 import torch
 
-from layers.SimpleGNN import AttentionCoeffGNN, AttentionCoeffGNN_multihead, AttentionCoeffGNN_multihead_fixed
+from layers.SimpleGNN import AttentionCoeffGNN, AttentionCoeffGNN_multihead, AttentionCoeffGNN_multihead_fixed, TemporalGNN, RecurrentAttentionCoeffGNN
 
 class SENNGC(nn.Module):
     def __init__(self, num_vars: int, order: int, hidden_layer_size: int, num_hidden_layers: int,
@@ -37,10 +37,16 @@ class SENNGC(nn.Module):
                 self.coeff_nets.append(AttentionCoeffGNN(num_vars=num_vars, rank=self.rank ))
         
         elif args["coeff_architecture"] == "AttentionCoeffGNN_multihead":
-            self.rank = 20
+            # time projection
+            self.rank = 5
             self.coeff_nets = nn.ModuleList()
             for k in range(order):
                 self.coeff_nets.append(AttentionCoeffGNN_multihead(num_vars=num_vars, rank=self.rank))
+
+            # freq projection
+            #self.coeff_nets_freq = nn.ModuleList()              
+            #for k in range(order):
+            #    self.coeff_nets_freq.append(AttentionCoeffGNN_multihead(num_vars=num_vars, rank=self.rank))
         
         elif args["coeff_architecture"] == "AttentionCoeffGNN_multihead_fixed":
             self.rank = 20
@@ -48,8 +54,132 @@ class SENNGC(nn.Module):
             for k in range(order):
                 self.coeff_nets.append(AttentionCoeffGNN_multihead_fixed(num_vars=num_vars, rank=self.rank))
 
-        total_params = sum(p.numel() for net in self.coeff_nets for p in net.parameters())
-        print(f"Total parameters for {order} lags: {total_params}")
+
+        elif args["coeff_architecture"] == "cross_time_freq":
+            self.rank = 20
+            self.coeff_nets_time = nn.ModuleList()
+            for k in range(order):
+                self.coeff_nets_time.append(AttentionCoeffGNN_multihead_fixed(num_vars=num_vars, rank=self.rank))
+
+            # freq branch (shared across all orders)
+            self.coeff_nets_freq = AttentionCoeffGNN_multihead(
+                num_vars=num_vars, rank=self.rank
+            )
+
+            d_q = 16  # query dimension
+            d_k = 16  # key dimension
+            d_v = 32  # value dimension
+            self.time_Q = nn.Linear(num_vars, d_q)
+            self.time_K = nn.Linear(num_vars, d_k)
+            self.time_V = nn.Linear(num_vars, d_v)
+            self.freq_Q = nn.Linear(num_vars, d_q)
+            self.freq_K = nn.Linear(num_vars, d_k)
+            self.freq_V = nn.Linear(num_vars, d_v)
+            self.time_out = nn.Linear(d_v, num_vars)
+            self.freq_out = nn.Linear(d_v, num_vars)
+
+            total_params = sum(p.numel() for p in self.coeff_nets_time.parameters() if p.requires_grad)
+            total_freq_params = sum(p.numel() for p in self.coeff_nets_freq.parameters() if p.requires_grad)
+            print(f"Total parameters for temporal : {total_params+total_freq_params}")
+        
+
+        elif args["coeff_architecture"] == "cross_attention_single_coeff_network":
+            self.rank = 20
+
+            # single time branch coefficient (shared across all lags)
+            self.coeff_net_time = AttentionCoeffGNN_multihead_fixed(num_vars=num_vars, rank=self.rank)
+
+            # frequency branch coefficient (shared across all lags)
+            self.coeff_net_freq = AttentionCoeffGNN_multihead_fixed(num_vars=num_vars, rank=self.rank)
+
+            # cross-attention projections
+            self.d_q = 16  # query dimension
+            self.d_k = 16  # key dimension
+            self.d_v = 32  # value dimension
+
+            self.time_Q = nn.Linear(num_vars, self.d_q)
+            self.time_K = nn.Linear(num_vars, self.d_k)
+            self.time_V = nn.Linear(num_vars, self.d_v)
+
+            self.freq_Q = nn.Linear(num_vars, self.d_q)
+            self.freq_K = nn.Linear(num_vars, self.d_k)
+            self.freq_V = nn.Linear(num_vars, self.d_v)
+
+            self.time_out = nn.Linear(self.d_v, num_vars)
+            self.freq_out = nn.Linear(self.d_v, num_vars)
+
+            total_params = sum(p.numel() for p in self.coeff_net_time.parameters() if p.requires_grad)
+            total_params += sum(p.numel() for p in self.coeff_net_freq.parameters() if p.requires_grad)
+            total_params += sum(p.numel() for p in self.time_Q.parameters() if p.requires_grad)
+            total_params += sum(p.numel() for p in self.time_K.parameters() if p.requires_grad)
+            total_params += sum(p.numel() for p in self.time_V.parameters() if p.requires_grad)
+            total_params += sum(p.numel() for p in self.freq_Q.parameters() if p.requires_grad)
+            total_params += sum(p.numel() for p in self.freq_K.parameters() if p.requires_grad)
+            total_params += sum(p.numel() for p in self.freq_V.parameters() if p.requires_grad)
+            total_params += sum(p.numel() for p in self.time_out.parameters() if p.requires_grad)
+            total_params += sum(p.numel() for p in self.freq_out.parameters() if p.requires_grad)
+
+            print(f"Total parameters for cross_attention_single_coeff_network: {total_params}")
+
+        elif args["coeff_architecture"] == "cross_attention_single_coeff_network_multi_head":
+            self.rank = 20
+            self.n_heads = 4  # number of attention heads
+            self.d_model = 32  # total feature dimension for attention
+
+            # --- single time branch coefficient (shared across all lags) ---
+            self.coeff_net_time = AttentionCoeffGNN_multihead_fixed(num_vars=num_vars, rank=self.rank)
+
+            # --- frequency branch coefficient (shared across all lags) ---
+            self.coeff_net_freq = AttentionCoeffGNN_multihead(num_vars=num_vars, rank=self.rank)
+
+            # --- cross-attention projections ---
+            self.time_Q = nn.Linear(num_vars, self.d_model)
+            self.time_K = nn.Linear(num_vars, self.d_model)
+            self.time_V = nn.Linear(num_vars, self.d_model)
+
+            self.freq_Q = nn.Linear(num_vars, self.d_model)
+            self.freq_K = nn.Linear(num_vars, self.d_model)
+            self.freq_V = nn.Linear(num_vars, self.d_model)
+
+            self.time_out = nn.Linear(self.d_model, num_vars)
+            self.freq_out = nn.Linear(self.d_model, num_vars)
+
+            # --- learnable skip connection weight ---
+            self.alpha = nn.Parameter(torch.tensor(0.5))
+
+            # --- optional layer norm ---
+            self.ln = nn.LayerNorm(self.d_model)
+
+            # --- Positional encoding ---
+            self.pos_emb = nn.Parameter(torch.randn(order, self.d_model))
+
+            # --- Total parameters count ---
+            total_params = sum(p.numel() for p in self.coeff_net_time.parameters() if p.requires_grad)
+            total_params += sum(p.numel() for p in self.coeff_net_freq.parameters() if p.requires_grad)
+            for m in [self.time_Q, self.time_K, self.time_V, self.freq_Q, self.freq_K, self.freq_V, self.time_out, self.freq_out]:
+                total_params += sum(p.numel() for p in m.parameters() if p.requires_grad)
+
+            print(f"Total parameters for cross_attention_single_coeff_network_multi_head: {total_params}")
+
+        elif args["coeff_architecture"] == "TemporalGNN":
+            self.rank = 20
+            #### 🚨 only ONE temporal model, not one per lag
+            ###self.temporal = TemporalGNN(num_vars=num_vars, rank=self.rank, hidden_dim=hidden_layer_size)
+            
+            self.coeff_net = RecurrentAttentionCoeffGNN(
+                num_vars=num_vars,
+                rank=self.rank,
+                order=order,
+                hidden_dim=64,
+                num_layers=2,
+                device=device
+            )
+            total_params = sum(p.numel() for p in self.coeff_net.parameters() if p.requires_grad)
+            print(f"Total parameters for temporal : {total_params}")
+
+        if args["coeff_architecture"] not in  ["TemporalGNN","cross_time_freq","cross_attention_single_coeff_network"]:
+            total_params = sum(p.numel() for net in self.coeff_nets for p in net.parameters())
+            print(f"Total parameters for {order} lags: {total_params}")
         
         # Some bookkeeping
         self.num_vars = num_vars
@@ -99,9 +229,172 @@ class SENNGC(nn.Module):
             if coeffs is None:
                 coeffs = torch.unsqueeze(coeffs_k, 1)
             else:
-                coeffs = torch.cat((coeffs, torch.unsqueeze(coeffs_k, 1)), 1)
+                coeffs = torch.cat((coeffs, torch.unsqueeze(coeffs_k, 1)), 1)            
             # coeffs[:, k, :, :] = coeffs_k
             preds = preds + torch.matmul(coeffs_k, inputs[:, k, :].unsqueeze(dim=2)).squeeze()
+        return preds, coeffs
+    
+    
+    def forward_cross_time_freq(self, inputs: torch.Tensor, corr_type="dual_guided"):
+        """
+        Forward pass for cross time-frequency AttentionCoeffGNN.
+
+        Args:
+            inputs: Tensor of shape (B, order, num_vars)
+            corr_type: str, type of combination:
+                - "simple": linear correlation
+                - "weighted": learnable weighted combination
+                - "cross_attention": time branch attends to freq branch
+        Returns:
+            preds: Tensor (B, num_vars)
+            coeffs_combined: Tensor (B, order, num_vars, num_vars)
+        """
+        B, order, p = inputs.shape
+        device = inputs.device
+
+        # --- Time branch ---
+        coeffs_time = []
+        for k in range(order):
+            coeff_t = self.coeff_nets_time[k](inputs[:, k, :])
+            coeff_t = coeff_t.view(B, p, p)
+            coeffs_time.append(coeff_t)
+        coeffs_time = torch.stack(coeffs_time, dim=1)  # (B, order, p, p)
+
+        # --- Frequency branch ---
+        inputs_freq = torch.fft.rfft(inputs, dim=1).real  # (B, freq_bins, p)
+        inputs_freq = inputs_freq.mean(dim=1)             # aggregate to (B, p)
+        coeff_freq = self.coeff_nets_freq(inputs_freq).view(B, p, p)
+
+        # --- Combine time & freq ---
+        coeffs_combined = torch.zeros_like(coeffs_time)
+        for k in range(order):
+            c_time = coeffs_time[:, k, :, :]
+
+            if corr_type == "simple":
+                # linear correlation
+                coeffs_combined[:, k, :, :] = (c_time @ coeff_freq.T) / p
+
+            elif corr_type == "weighted":
+                alpha = getattr(self, "alpha", 0.5)
+                coeffs_combined[:, k, :, :] = alpha * c_time + (1 - alpha) * coeff_freq
+
+            elif corr_type == "cross_attention":
+                # scaled matmul attention + softmax
+                attn_scores = torch.matmul(c_time, coeff_freq) / (p ** 0.5)
+                attn_scores = torch.softmax(attn_scores, dim=-1)
+                coeffs_combined[:, k, :, :] = c_time + torch.matmul(attn_scores, coeff_freq)
+            
+            elif corr_type == "dual_attention":
+                # Time → Freq attention
+                attn_time2freq = torch.matmul(c_time, coeff_freq) / (p ** 0.5)
+                attn_time2freq = torch.softmax(attn_time2freq, dim=-1)
+                time2freq = torch.matmul(attn_time2freq, coeff_freq)
+
+                # Freq → Time attention
+                attn_freq2time = torch.matmul(coeff_freq, c_time) / (p ** 0.5)
+                attn_freq2time = torch.softmax(attn_freq2time, dim=-1)
+                freq2time = torch.matmul(attn_freq2time, c_time)
+
+                # Combine dual attention with residual
+                coeffs_combined[:, k, :, :] = c_time + time2freq + freq2time
+
+            elif corr_type == "dual_guided":
+                # --- Linear projections for Time branch ---
+                Q_time = self.time_Q(c_time)   # (B, p, d_q)
+                K_time = self.time_K(c_time)   # (B, p, d_k)
+                V_time = self.time_V(c_time)   # (B, p, d_v)
+
+                # --- Linear projections for Frequency branch ---
+                Q_freq = self.freq_Q(coeff_freq)  # (B, p, d_q)
+                K_freq = self.freq_K(coeff_freq)  # (B, p, d_k)
+                V_freq = self.freq_V(coeff_freq)  # (B, p, d_v)
+
+                # --- Frequency -> Time attention ---
+                attn_f2t = torch.softmax(Q_time @ K_freq.transpose(-2, -1) / math.sqrt(K_freq.size(-1)), dim=-1)
+                guided_time = attn_f2t @ V_freq  # (B, p, d_v)
+
+                # --- Time -> Frequency attention ---
+                attn_t2f = torch.softmax(Q_freq @ K_time.transpose(-2, -1) / math.sqrt(K_time.size(-1)), dim=-1)
+                guided_freq = attn_t2f @ V_time  # (B, p, d_v)
+
+                # --- Project back to original coeff dimension (p x p) ---
+                guided_time_proj = self.time_out(guided_time)   # (B, p, p)
+                guided_freq_proj = self.freq_out(guided_freq)   # (B, p, p)
+
+                # --- Fuse both with skip connections ---
+                coeffs_combined[:, k, :, :] = c_time + coeff_freq + guided_time_proj + guided_freq_proj
+
+            
+            else:
+                raise ValueError(f"Unknown corr_type: {corr_type}")
+
+        # --- Predictions ---
+        preds = torch.zeros((B, p), device=device)
+        for k in range(order):
+            preds += (coeffs_combined[:, k, :, :] @ inputs[:, k, :].unsqueeze(-1)).squeeze(-1)
+
+        return preds, coeffs_combined
+
+
+    def forward_cross_attention_single_coeff_network(self, inputs: torch.Tensor):
+        """
+        Forward pass for cross-domain time-frequency attention with single time coeff.
+
+        Args:
+            inputs: Tensor of shape (B, order, num_vars)
+
+        Returns:
+            preds: Tensor of shape (B, num_vars)
+            coeffs_combined: Tensor of shape (B, order, num_vars, num_vars)
+        """
+        B, order, p = inputs.shape
+        device = inputs.device
+
+        # --- Time coefficient (single) ---
+        coeff_time = self.coeff_net_time(inputs[:, 0, :]).view(B, p, p)  # single coeff for time
+        # --- Frequency coefficient (single) ---
+        inputs_freq = torch.fft.rfft(inputs, dim=1).real.mean(dim=1)  # aggregate freq (B, p)
+        coeff_freq = self.coeff_net_freq(inputs_freq).view(B, p, p)
+
+        # --- Linear projections for cross-attention ---
+        Q_time = self.time_Q(coeff_time)
+        K_time = self.time_K(coeff_time)
+        V_time = self.time_V(coeff_time)
+
+        Q_freq = self.freq_Q(coeff_freq)
+        K_freq = self.freq_K(coeff_freq)
+        V_freq = self.freq_V(coeff_freq)
+
+        # --- Cross-attention ---
+        # Time attends to frequency
+        attn_weights_tf = torch.softmax(Q_time @ K_freq.transpose(-2, -1) / (self.d_k ** 0.5), dim=-1)
+        guided_time = attn_weights_tf @ V_freq
+
+        # Frequency attends to time
+        attn_weights_ft = torch.softmax(Q_freq @ K_time.transpose(-2, -1) / (self.d_k ** 0.5), dim=-1)
+        guided_freq = attn_weights_ft @ V_time
+
+        # --- Fuse with skip connections ---
+        fused_time = self.time_out(guided_time) + coeff_time
+        fused_freq = self.freq_out(guided_freq) + coeff_freq
+
+        # --- Combine for all orders ---
+        coeffs_combined = torch.stack([fused_time + fused_freq] * order, dim=1)  # (B, order, p, p)
+
+        # --- Predictions ---
+        preds = torch.zeros((B, p), device=device)
+        for k in range(order):
+            #preds += coeffs_combined[:, k, :, :] @ inputs[:, k, :].unsqueeze(-1).squeeze(-1)
+            preds += torch.bmm(coeffs_combined[:, k, :, :], inputs[:, k, :].unsqueeze(-1)).squeeze(-1)
+
+        return preds, coeffs_combined
+
+    def forward_temporal(self, inputs: torch.Tensor):
+        """
+        inputs: (B, order, num_vars)
+        TemporalGNN processes the entire lag sequence recurrently.
+        """
+        preds, coeffs = self.coeff_net(inputs)  # let TemporalGNN return preds + coeffs
         return preds, coeffs
     
     def forward(self, inputs: torch.Tensor):
@@ -109,6 +402,12 @@ class SENNGC(nn.Module):
             return self.forward_normal(inputs)
         elif self.args["coeff_architecture"] == "gnn_attention" or self.args["coeff_architecture"] == "AttentionCoeffGNN_multihead" or self.args["coeff_architecture"] == "AttentionCoeffGNN_multihead_fixed":                                                                                                                                                    
             return self.forward_gnn(inputs)
+        elif self.args["coeff_architecture"] == "TemporalGNN":
+            return self.forward_temporal(inputs)
+        elif self.args["coeff_architecture"] == "cross_time_freq":
+            return self.forward_cross_time_freq(inputs)
+        elif self.args["coeff_architecture"] == "cross_attention_single_coeff_network":
+            return self.forward_cross_attention_single_coeff_network(inputs)
         
 
 import math
