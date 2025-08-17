@@ -296,20 +296,20 @@ class RecurrentAttentionCoeffGNN(nn.Module):
         self.order = order
         self.device = device
 
-        # Shared GNN coeff extractor
+        # Shared GNN coefficient extractor per lag
         self.base_net = AttentionCoeffGNN_multihead_fixed(num_vars=num_vars, rank=rank)
 
         # RNN across lags
-        self.in_proj = nn.Linear(num_vars * num_vars, hidden_dim)  # project coeffs to hidden_dim
+        self.in_proj = nn.Linear(num_vars * num_vars, hidden_dim)  # project flattened coeffs
         self.rnn = nn.GRU(
-            input_size=hidden_dim,   # flatten adjacency
+            input_size=hidden_dim,
             hidden_size=hidden_dim,
             num_layers=num_layers,
             batch_first=True
         )
 
-        # Project back to coeff matrix
-        self.out = nn.Linear(hidden_dim, num_vars * num_vars)
+        # Project hidden state to coefficient adjustment
+        self.context_proj = nn.Linear(hidden_dim, num_vars * num_vars)
 
     def forward(self, inputs: torch.Tensor):
         """
@@ -322,28 +322,32 @@ class RecurrentAttentionCoeffGNN(nn.Module):
         if (O, P) != (self.order, self.num_vars):
             print("WARNING: inputs should be of shape BS x K x p")
 
+        # --- Step 1: compute per-lag coefficients ---
         coeffs_seq = []
         for k in range(O):
             coeff_k = self.base_net(inputs[:, k, :])    # (B, P, P)
-            coeffs_seq.append(coeff_k.view(B, -1))
+            coeffs_seq.append(coeff_k.view(B, -1))      # flatten
 
-        # Sequence of coeffs from GNN: (B, O, P*P)
+        # Sequence: (B, O, P*P)
         coeffs_seq = torch.stack(coeffs_seq, dim=1)
 
-        # Process with RNN
-        coeffs_seq = self.in_proj(coeffs_seq)  # (B, O, hidden_dim)
-        h, _ = self.rnn(coeffs_seq)  # (B, O, hidden_dim)
-        coeffs_rnn = self.out(h).view(B, O, P, P)
+        # --- Step 2: process sequence with RNN ---
+        rnn_input = self.in_proj(coeffs_seq)  # (B, O, hidden_dim)
+        h_seq, h_final = self.rnn(rnn_input)  # h_seq: (B, O, hidden_dim), h_final: (num_layers, B, hidden_dim)
+        h_final = h_final[-1]                 # (B, hidden_dim) last layer final hidden
 
-        # Predictions (like your original loop)
+        # --- Step 3: project hidden state to coefficient adjustment ---
+        context_adjust = self.context_proj(h_final).view(B, P, P)  # (B, P, P)
+
+        # --- Step 4: add global context to each lag coefficient ---
+        coeffs_rnn = coeffs_seq.view(B, O, P, P) + context_adjust.unsqueeze(1)  # broadcast across lags
+
+        # --- Step 5: compute predictions ---
         preds = torch.zeros((B, P), device=self.device)
         for k in range(O):
-            preds = preds + torch.matmul(
-                coeffs_rnn[:, k, :, :], inputs[:, k, :].unsqueeze(-1)
-            ).squeeze(-1)
+            preds += torch.matmul(coeffs_rnn[:, k, :, :], inputs[:, k, :].unsqueeze(-1)).squeeze(-1)
 
         return preds, coeffs_rnn
-
 
 import torch
 import torch.nn as nn
