@@ -202,7 +202,7 @@ class AttentionCoeffGNN_multihead(nn.Module):
     
     
 class AttentionCoeffGNN_multihead_fixed(nn.Module):
-    def __init__(self, num_vars, rank, hidden_dim=256, heads=4, extra_layers=1):
+    def __init__(self, num_vars, rank, hidden_dim=128, heads=4, extra_layers=1):
         """
         Multi-head attention coefficient generator (fixed version).
         - Avoids mean pooling to preserve mid-ranked signals.
@@ -297,7 +297,7 @@ class RecurrentAttentionCoeffGNN(nn.Module):
         self.device = device
 
         # Shared GNN coeff extractor
-        self.base_net = AttentionCoeffGNN_multihead(num_vars=num_vars, rank=rank)
+        self.base_net = AttentionCoeffGNN_multihead_fixed(num_vars=num_vars, rank=rank)
 
         # RNN across lags
         self.in_proj = nn.Linear(num_vars * num_vars, hidden_dim)  # project coeffs to hidden_dim
