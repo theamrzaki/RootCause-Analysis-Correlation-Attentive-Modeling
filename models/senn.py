@@ -62,7 +62,7 @@ class SENNGC(nn.Module):
                 self.coeff_nets_time.append(AttentionCoeffGNN_multihead_fixed(num_vars=num_vars, rank=self.rank))
 
             # freq branch (shared across all orders)
-            self.coeff_nets_freq = AttentionCoeffGNN_multihead(
+            self.coeff_nets_freq = AttentionCoeffGNN_multihead_fixed(
                 num_vars=num_vars, rank=self.rank
             )
 

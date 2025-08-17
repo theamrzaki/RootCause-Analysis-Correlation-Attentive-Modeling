@@ -28,6 +28,7 @@ class AERCA(nn.Module):
         self.encoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers,args=options, device=device)
         self.decoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, args=options, device=device)
         self.decoder_prev = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, args=options, device=device)
+        self.latent_gru = nn.GRU(input_size=num_vars, hidden_size=num_vars, num_layers=2, batch_first=True)
         self._log_and_print('Number of parameters in encoder: {}', self._count_parameters(self.encoder))
         self._log_and_print('Number of parameters in decoder: {}', self._count_parameters(self.decoder))
         self._log_and_print('Number of parameters in decoder_prev: {}', self._count_parameters(self.decoder_prev))
@@ -61,6 +62,7 @@ class AERCA(nn.Module):
         self.encoder.to(self.device)
         self.decoder.to(self.device)
         self.decoder_prev.to(self.device)
+        self.latent_gru.to(self.device)
         self.model_name = 'AERCA_' + data_name + '_ws_' + str(window_size) + '_stride_' + str(stride) + \
                           '_encoder_alpha_' + str(encoder_alpha) + '_decoder_alpha_' + str(decoder_alpha) + \
                           '_encoder_gamma_' + str(encoder_gamma) + '_decoder_gamma_' + str(decoder_gamma) + \
@@ -109,7 +111,7 @@ class AERCA(nn.Module):
         winds = torch.tensor(winds).float().to(self.device)
         nexts = torch.tensor(nexts).float().to(self.device)
         preds, coeffs = self.encoder(winds)
-        us = preds - nexts
+        us = preds - nexts                    # shape: (B, hidden_size)
         return us, coeffs, nexts[self.window_size:], winds[:-self.window_size]
 
     def decoding(self, us, winds, add_u=True):

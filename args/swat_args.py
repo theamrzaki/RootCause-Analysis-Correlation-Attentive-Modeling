@@ -23,7 +23,7 @@ def create_arg_parser():
     parser.add_argument('--dataset_name', type=str, default='swat', help='Dataset name (default: swat)')
 
     # AERCA arguments
-    parser.add_argument('--window_size', type=int, default=5, help='Window size (default: 1)')
+    parser.add_argument('--window_size', type=int, default=1, help='Window size (default: 1)')
     parser.add_argument('--stride', type=int, default=1, help='Stride (default: 1)')
     parser.add_argument('--encoder_alpha', type=float, default=0.5, help='Encoder alpha (default: 0.5)')
     parser.add_argument('--decoder_alpha', type=float, default=0.5, help='Decoder alpha (default: 0.5)')
