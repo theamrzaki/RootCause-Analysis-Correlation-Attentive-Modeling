@@ -10,9 +10,9 @@
             "request": "launch",
             "program": "main.py",
             "args": [
-                "--dataset_name", "swat",
+                "--dataset_name", "msds",
                 "--correlated_KL","0",
-                "--coeff_architecture","AttentionCoeffGNN_multihead_fixed"
+                "--coeff_architecture","trend_seasonal"
             ],
             "console": "integratedTerminal"
         },
