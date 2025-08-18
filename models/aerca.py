@@ -28,7 +28,7 @@ class AERCA(nn.Module):
         self.encoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers,args=options, device=device)
         self.decoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, args=options, device=device)
         self.decoder_prev = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, args=options, device=device)
-        self.latent_gru = nn.GRU(input_size=num_vars, hidden_size=num_vars, num_layers=2, batch_first=True)
+        self.latent_gru = nn.LSTM(input_size=num_vars, hidden_size=num_vars, num_layers=2, batch_first=True)
         self._log_and_print('Number of parameters in encoder: {}', self._count_parameters(self.encoder))
         self._log_and_print('Number of parameters in decoder: {}', self._count_parameters(self.decoder))
         self._log_and_print('Number of parameters in decoder_prev: {}', self._count_parameters(self.decoder_prev))
@@ -128,6 +128,21 @@ class AERCA(nn.Module):
             nexts_hat = preds + prev_preds
         return nexts_hat, coeffs, prev_coeffs
 
+
+    def decoding_batch(self, us, winds, add_u=True):
+        # us: (B, P)
+        us_seq = us.unsqueeze(1)  # shape -> (B, 1, P)
+
+        preds, coeffs = self.decoder(us_seq)           # next-step prediction from latent
+        prev_preds, prev_coeffs = self.decoder_prev(winds)
+
+        if add_u:
+            nexts_hat = preds + us + prev_preds
+        else:
+            nexts_hat = preds + prev_preds
+
+        return nexts_hat, coeffs, prev_coeffs
+
     def forward(self, x, add_u=True):
         us, encoder_coeffs, nexts, winds = self.encoding(x)
         if(self.options["correlated_KL"] == 1):
@@ -162,48 +177,58 @@ class AERCA(nn.Module):
         loss_recon = self.mse_loss(nexts_hat, nexts)
         logging.info('Reconstruction loss: %s', loss_recon.item())
 
-        loss_encoder_coeffs = self._sparsity_loss(encoder_coeffs, self.encoder_alpha)
-        logging.info('Encoder coeffs loss: %s', loss_encoder_coeffs.item())
-
-        loss_decoder_coeffs = self._sparsity_loss(decoder_coeffs, self.decoder_alpha)
-        logging.info('Decoder coeffs loss: %s', loss_decoder_coeffs.item())
-
-        loss_prev_coeffs = self._sparsity_loss(prev_coeffs, self.decoder_alpha)
-        logging.info('Prev coeffs loss: %s', loss_prev_coeffs.item())
-
-        loss_encoder_smooth = self._smoothness_loss(encoder_coeffs)
-        logging.info('Encoder smooth loss: %s', loss_encoder_smooth.item())
-
-        loss_decoder_smooth = self._smoothness_loss(decoder_coeffs)
-        logging.info('Decoder smooth loss: %s', loss_decoder_smooth.item())
-
-        loss_prev_smooth = self._smoothness_loss(prev_coeffs)
-        logging.info('Prev smooth loss: %s', loss_prev_smooth.item())
+        if (self.options["coeff_architecture"] == "deep_mlp"):
+            loss_encoder_coeffs = self._sparsity_loss(encoder_coeffs, self.encoder_alpha)
+            logging.info('Encoder coeffs loss: %s', loss_encoder_coeffs.item())
+            
+            loss_decoder_coeffs = self._sparsity_loss(decoder_coeffs, self.decoder_alpha)
+            logging.info('Decoder coeffs loss: %s', loss_decoder_coeffs.item())
+            
+            loss_prev_coeffs = self._sparsity_loss(prev_coeffs, self.decoder_alpha)
+            logging.info('Prev coeffs loss: %s', loss_prev_coeffs.item())
+            
+            loss_encoder_smooth = self._smoothness_loss(encoder_coeffs)
+            logging.info('Encoder smooth loss: %s', loss_encoder_smooth.item())
+            
+            loss_decoder_smooth = self._smoothness_loss(decoder_coeffs)
+            logging.info('Decoder smooth loss: %s', loss_decoder_smooth.item())
+            
+            loss_prev_smooth = self._smoothness_loss(prev_coeffs)
+            logging.info('Prev smooth loss: %s', loss_prev_smooth.item())
 
         loss_kl = kl_div
         logging.info('KL loss: %s', loss_kl.item())
 
         
         reg_lambda = 0.01 * (self.log_lambda_indep ** 2 + self.log_lambda_corr ** 2)
-        loss = (loss_recon +
-                self.encoder_lambda * loss_encoder_coeffs +
-                self.decoder_lambda * (loss_decoder_coeffs + loss_prev_coeffs) +
-                self.encoder_gamma * loss_encoder_smooth +
-                self.decoder_gamma * (loss_decoder_smooth + loss_prev_smooth) +
-                self.beta * loss_kl+
-                reg_lambda)
-        logging.info('Total loss: %s', loss.item())
-        losses_dict = {
-            "loss_recon": loss_recon.item(),
-            "loss_encoder_coeffs": loss_encoder_coeffs.item(),
-            "loss_decoder_coeffs": loss_decoder_coeffs.item(),
-            "loss_prev_coeffs": loss_prev_coeffs.item(),
-            "loss_encoder_smooth": loss_encoder_smooth.item(),
-            "loss_decoder_smooth": loss_decoder_smooth.item(),
-            "loss_prev_smooth": loss_prev_smooth.item(),
-            "loss_kl": loss_kl.item(),
-            "reg_lambda": reg_lambda.item()
-        }
+
+        if (self.options["coeff_architecture"] == "deep_mlp"):
+            loss = (loss_recon +
+                    self.encoder_lambda * loss_encoder_coeffs +
+                    self.decoder_lambda * (loss_decoder_coeffs + loss_prev_coeffs) +
+                    self.encoder_gamma * loss_encoder_smooth +
+                    self.decoder_gamma * (loss_decoder_smooth + loss_prev_smooth) +
+                    self.beta * loss_kl +
+                    reg_lambda)
+            losses_dict = {
+                "loss_recon": loss_recon.item(),
+                "loss_encoder_coeffs": loss_encoder_coeffs.item(),
+                "loss_decoder_coeffs": loss_decoder_coeffs.item(),
+                "loss_prev_coeffs": loss_prev_coeffs.item(),
+                "loss_encoder_smooth": loss_encoder_smooth.item(),
+                "loss_decoder_smooth": loss_decoder_smooth.item(),
+                "loss_prev_smooth": loss_prev_smooth.item(),
+                "loss_kl": loss_kl.item(),
+                "reg_lambda": reg_lambda.item()}
+        else:
+            loss = (loss_recon +
+                    self.beta * loss_kl +
+                    reg_lambda)
+            losses_dict = {
+                "loss_recon": loss_recon.item(),
+                "loss_kl": loss_kl.item(),
+                "reg_lambda": reg_lambda.item()
+            }
         return loss, losses_dict
 
     def _training(self, xs):
@@ -249,8 +274,6 @@ class AERCA(nn.Module):
             if epoch_val_loss < best_val_loss:
                 count = 0
                 logging.info(f'Saving model at epoch {epoch + 1}')
-                logging.info(f'Saving model name: {self.model_name}.pt')
-                best_val_loss = epoch_val_loss
                 torch.save(self.state_dict(), os.path.join(self.save_dir, f'{self.model_name}.pt'))
             if count >= 20:
                 print('Early stopping')
@@ -263,6 +286,89 @@ class AERCA(nn.Module):
         self._get_root_cause_threshold_encoder(xs_val)
         self._get_root_cause_threshold_decoder(xs_val)
 
+
+
+    def _training_batch(self, xs, batch_size=200):
+        """
+        xs: list of windows, each of shape (window_size+1, num_vars)
+        batch_size: number of windows per batch
+        """
+        # Split into train and validation
+        split_idx = int(0.8 * len(xs))
+        xs_train = xs[:split_idx]
+        xs_val = xs[split_idx:]
+
+        best_val_loss = np.inf
+        early_stop_count = 0
+
+        for epoch in tqdm(range(self.epochs), desc='Epoch'):
+            self.current_epoch = epoch
+            self.train()
+            epoch_loss = 0
+
+            # Shuffle training windows
+            np.random.shuffle(xs_train)
+
+            # --- Training loop with batching ---
+            for i in tqdm(range(0, len(xs_train), batch_size)):
+                batch_windows = xs_train[i:i+batch_size]
+                x_batch = torch.tensor(batch_windows, dtype=torch.float32, device=self.device)  # (B, W, P)
+
+                self.optimizer.zero_grad()
+                loss, _ = self._training_step(x_batch)
+                loss.backward()
+                self.optimizer.step()
+                epoch_loss += loss.item()
+
+            self.writer.add_scalar('Loss/train', epoch_loss, epoch)
+            logging.info('Epoch %s/%s', epoch + 1, self.epochs)
+            logging.info('Epoch training loss: %s', epoch_loss)
+
+            # --- Validation loop ---
+            self.eval()
+            val_loss = 0
+            losses_dict_validation = defaultdict(float)
+            with torch.no_grad():
+                for i in range(0, len(xs_val), batch_size):
+                    batch_windows = xs_val[i:i+batch_size]
+                    x_batch = torch.tensor(batch_windows, dtype=torch.float32, device=self.device)
+                    loss, losses_dict = self._training_step(x_batch)
+                    val_loss += loss.item()
+                    for k, v in losses_dict.items():
+                        losses_dict_validation[k] += v
+
+            self.writer.add_scalar('Loss/val', val_loss, epoch)
+            for k, v in losses_dict_validation.items():
+                self.writer.add_scalar(f'val/{k}', v, epoch)
+
+            logging.info('Epoch val loss: %s', val_loss)
+
+            # --- Early stopping ---
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                early_stop_count = 0
+                logging.info(f'Saving model at epoch {epoch + 1}')
+                torch.save(self.state_dict(), os.path.join(self.save_dir, f'{self.model_name}.pt'))
+            else:
+                early_stop_count += 1
+                if early_stop_count >= 20:
+                    print('Early stopping')
+                    break
+
+            if epoch % 5 == 0:
+                self.writer.flush()
+
+        # --- Load best model ---
+        self.load_state_dict(torch.load(os.path.join(self.save_dir, f'{self.model_name}.pt'), map_location=self.device))
+        logging.info('Training complete')
+
+        # --- Compute thresholds ---
+        self._get_recon_threshold(xs_val)
+        self._get_root_cause_threshold_encoder(xs_val)
+        self._get_root_cause_threshold_decoder(xs_val)
+
+
+
     def _testing_step(self, x, label=None, add_u=True):
         nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us = self.forward(x, add_u=add_u)
 
@@ -274,34 +380,37 @@ class AERCA(nn.Module):
         loss_recon = self.mse_loss(nexts_hat, nexts)
         logging.info('Reconstruction loss: %s', loss_recon.item())
 
-        loss_encoder_coeffs = self._sparsity_loss(encoder_coeffs, self.encoder_alpha)
-        logging.info('Encoder coeffs loss: %s', loss_encoder_coeffs.item())
-
-        loss_decoder_coeffs = self._sparsity_loss(decoder_coeffs, self.decoder_alpha)
-        logging.info('Decoder coeffs loss: %s', loss_decoder_coeffs.item())
-
-        loss_prev_coeffs = self._sparsity_loss(prev_coeffs, self.decoder_alpha)
-        logging.info('Prev coeffs loss: %s', loss_prev_coeffs.item())
-
-        loss_encoder_smooth = self._smoothness_loss(encoder_coeffs)
-        logging.info('Encoder smooth loss: %s', loss_encoder_smooth.item())
-
-        loss_decoder_smooth = self._smoothness_loss(decoder_coeffs)
-        logging.info('Decoder smooth loss: %s', loss_decoder_smooth.item())
-
-        loss_prev_smooth = self._smoothness_loss(prev_coeffs)
-        logging.info('Prev smooth loss: %s', loss_prev_smooth.item())
-
         loss_kl = kl_div
         logging.info('KL loss: %s', loss_kl.item())
 
-        loss = (loss_recon +
-                self.encoder_lambda * loss_encoder_coeffs +
-                self.decoder_lambda * (loss_decoder_coeffs + loss_prev_coeffs) +
-                self.encoder_gamma * loss_encoder_smooth +
-                self.decoder_gamma * (loss_decoder_smooth + loss_prev_smooth) +
-                self.beta * loss_kl)
-        logging.info('Total loss: %s', loss.item())
+        if (self.options["coeff_architecture"] == "deep_mlp"):
+            loss_encoder_coeffs = self._sparsity_loss(encoder_coeffs, self.encoder_alpha)
+            logging.info('Encoder coeffs loss: %s', loss_encoder_coeffs.item())
+
+            loss_decoder_coeffs = self._sparsity_loss(decoder_coeffs, self.decoder_alpha)
+            logging.info('Decoder coeffs loss: %s', loss_decoder_coeffs.item())
+
+            loss_prev_coeffs = self._sparsity_loss(prev_coeffs, self.decoder_alpha)
+            logging.info('Prev coeffs loss: %s', loss_prev_coeffs.item())
+
+            loss_encoder_smooth = self._smoothness_loss(encoder_coeffs)
+            logging.info('Encoder smooth loss: %s', loss_encoder_smooth.item())
+
+            loss_decoder_smooth = self._smoothness_loss(decoder_coeffs)
+            logging.info('Decoder smooth loss: %s', loss_decoder_smooth.item())
+
+            loss_prev_smooth = self._smoothness_loss(prev_coeffs)
+            logging.info('Prev smooth loss: %s', loss_prev_smooth.item())
+            loss = (loss_recon +
+                    self.encoder_lambda * loss_encoder_coeffs +
+                    self.decoder_lambda * (loss_decoder_coeffs + loss_prev_coeffs) +
+                    self.encoder_gamma * loss_encoder_smooth +
+                    self.decoder_gamma * (loss_decoder_smooth + loss_prev_smooth) +
+                    self.beta * loss_kl)
+        else:
+            loss = (loss_recon +
+                    self.beta * loss_kl)
+            logging.info('Total loss: %s', loss.item())
 
         return loss, nexts_hat, nexts, encoder_coeffs, decoder_coeffs, kl_div, preprocessed_label, us
 
@@ -355,6 +464,65 @@ class AERCA(nn.Module):
         np.save(os.path.join(self.save_dir, f'{self.model_name}_upper_decoder.npy'), self.upper_decoder)
         np.save(os.path.join(self.save_dir, f'{self.model_name}_us_mean_decoder.npy'), self.us_mean_decoder)
         np.save(os.path.join(self.save_dir, f'{self.model_name}_us_std_decoder.npy'), self.us_std_decoder)
+
+
+    def _get_recon_threshold_batch(self, xs):
+        self.eval()
+        losses_list = []
+        with torch.no_grad():
+            for x in xs:
+                # x is now (window_size, P), expand to batch of 1
+                x_batch = x.unsqueeze(0) if torch.is_tensor(x) else torch.tensor(x).unsqueeze(0).float().to(self.device)
+                _, nexts_hat, nexts, _, _, _, _, _ = self._testing_step(x_batch, add_u=False)
+                loss_arr = self.mse_loss_wo_reduction(nexts_hat, nexts).cpu().numpy().ravel()
+                losses_list.append(loss_arr)
+        recon_losses = np.concatenate(losses_list)
+        self.recon_threshold_value = np.quantile(recon_losses, self.recon_threshold)
+        self.recon_mean = np.mean(recon_losses)
+        self.recon_std = np.std(recon_losses)
+        np.save(os.path.join(self.save_dir, f'{self.model_name}_recon_threshold.npy'), self.recon_threshold_value)
+        np.save(os.path.join(self.save_dir, f'{self.model_name}_recon_mean.npy'), self.recon_mean)
+        np.save(os.path.join(self.save_dir, f'{self.model_name}_recon_std.npy'), self.recon_std)
+
+
+    def _get_root_cause_threshold_encoder_batch(self, xs):
+        self.eval()
+        us_list = []
+        with torch.no_grad():
+            for x in xs:
+                x_batch = x.unsqueeze(0) if torch.is_tensor(x) else torch.tensor(x).unsqueeze(0).float().to(self.device)
+                us = self._testing_step(x_batch)[-1]  # latent residuals
+                us_list.append(us.cpu().numpy())
+        us_all = np.concatenate(us_list, axis=0)  # shape: (total_samples, P)
+        self.lower_encoder = np.quantile(us_all, (1 - self.root_cause_threshold_encoder) / 2, axis=0)
+        self.upper_encoder = np.quantile(us_all, 1 - (1 - self.root_cause_threshold_encoder) / 2, axis=0)
+        self.us_mean_encoder = np.median(us_all, axis=0)
+        self.us_std_encoder = np.std(us_all, axis=0)
+        np.save(os.path.join(self.save_dir, f'{self.model_name}_lower_encoder.npy'), self.lower_encoder)
+        np.save(os.path.join(self.save_dir, f'{self.model_name}_upper_encoder.npy'), self.upper_encoder)
+        np.save(os.path.join(self.save_dir, f'{self.model_name}_us_mean_encoder.npy'), self.us_mean_encoder)
+        np.save(os.path.join(self.save_dir, f'{self.model_name}_us_std_encoder.npy'), self.us_std_encoder)
+
+
+    def _get_root_cause_threshold_decoder_batch(self, xs):
+        self.eval()
+        diff_list = []
+        with torch.no_grad():
+            for x in xs:
+                x_batch = x.unsqueeze(0) if torch.is_tensor(x) else torch.tensor(x).unsqueeze(0).float().to(self.device)
+                _, nexts_hat, nexts, _, _, _, _, _ = self._testing_step(x_batch, add_u=False)
+                diff = (nexts - nexts_hat).cpu().numpy().ravel()
+                diff_list.append(diff)
+        us_all = np.concatenate(diff_list, axis=0)
+        self.lower_decoder = np.quantile(us_all, (1 - self.root_cause_threshold_decoder) / 2, axis=0)
+        self.upper_decoder = np.quantile(us_all, 1 - (1 - self.root_cause_threshold_decoder) / 2, axis=0)
+        self.us_mean_decoder = np.mean(us_all, axis=0)
+        self.us_std_decoder = np.std(us_all, axis=0)
+        np.save(os.path.join(self.save_dir, f'{self.model_name}_lower_decoder.npy'), self.lower_decoder)
+        np.save(os.path.join(self.save_dir, f'{self.model_name}_upper_decoder.npy'), self.upper_decoder)
+        np.save(os.path.join(self.save_dir, f'{self.model_name}_us_mean_decoder.npy'), self.us_mean_decoder)
+        np.save(os.path.join(self.save_dir, f'{self.model_name}_us_std_decoder.npy'), self.us_std_decoder)
+
 
     def _testing_root_cause(self, xs, labels):
         # Load model and only the encoder-related parameters required for the POT computations.

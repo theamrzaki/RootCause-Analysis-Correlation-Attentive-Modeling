@@ -1,7 +1,8 @@
 import torch.nn as nn
 import torch
 
-from layers.SimpleGNN import AttentionCoeffGNN, AttentionCoeffGNN_multihead, AttentionCoeffGNN_multihead_fixed, TemporalGNN, RecurrentAttentionCoeffGNN
+from layers.SimpleGNN import AttentionCoeffGNN, AttentionCoeffGNN_multihead, AttentionCoeffGNN_multihead_fixed, TemporalGNN, RecurrentAttentionCoeffGNN, RecurrentAttentionGNN_Attn
+from layers.trend_seasonal import TS_Model
 
 class SENNGC(nn.Module):
     def __init__(self, num_vars: int, order: int, hidden_layer_size: int, num_hidden_layers: int,
@@ -108,6 +109,11 @@ class SENNGC(nn.Module):
             self.time_out = nn.Linear(self.d_v, num_vars)
             self.freq_out = nn.Linear(self.d_v, num_vars)
 
+            # --- Attention GRU for temporal correlation ---
+            hidden_dim = 64
+            self.attn_gru = nn.GRU(input_size=num_vars*num_vars, hidden_size=hidden_dim, batch_first=True)
+            self.coeff_adjust_proj = nn.Linear(hidden_dim, num_vars*num_vars)  # project to next-step preds
+
             total_params = sum(p.numel() for p in self.coeff_net_time.parameters() if p.requires_grad)
             total_params += sum(p.numel() for p in self.coeff_net_freq.parameters() if p.requires_grad)
             total_params += sum(p.numel() for p in self.time_Q.parameters() if p.requires_grad)
@@ -170,14 +176,31 @@ class SENNGC(nn.Module):
                 num_vars=num_vars,
                 rank=self.rank,
                 order=order,
-                hidden_dim=64,
-                num_layers=2,
                 device=device
             )
             total_params = sum(p.numel() for p in self.coeff_net.parameters() if p.requires_grad)
             print(f"Total parameters for temporal : {total_params}")
 
-        if args["coeff_architecture"] not in  ["TemporalGNN","cross_time_freq","cross_attention_single_coeff_network"]:
+
+        elif args["coeff_architecture"] == "TemporalGNN_Attention":
+            self.rank = 20
+            
+            self.coeff_net = RecurrentAttentionGNN_Attn(
+                num_vars=num_vars,
+                rank=self.rank,
+                order=order,
+                device=device
+            )
+            total_params = sum(p.numel() for p in self.coeff_net.parameters() if p.requires_grad)
+            print(f"Total parameters for temporal : {total_params}")
+
+        elif args["coeff_architecture"] == "trend_seasonal":
+            self.coeff_net = TS_Model( seq_len=order, num_nodes=num_vars, d_model=64)
+            total_params = sum(p.numel() for p in self.coeff_net.parameters() if p.requires_grad)
+            print(f"Total parameters for temporal : {total_params}")
+
+
+        if args["coeff_architecture"] not in  ["TemporalGNN","cross_time_freq","cross_attention_single_coeff_network","TemporalGNN_Attention","trend_seasonal"]:
             total_params = sum(p.numel() for net in self.coeff_nets for p in net.parameters())
             print(f"Total parameters for {order} lags: {total_params}")
         
@@ -350,13 +373,12 @@ class SENNGC(nn.Module):
         B, order, p = inputs.shape
         device = inputs.device
 
-        # --- Time coefficient (single) ---
-        coeff_time = self.coeff_net_time(inputs[:, 0, :]).view(B, p, p)  # single coeff for time
-        # --- Frequency coefficient (single) ---
-        inputs_freq = torch.fft.rfft(inputs, dim=1).real.mean(dim=1)  # aggregate freq (B, p)
+        # --- Step 1: Compute single time/frequency coefficients ---
+        coeff_time = self.coeff_net_time(inputs[:, 0, :]).view(B, p, p)
+        inputs_freq = torch.fft.rfft(inputs, dim=1).real.mean(dim=1)  # aggregate frequency
         coeff_freq = self.coeff_net_freq(inputs_freq).view(B, p, p)
 
-        # --- Linear projections for cross-attention ---
+        # --- Step 2: Cross-attention ---
         Q_time = self.time_Q(coeff_time)
         K_time = self.time_K(coeff_time)
         V_time = self.time_V(coeff_time)
@@ -365,26 +387,30 @@ class SENNGC(nn.Module):
         K_freq = self.freq_K(coeff_freq)
         V_freq = self.freq_V(coeff_freq)
 
-        # --- Cross-attention ---
-        # Time attends to frequency
         attn_weights_tf = torch.softmax(Q_time @ K_freq.transpose(-2, -1) / (self.d_k ** 0.5), dim=-1)
         guided_time = attn_weights_tf @ V_freq
 
-        # Frequency attends to time
         attn_weights_ft = torch.softmax(Q_freq @ K_time.transpose(-2, -1) / (self.d_k ** 0.5), dim=-1)
         guided_freq = attn_weights_ft @ V_time
 
-        # --- Fuse with skip connections ---
         fused_time = self.time_out(guided_time) + coeff_time
         fused_freq = self.freq_out(guided_freq) + coeff_freq
 
-        # --- Combine for all orders ---
-        coeffs_combined = torch.stack([fused_time + fused_freq] * order, dim=1)  # (B, order, p, p)
+        # --- Step 3: Combine time-frequency features as GRU input ---
+        # Flatten per sample: (B, p*p) and repeat for each order
+        fused_flat = (fused_time + fused_freq).view(B, 1, -1).repeat(1, order, 1)  # (B, order, p*p)
 
-        # --- Predictions ---
+        # --- Step 4: Attention-GRU over order dimension ---
+        h_seq, h_final = self.attn_gru(fused_flat)  # h_seq: (B, order, hidden_dim)
+        h_last = h_final[-1]                         # (B, hidden_dim)
+
+        # Project hidden state to adjust coefficients
+        coeff_adjust = self.coeff_adjust_proj(h_last).view(B, 1, p, p)  # (B, 1, p, p)
+        coeffs_combined = fused_flat.view(B, order, p, p) + coeff_adjust  # broadcast across order
+
+        # --- Step 5: Compute predictions ---
         preds = torch.zeros((B, p), device=device)
         for k in range(order):
-            #preds += coeffs_combined[:, k, :, :] @ inputs[:, k, :].unsqueeze(-1).squeeze(-1)
             preds += torch.bmm(coeffs_combined[:, k, :, :], inputs[:, k, :].unsqueeze(-1)).squeeze(-1)
 
         return preds, coeffs_combined
@@ -402,13 +428,14 @@ class SENNGC(nn.Module):
             return self.forward_normal(inputs)
         elif self.args["coeff_architecture"] == "gnn_attention" or self.args["coeff_architecture"] == "AttentionCoeffGNN_multihead" or self.args["coeff_architecture"] == "AttentionCoeffGNN_multihead_fixed":                                                                                                                                                    
             return self.forward_gnn(inputs)
-        elif self.args["coeff_architecture"] == "TemporalGNN":
+        elif self.args["coeff_architecture"] in ["TemporalGNN", "TemporalGNN_Attention","trend_seasonal"]:
             return self.forward_temporal(inputs)
         elif self.args["coeff_architecture"] == "cross_time_freq":
             return self.forward_cross_time_freq(inputs)
         elif self.args["coeff_architecture"] == "cross_attention_single_coeff_network":
             return self.forward_cross_attention_single_coeff_network(inputs)
-        
+        elif self.args["coeff_architecture"] == "trend_seasonal":
+            return self.forward_trend_seasonal(inputs)
 
 import math
 import torch
