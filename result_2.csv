@@ -264,3 +264,45 @@ msdsTemporalGNN_Attention_(no mean)_correlated_&_normal18_133909_5_1e-05_8_windo
 msdsTemporalGNN_Attention_(no mean)_correlated_&_normal18_134839_5_1e-05_9_window_5,msds,9,correlated_&_normal,TemporalGNN_Attention,0.0,0.11111111111111112,0.6333333333333333,1.0,0.6038888888888889
 msdsdeep_mlp_(no mean)_normal_KL18_142632_5_1e-05_6_window_5,msds,6,normal_KL,deep_mlp,0.4,1.0,1.0,1.0,0.9333333333333333
 msdstrend_seasonal_(no mean)_normal_KL18_145604_4_1e-05_5_window_4,msds,5,normal_KL,trend_seasonal,0.014285714285714285,0.4,0.9571428571428572,1.0,0.7228571428571429
+msdsTemporalGNN_Attention_(no mean)_normal_KL18_151600_1_1e-05_5_window_1,msds,5,normal_KL,TemporalGNN_Attention,0.10891089108910891,0.9884488448844884,0.9917491749174918,1.0,0.842904290429043
+msdsTemporalGNN_Attention_(no mean)_normal_KL18_151926_1_1e-05_6_window_1,msds,6,normal_KL,TemporalGNN_Attention,0.4158415841584158,0.7145214521452145,0.872937293729373,1.0,0.8371287128712872
+msdsdeep_mlp_(no mean)_normal_KL18_152304_1_1e-05_5_window_1,msds,5,normal_KL,deep_mlp,0.7029702970297029,0.9917491749174918,0.9966996699669968,1.0,0.9579207920792079
+msdsdeep_mlp_(no mean)_normal_KL18_152612_1_1e-05_6_window_1,msds,6,normal_KL,deep_mlp,0.5841584158415841,0.9884488448844884,0.9917491749174918,1.0,0.9542904290429043
+msdsTemporalGNN_Attention_(no mean)_normal_KL18_152956_1_1e-05_5_window_1,msds,5,normal_KL,TemporalGNN_Attention,0.24752475247524752,0.9422442244224423,0.9917491749174918,1.0,0.8787128712871286
+msdsTemporalGNN_Attention_(no mean)_normal_KL18_153530_1_0.0001_5_window_1,msds,5,normal_KL,TemporalGNN_Attention,0.27722772277227725,0.9917491749174918,0.9966996699669968,1.0,0.9143564356435643
+msdsTemporalGNN_Attention_(no mean)_normal_KL18_153959_1_0.0001_5_window_1,msds,5,normal_KL,TemporalGNN_Attention,0.693069306930693,0.9785478547854785,0.9966996699669968,1.0,0.9503300330033003
+msdsTemporalGNN_Attention_(no mean)_normal_KL18_154324_1_0.0001_6_window_1,msds,6,normal_KL,TemporalGNN_Attention,0.13861386138613863,0.5693069306930693,0.9735973597359735,1.0,0.7759075907590759
+
+
+
+
+
+
+msdsdeep_mlp_(no mean)_normal_KL18_155045_1_1e-06_1_window_1,msds,1,normal_KL,deep_mlp,0.7029702970297029,0.9884488448844884,0.9966996699669968,1.0,0.9437293729372938
+msdsdeep_mlp_(no mean)_normal_KL18_155356_1_1e-06_2_window_1,msds,2,normal_KL,deep_mlp,0.45544554455445546,0.778877887788779,0.9818481848184819,1.0,0.8780528052805281
+msdsdeep_mlp_(no mean)_normal_KL18_155702_1_1e-06_3_window_1,msds,3,normal_KL,deep_mlp,0.13861386138613863,0.7541254125412542,0.9917491749174918,1.0,0.8262376237623762
+msdsdeep_mlp_(no mean)_normal_KL18_160011_1_1e-06_4_window_1,msds,4,normal_KL,deep_mlp,0.5148514851485149,0.8828382838283829,0.9917491749174918,1.0,0.9084158415841586
+msdsdeep_mlp_(no mean)_normal_KL18_160311_1_1e-06_11_window_1,msds,11,normal_KL,deep_mlp,0.0,0.22277227722772278,0.4174917491749175,1.0,0.5628712871287128
+msdsdeep_mlp_(no mean)_normal_KL18_160614_1_1e-06_12_window_1,msds,12,normal_KL,deep_mlp,0.04950495049504951,0.9389438943894389,0.9917491749174918,1.0,0.8706270627062708
+msdsdeep_mlp_(no mean)_normal_KL18_160920_1_1e-06_13_window_1,msds,13,normal_KL,deep_mlp,0.21782178217821782,0.7095709570957095,0.9323432343234324,1.0,0.81996699669967
+msdsTemporalGNN_Attention_(no mean)_normal_KL18_161236_1_0.0001_1_window_1,msds,1,normal_KL,TemporalGNN_Attention,0.22772277227722773,0.3976897689768977,0.9966996699669968,1.0,0.7782178217821782
+msdsTemporalGNN_Attention_(no mean)_normal_KL18_161603_1_0.0001_2_window_1,msds,2,normal_KL,TemporalGNN_Attention,0.6237623762376238,0.971947194719472,0.9917491749174918,1.0,0.950990099009901
+msdsTemporalGNN_Attention_(no mean)_normal_KL18_161927_1_0.0001_3_window_1,msds,3,normal_KL,TemporalGNN_Attention,0.7524752475247525,0.8448844884488448,0.9917491749174918,1.0,0.9305280528052805
+msdsTemporalGNN_Attention_(no mean)_normal_KL18_162247_1_0.0001_4_window_1,msds,4,normal_KL,TemporalGNN_Attention,0.7722772277227723,0.9125412541254125,0.9917491749174918,1.0,0.950990099009901
+msdsTemporalGNN_Attention_(no mean)_normal_KL18_162622_1_0.0001_11_window_1,msds,11,normal_KL,TemporalGNN_Attention,0.009900990099009901,0.9323432343234324,0.9966996699669968,1.0,0.8242574257425742
+msdsTemporalGNN_Attention_(no mean)_normal_KL18_162937_1_0.0001_12_window_1,msds,12,normal_KL,TemporalGNN_Attention,0.297029702970297,0.9966996699669968,0.9966996699669968,1.0,0.9138613861386139
+msdsTemporalGNN_Attention_(no mean)_normal_KL18_163306_1_0.0001_13_window_1,msds,13,normal_KL,TemporalGNN_Attention,0.37623762376237624,0.8580858085808581,0.9867986798679869,1.0,0.8798679867986798
+msdsdeep_mlp_(no mean)_correlated_&_normal18_163632_1_1e-06_1_window_1,msds,1,correlated_&_normal,deep_mlp,0.0,0.7656765676567656,0.8201320132013201,1.0,0.801980198019802
+msdsdeep_mlp_(no mean)_correlated_&_normal18_163945_1_1e-06_2_window_1,msds,2,correlated_&_normal,deep_mlp,0.6534653465346535,0.8036303630363036,0.9917491749174918,1.0,0.9143564356435643
+msdsdeep_mlp_(no mean)_correlated_&_normal18_164302_1_1e-06_3_window_1,msds,3,correlated_&_normal,deep_mlp,0.5544554455445545,0.9620462046204621,0.9917491749174918,1.0,0.9366336633663366
+msdsdeep_mlp_(no mean)_correlated_&_normal18_164617_1_1e-06_4_window_1,msds,4,correlated_&_normal,deep_mlp,0.7128712871287128,0.9422442244224423,0.9917491749174918,1.0,0.9509900990099011
+msdsdeep_mlp_(no mean)_correlated_&_normal18_164930_1_1e-06_11_window_1,msds,11,correlated_&_normal,deep_mlp,0.0,0.019801980198019802,0.10231023102310231,1.0,0.44141914191419146
+msdsdeep_mlp_(no mean)_correlated_&_normal18_165246_1_1e-06_12_window_1,msds,12,correlated_&_normal,deep_mlp,0.0,0.7656765676567656,0.7904290429042904,1.0,0.7915841584158416
+msdsdeep_mlp_(no mean)_correlated_&_normal18_165559_1_1e-06_13_window_1,msds,13,correlated_&_normal,deep_mlp,0.5544554455445545,0.7887788778877888,0.9818481848184819,1.0,0.8933993399339935
+msdsTemporalGNN_Attention_(no mean)_correlated_&_normal18_165914_1_0.0001_1_window_1,msds,1,correlated_&_normal,TemporalGNN_Attention,0.297029702970297,0.9620462046204621,0.9966996699669968,1.0,0.9099009900990099
+msdsTemporalGNN_Attention_(no mean)_correlated_&_normal18_170258_1_0.0001_2_window_1,msds,2,correlated_&_normal,TemporalGNN_Attention,0.22772277227722773,0.8828382838283829,0.9966996699669968,1.0,0.8724422442244224
+msdsTemporalGNN_Attention_(no mean)_correlated_&_normal18_170622_1_0.0001_3_window_1,msds,3,correlated_&_normal,TemporalGNN_Attention,0.1782178217821782,0.33993399339933994,0.9174917491749175,1.0,0.7344884488448844
+msdsTemporalGNN_Attention_(no mean)_correlated_&_normal18_170959_1_0.0001_4_window_1,msds,4,correlated_&_normal,TemporalGNN_Attention,0.46534653465346537,0.8184818481848185,0.9125412541254125,1.0,0.8742574257425743
+msdsTemporalGNN_Attention_(no mean)_correlated_&_normal18_171324_1_0.0001_11_window_1,msds,11,correlated_&_normal,TemporalGNN_Attention,0.42574257425742573,0.9917491749174918,0.9966996699669968,1.0,0.9316831683168317
+msdsTemporalGNN_Attention_(no mean)_correlated_&_normal18_171656_1_0.0001_12_window_1,msds,12,correlated_&_normal,TemporalGNN_Attention,0.27722772277227725,0.9818481848184819,0.9966996699669968,1.0,0.9113861386138614
+msdsTemporalGNN_Attention_(no mean)_correlated_&_normal18_172022_1_0.0001_13_window_1,msds,13,correlated_&_normal,TemporalGNN_Attention,0.0594059405940594,0.5907590759075907,0.971947194719472,1.0,0.7716171617161717
