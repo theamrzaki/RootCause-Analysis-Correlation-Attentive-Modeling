@@ -53,7 +53,9 @@ def create_arg_parser():
     
     # Architecture arguments
     parser.add_argument('--coeff_architecture', type=str, default='deep_mlp', help='Coefficient architecture options (deep_mlp, gnn_attention) (default: deep_mlp)')
-
+    parser.add_argument('--attention_dim', type=int, default=64, help='Attention dimension (default: 64)')
+    parser.add_argument('--num_attention_heads', type=int, default=4, help='Number of attention heads (default: 4)')
+    
     # Attention arguments
     parser.add_argument('--global_attention_over_all_lag', type=str)
     parser.add_argument('--local_attention_per_lag', type=int, default=0, help='Flag for using local attention per lag (default: 0)')
