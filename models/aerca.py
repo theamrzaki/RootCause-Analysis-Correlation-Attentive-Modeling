@@ -177,24 +177,23 @@ class AERCA(nn.Module):
         loss_recon = self.mse_loss(nexts_hat, nexts)
         logging.info('Reconstruction loss: %s', loss_recon.item())
 
-        if (self.options["coeff_architecture"] == "deep_mlp"):
-            loss_encoder_coeffs = self._sparsity_loss(encoder_coeffs, self.encoder_alpha)
-            logging.info('Encoder coeffs loss: %s', loss_encoder_coeffs.item())
-            
-            loss_decoder_coeffs = self._sparsity_loss(decoder_coeffs, self.decoder_alpha)
-            logging.info('Decoder coeffs loss: %s', loss_decoder_coeffs.item())
-            
-            loss_prev_coeffs = self._sparsity_loss(prev_coeffs, self.decoder_alpha)
-            logging.info('Prev coeffs loss: %s', loss_prev_coeffs.item())
-            
-            loss_encoder_smooth = self._smoothness_loss(encoder_coeffs)
-            logging.info('Encoder smooth loss: %s', loss_encoder_smooth.item())
-            
-            loss_decoder_smooth = self._smoothness_loss(decoder_coeffs)
-            logging.info('Decoder smooth loss: %s', loss_decoder_smooth.item())
-            
-            loss_prev_smooth = self._smoothness_loss(prev_coeffs)
-            logging.info('Prev smooth loss: %s', loss_prev_smooth.item())
+        loss_encoder_coeffs = self._sparsity_loss(encoder_coeffs, self.encoder_alpha)
+        logging.info('Encoder coeffs loss: %s', loss_encoder_coeffs.item())
+        
+        loss_decoder_coeffs = self._sparsity_loss(decoder_coeffs, self.decoder_alpha)
+        logging.info('Decoder coeffs loss: %s', loss_decoder_coeffs.item())
+        
+        loss_prev_coeffs = self._sparsity_loss(prev_coeffs, self.decoder_alpha)
+        logging.info('Prev coeffs loss: %s', loss_prev_coeffs.item())
+        
+        loss_encoder_smooth = self._smoothness_loss(encoder_coeffs)
+        logging.info('Encoder smooth loss: %s', loss_encoder_smooth.item())
+        
+        loss_decoder_smooth = self._smoothness_loss(decoder_coeffs)
+        logging.info('Decoder smooth loss: %s', loss_decoder_smooth.item())
+        
+        loss_prev_smooth = self._smoothness_loss(prev_coeffs)
+        logging.info('Prev smooth loss: %s', loss_prev_smooth.item())
 
         loss_kl = kl_div
         logging.info('KL loss: %s', loss_kl.item())
@@ -202,33 +201,24 @@ class AERCA(nn.Module):
         
         reg_lambda = 0.01 * (self.log_lambda_indep ** 2 + self.log_lambda_corr ** 2)
 
-        if (self.options["coeff_architecture"] == "deep_mlp"):
-            loss = (loss_recon +
-                    self.encoder_lambda * loss_encoder_coeffs +
-                    self.decoder_lambda * (loss_decoder_coeffs + loss_prev_coeffs) +
-                    self.encoder_gamma * loss_encoder_smooth +
-                    self.decoder_gamma * (loss_decoder_smooth + loss_prev_smooth) +
-                    self.beta * loss_kl +
-                    reg_lambda)
-            losses_dict = {
-                "loss_recon": loss_recon.item(),
-                "loss_encoder_coeffs": loss_encoder_coeffs.item(),
-                "loss_decoder_coeffs": loss_decoder_coeffs.item(),
-                "loss_prev_coeffs": loss_prev_coeffs.item(),
-                "loss_encoder_smooth": loss_encoder_smooth.item(),
-                "loss_decoder_smooth": loss_decoder_smooth.item(),
-                "loss_prev_smooth": loss_prev_smooth.item(),
-                "loss_kl": loss_kl.item(),
-                "reg_lambda": reg_lambda.item()}
-        else:
-            loss = (loss_recon +
-                    self.beta * loss_kl +
-                    reg_lambda)
-            losses_dict = {
-                "loss_recon": loss_recon.item(),
-                "loss_kl": loss_kl.item(),
-                "reg_lambda": reg_lambda.item()
-            }
+        loss = (loss_recon +
+                self.encoder_lambda * loss_encoder_coeffs +
+                self.decoder_lambda * (loss_decoder_coeffs + loss_prev_coeffs) +
+                self.encoder_gamma * loss_encoder_smooth +
+                self.decoder_gamma * (loss_decoder_smooth + loss_prev_smooth) +
+                self.beta * loss_kl +
+                reg_lambda)
+        losses_dict = {
+            "loss_recon": loss_recon.item(),
+            "loss_encoder_coeffs": loss_encoder_coeffs.item(),
+            "loss_decoder_coeffs": loss_decoder_coeffs.item(),
+            "loss_prev_coeffs": loss_prev_coeffs.item(),
+            "loss_encoder_smooth": loss_encoder_smooth.item(),
+            "loss_decoder_smooth": loss_decoder_smooth.item(),
+            "loss_prev_smooth": loss_prev_smooth.item(),
+            "loss_kl": loss_kl.item(),
+            "reg_lambda": reg_lambda.item()}
+        
         return loss, losses_dict
 
     def _training(self, xs):

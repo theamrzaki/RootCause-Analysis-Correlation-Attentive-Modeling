@@ -1,7 +1,7 @@
 import torch.nn as nn
 import torch
 
-from layers.SimpleGNN import AttentionCoeffGNN, AttentionCoeffGNN_multihead, AttentionCoeffGNN_multihead_fixed, TemporalGNN, RecurrentAttentionCoeffGNN, RecurrentAttentionGNN_Attn
+from layers.SimpleGNN import AttentionCoeffGNN, AttentionCoeffGNN_multihead, AttentionCoeffGNN_multihead_fixed, TemporalGNN, RecurrentAttentionCoeffGNN, RecurrentAttentionGNN_Attn,RecurrentAttentionCoeffGNN_chunks
 from layers.trend_seasonal import TS_Model
 
 class SENNGC(nn.Module):
@@ -172,7 +172,7 @@ class SENNGC(nn.Module):
             #### 🚨 only ONE temporal model, not one per lag
             ###self.temporal = TemporalGNN(num_vars=num_vars, rank=self.rank, hidden_dim=hidden_layer_size)
             
-            self.coeff_net = RecurrentAttentionCoeffGNN(
+            self.coeff_net = RecurrentAttentionCoeffGNN_chunks(
                 num_vars=num_vars,
                 rank=self.rank,
                 order=order,
@@ -183,13 +183,15 @@ class SENNGC(nn.Module):
 
 
         elif args["coeff_architecture"] == "TemporalGNN_Attention":
-            self.rank = 20
+            self.rank = 1
             
             self.coeff_net = RecurrentAttentionGNN_Attn(
                 num_vars=num_vars,
                 rank=self.rank,
                 order=order,
-                device=device
+                device=device,
+                attention_heads = args.get("num_attention_heads", 4),  # default to 4 heads if not specified
+                attention_dim = args.get("attention_dim", 64)  # default to 64 if not specified
             )
             total_params = sum(p.numel() for p in self.coeff_net.parameters() if p.requires_grad)
             print(f"Total parameters for temporal : {total_params}")
