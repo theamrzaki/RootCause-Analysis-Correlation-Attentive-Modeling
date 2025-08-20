@@ -29,16 +29,30 @@ class AERCA(nn.Module):
         self.encoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers,args=options, device=device)
         #self.decoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, args=options, device=device)
         #self.decoder_prev = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, args=options, device=device)
-        # --- Attention-based decoding layers ---
-        self.decoding_input_proj = nn.Linear(num_vars, hidden_layer_size).to(self.device)  # project input windows
-        self.decoding_attn = nn.MultiheadAttention(embed_dim=hidden_layer_size, 
-                                                num_heads=2, 
-                                                batch_first=True).to(self.device)       # temporal attention
-        self.decoding_output_proj = nn.Linear(hidden_layer_size, num_vars).to(self.device)  # next-step predictions
-        self.decoding_coeff_proj = nn.Linear(hidden_layer_size, num_vars * num_vars).to(self.device)  # coefficient matrix
-        self.decoding_norm = nn.LayerNorm(hidden_layer_size).to(self.device)  # optional normalization over hidden_dim
-        self.temporal_attn_decoder = nn.MultiheadAttention(embed_dim=hidden_layer_size, num_heads=1, batch_first=True).to(self.device) 
-        self.coeff_proj_decoder = nn.Linear(hidden_layer_size, num_vars*num_vars).to(self.device) 
+        # --- Efficient attention-based decoder layers ---
+        hidden_dim_small = min(hidden_layer_size, 64)  # smaller hidden dim to reduce parameters
+        rank = 1                 # low-rank for coefficient matrices
+
+        self.decoding_input_proj = nn.Linear(num_vars, hidden_dim_small).to(device)
+
+        self.decoding_attn = nn.MultiheadAttention(
+            embed_dim=hidden_dim_small, num_heads=2, batch_first=True
+        ).to(device)
+
+        self.decoding_norm = nn.LayerNorm(hidden_dim_small).to(device)
+
+        self.temporal_attn_decoder = nn.MultiheadAttention(
+            embed_dim=hidden_dim_small, num_heads=1, batch_first=True
+        ).to(device)
+
+        self.decoding_output_proj = nn.Linear(hidden_dim_small, num_vars).to(device)
+
+        self.decoding_coeff_proj = nn.Linear(hidden_dim_small, 2 * num_vars * rank).to(device)  
+        # produces U and V for low-rank coeffs
+
+        self.coeff_proj_decoder = nn.Linear(hidden_dim_small, 2 * num_vars * rank).to(device)   
+        # for prev_coeffs
+
         self._log_and_print('Number of parameters in encoder: {}', self._count_parameters(self.encoder))
         self._log_and_print('Number of parameters in decoding_input_proj: {}', self._count_parameters(self.decoding_input_proj))
         self._log_and_print('Number of parameters in decoding_attn: {}', self._count_parameters(self.decoding_attn))
@@ -61,7 +75,9 @@ class AERCA(nn.Module):
                             self._count_parameters(self.decoding_norm)+
                             self._count_parameters(self.temporal_attn_decoder) +
                             self._count_parameters(self.coeff_proj_decoder))
-        
+        print('----------------------------------')
+        print(f'Total number of parameters in AERCA: {self.total_params}')
+        print('----------------------------------')
         self.options = options if options is not None else {}
         
         self.num_vars = num_vars
@@ -119,7 +135,7 @@ class AERCA(nn.Module):
     def _count_parameters(self, model):
         num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
         # view it with commas
-        return f"{num_params:,}"
+        return num_params#f"{num_params:,}"
     
     def _log_and_print(self, msg, *args):
         """Helper method to log and print testing results."""
@@ -150,51 +166,51 @@ class AERCA(nn.Module):
         Attention-based decoding replacing dual decoders.
         us: latent states (B, T, num_vars)
         winds: original windows (B, T, num_vars)
-        Returns:
-            nexts_hat: (B, p)
-            coeffs: (B, 1, p, p)
-            prev_coeffs: (B, 1, p, p)
         """
-        B, p = us.shape
+        batch_size, p = us.shape
+        rank = self.decoding_coeff_proj.out_features // (2 * p)  # dynamically recover rank
 
-        # 1. Sliding windows from latent representation
-        u_windows = sliding_window_view_torch(us, self.window_size + 1)  # (B, window+1, p)
-        u_winds = u_windows[:, :-1, :]   # (B, window, p)
-        u_next = u_windows[:, -1, :]     # (B, p)
+        # --- Sliding windows ---
+        u_windows = sliding_window_view_torch(us, self.window_size + 1)
+        u_winds = u_windows[:, :-1, :]  # (B, window, p)
+        u_next = u_windows[:, -1, :]    # (B, p)
 
-        # 2. Project latent windows into hidden dim
-        u_proj = self.decoding_input_proj(u_winds)  # (B, window, hidden_dim)
-
-        # 3. Self-attention across temporal window
-        attn_out, _ = self.decoding_attn(u_proj, u_proj, u_proj)  # (B, window, hidden_dim)
+        # --- Project and attend ---
+        u_proj = self.decoding_input_proj(u_winds)                   # (B, window, hidden_dim)
+        attn_out, _ = self.decoding_attn(u_proj, u_proj, u_proj)    # (B, window, hidden_dim)
         attn_norm = self.decoding_norm(attn_out)
 
-        # 4. Temporal attention pooling (query = last state)
-        query = attn_norm[:, -1:, :]  # (B, 1, hidden_dim)
+        query = attn_norm[:, -1:, :]                                   # (B, 1, hidden_dim)
         temp_out, _ = self.temporal_attn_decoder(query, attn_norm, attn_norm)  # (B, 1, hidden_dim)
 
-        # 5. Prediction and coefficient projection
-        preds = self.decoding_output_proj(temp_out.squeeze(1))          # (B, p)
-        coeffs = self.decoding_coeff_proj(temp_out.squeeze(1))          # (B, p*p)
-        coeffs = coeffs.view(-1, 1, p, p)                            # (B, 1, p, p)
+        # --- Predictions ---
+        preds = self.decoding_output_proj(temp_out).squeeze(1)        # (B, p)
 
-        # 6. Auxiliary decoder path using original winds
-        winds_proj = self.decoding_input_proj(winds)                    # (B, window, hidden_dim)
+        # --- Low-rank coefficient reconstruction ---
+        coeff_flat = self.decoding_coeff_proj(temp_out)               # (B, 1, 2 * p * rank)
+        U, V = torch.split(coeff_flat, p * rank, dim=-1)
+        U = U.view(-1, 1, p, rank)
+        V = V.view(-1, 1, p, rank)
+        coeffs = torch.matmul(U, V.transpose(-2, -1))
+
+        # --- Previous coefficients from winds ---
+        winds_proj = self.decoding_input_proj(winds)
         winds_attn, _ = self.decoding_attn(winds_proj, winds_proj, winds_proj)
         winds_norm = self.decoding_norm(winds_attn)
         winds_temp, _ = self.temporal_attn_decoder(winds_norm[:, -1:, :], winds_norm, winds_norm)
 
-        prev_preds = self.decoding_output_proj(winds_temp.squeeze(1))   # (B, p)
-        prev_coeffs = self.coeff_proj_decoder(winds_temp.squeeze(1))    # (B, p*p)
-        prev_coeffs = prev_coeffs.view(-1, 1, p, p)                      # (B, 1, p, p)
+        prev_flat = self.coeff_proj_decoder(winds_temp)              # (B, 1, 2 * p * rank)
+        U_prev, V_prev = torch.split(prev_flat, p * rank, dim=-1)
+        U_prev = U_prev.view(-1, 1, p, rank)
+        V_prev = V_prev.view(-1, 1, p, rank)
+        prev_coeffs = torch.matmul(U_prev, V_prev.transpose(-2, -1)) # (B, 1, p, p)
+        prev_preds = self.decoding_output_proj(winds_temp).squeeze(1) # (B, p)
 
-        # 7. Final combination (same as old version)
-        if add_u:
-            nexts_hat = preds + u_next + prev_preds
-        else:
-            nexts_hat = preds + prev_preds
+        # --- Final next-step prediction ---
+        nexts_hat = preds + u_next + prev_preds if add_u else preds + prev_preds
 
         return nexts_hat, coeffs, prev_coeffs
+
     
     def decoding____(self, us, winds, add_u=True):
         u_windows = sliding_window_view_torch(us, self.window_size + 1)
