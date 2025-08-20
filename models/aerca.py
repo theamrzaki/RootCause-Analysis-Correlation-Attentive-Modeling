@@ -28,10 +28,12 @@ class AERCA(nn.Module):
         self.encoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers,args=options, device=device)
         self.decoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, args=options, device=device)
         self.decoder_prev = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, args=options, device=device)
-        self.latent_gru = nn.LSTM(input_size=num_vars, hidden_size=num_vars, num_layers=2, batch_first=True)
         self._log_and_print('Number of parameters in encoder: {}', self._count_parameters(self.encoder))
         self._log_and_print('Number of parameters in decoder: {}', self._count_parameters(self.decoder))
         self._log_and_print('Number of parameters in decoder_prev: {}', self._count_parameters(self.decoder_prev))
+        self.total_params = (self._count_parameters(self.encoder) +
+                             self._count_parameters(self.decoder) +
+                             self._count_parameters(self.decoder_prev) )
         self.options = options if options is not None else {}
         self.device = device
         self.num_vars = num_vars
@@ -62,7 +64,6 @@ class AERCA(nn.Module):
         self.encoder.to(self.device)
         self.decoder.to(self.device)
         self.decoder_prev.to(self.device)
-        self.latent_gru.to(self.device)
         self.model_name = 'AERCA_' + data_name + '_ws_' + str(window_size) + '_stride_' + str(stride) + \
                           '_encoder_alpha_' + str(encoder_alpha) + '_decoder_alpha_' + str(decoder_alpha) + \
                           '_encoder_gamma_' + str(encoder_gamma) + '_decoder_gamma_' + str(decoder_gamma) + \
@@ -568,7 +569,7 @@ class AERCA(nn.Module):
         self._log_and_print('Root cause analysis AC*@100: {:.5f}', ac_star_at[2])
         self._log_and_print('Root cause analysis AC*@500: {:.5f}', ac_star_at[3])
         self._log_and_print('Root cause analysis Avg*@500: {:.5f}', np.mean(k_all))
-        write_results(self.options,self.local_model_name,ac_at,k_at_step_all,'./result_2.csv')
+        write_results(self.options,self.local_model_name,ac_at,k_at_step_all,self.total_params,'./result_2.csv')
 
     def _testing_causal_discover(self, xs, causal_struct_value):
         self.load_state_dict(torch.load(os.path.join(self.save_dir, f'{self.model_name}.pt'),

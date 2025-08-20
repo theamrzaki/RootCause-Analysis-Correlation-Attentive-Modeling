@@ -243,7 +243,7 @@ class AttentionCoeffGNN_multihead_fixed(nn.Module):
                 nn.init.xavier_uniform_(m.weight)
                 nn.init.zeros_(m.bias)
 
-    def forward(self, x):
+    def forward(self, x, attn_dropout=0.1):
         """
         x: (B, p)
         returns: coeffs_k: (B, p, p)
@@ -257,32 +257,36 @@ class AttentionCoeffGNN_multihead_fixed(nn.Module):
         V = self.v(x_unsq)
 
         # Split into heads
-        Q = Q.view(B, p, self.heads, self.head_dim).transpose(1, 2)
+        Q = Q.view(B, p, self.heads, self.head_dim).transpose(1, 2)  # (B, heads, p, head_dim)
         K = K.view(B, p, self.heads, self.head_dim).transpose(1, 2)
         V = V.view(B, p, self.heads, self.head_dim).transpose(1, 2)
+
+        # Head-wise LayerNorm
+        Q = F.layer_norm(Q, (self.head_dim,))
+        K = F.layer_norm(K, (self.head_dim,))
+        V = F.layer_norm(V, (self.head_dim,))
 
         # Attention
         attn_logits = torch.matmul(Q, K.transpose(-2, -1)) / (self.num_vars ** 0.5)
         attn_weights = F.softmax(attn_logits, dim=-1)
+
+        # Attention dropout
+        attn_weights = F.dropout(attn_weights, p=attn_dropout, training=self.training)
+
         h = torch.matmul(attn_weights, V)  # (B, heads, p, head_dim)
 
         # Merge heads
-        h = h.transpose(1, 2).contiguous().view(B, p, self.heads * self.head_dim)
+        h = h.transpose(1, 2).contiguous().view(B, p, self.heads * self.head_dim)  # (B, p, hidden_dim)
 
-        # Residual connection (project input)
-        # Project input to hidden_dim
-        res = self.residual(x)  # (B, hidden_dim)
+        # Residual connection with scaling
+        res = self.residual(x).unsqueeze(1)  # (B, 1, hidden_dim)
+        alpha = 0.9  # scale residual to stabilize
+        h = h + alpha * res  # broadcast over p dimension
 
-        # Unsqueeze to match h's variable dimension
-        res = res.unsqueeze(1)  # (B, 1, hidden_dim)
-
-        # Add residual
-        h = h + res  # broadcast over p dimension (variables) # preserves weaker correlations
-
-        # Norm
+        # LayerNorm over hidden_dim after residual
         h = self.norm1(h)
 
-        # Flatten across variables before MLP (preserves all signals)
+        # Flatten across variables before MLP
         h_flat = h.view(B, -1)
         h_mlp = self.mlp(h_flat)
 
@@ -549,7 +553,7 @@ class RecurrentAttentionGNN_Attn_nocoeff(nn.Module):
 
 
 class RecurrentAttentionGNN_Attn(nn.Module):
-    def __init__(self, num_vars, rank, order, hidden_dim=64, num_heads=4, device="cpu", attention_heads=4, attention_dim=64):
+    def __init__(self, num_vars, rank, order, hidden_dim=128, num_heads=2, device="cpu", attention_heads=4, attention_dim=64):
         super().__init__()
         self.num_vars = num_vars
         self.rank = rank
@@ -571,7 +575,7 @@ class RecurrentAttentionGNN_Attn(nn.Module):
         # Map attention hidden state back to coefficients
         self.coeff_proj = nn.Linear(hidden_dim, num_vars * num_vars)
 
-    def forward(self, inputs: torch.Tensor, batch_chunk_size: int = 1000):
+    def forward(self, inputs: torch.Tensor, batch_chunk_size: int = 10000):
         B, O, P = inputs.shape
         device = inputs.device
 
