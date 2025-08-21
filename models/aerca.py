@@ -14,6 +14,7 @@ from sklearn.metrics import f1_score
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 from collections import defaultdict
+import torch.nn.functional as F
 class AERCA(nn.Module):
     def __init__(self, num_vars: int, hidden_layer_size: int, num_hidden_layers: int, device: torch.device,
                  window_size: int, stride: int = 1, encoder_alpha: float = 0.5, decoder_alpha: float = 0.5,
@@ -26,59 +27,67 @@ class AERCA(nn.Module):
                  risk: float = 1e-2, initial_level: float = 0.98, num_candidates: int = 100, options=None):
         super(AERCA, self).__init__()
         self.device = device
+        self.options = options if options is not None else {}
         self.encoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers,args=options, device=device)
-        #self.decoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, args=options, device=device)
-        #self.decoder_prev = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, args=options, device=device)
-        # --- Efficient attention-based decoder layers ---
-        hidden_dim_small = min(hidden_layer_size, 64)  # smaller hidden dim to reduce parameters
-        rank = 1                 # low-rank for coefficient matrices
+        
 
-        self.decoding_input_proj = nn.Linear(num_vars, hidden_dim_small).to(device)
+        if(self.options["coeff_architecture"] == "deep_mlp"):
+            self.decoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, args=options, device=device).to(device)
+            self.decoder_prev = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, args=options, device=device).to(device)
+            self._log_and_print('Number of parameters in encoder: {}', self._count_parameters(self.encoder))
+            self._log_and_print('Number of parameters in decoder: {}', self._count_parameters(self.decoder))
+            self._log_and_print('Number of parameters in decoder_prev: {}', self._count_parameters(self.decoder_prev))
+            self.total_params = (self._count_parameters(self.encoder) +
+                                 self._count_parameters(self.decoder) +
+                                 self._count_parameters(self.decoder_prev)  )
+            
+        elif(self.options["coeff_architecture"] == "TemporalGNN_Attention"):
+            # --- Efficient attention-based decoder layers ---
+            hidden_dim_small = min(hidden_layer_size, 64)  # smaller hidden dim to reduce parameters
+            rank = 1                 # low-rank for coefficient matrices
 
-        self.decoding_attn = nn.MultiheadAttention(
-            embed_dim=hidden_dim_small, num_heads=2, batch_first=True
-        ).to(device)
+            self.decoding_input_proj = nn.Linear(num_vars, hidden_dim_small).to(device)
 
-        self.decoding_norm = nn.LayerNorm(hidden_dim_small).to(device)
+            self.decoding_attn = nn.MultiheadAttention(
+                embed_dim=hidden_dim_small, num_heads=2, batch_first=True
+            ).to(device)
 
-        self.temporal_attn_decoder = nn.MultiheadAttention(
-            embed_dim=hidden_dim_small, num_heads=1, batch_first=True
-        ).to(device)
+            self.decoding_norm = nn.LayerNorm(hidden_dim_small).to(device)
 
-        self.decoding_output_proj = nn.Linear(hidden_dim_small, num_vars).to(device)
+            self.temporal_attn_decoder = nn.MultiheadAttention(
+                embed_dim=hidden_dim_small, num_heads=1, batch_first=True
+            ).to(device)
 
-        self.decoding_coeff_proj = nn.Linear(hidden_dim_small, 2 * num_vars * rank).to(device)  
-        # produces U and V for low-rank coeffs
+            self.decoding_output_proj = nn.Linear(hidden_dim_small, num_vars).to(device)
 
-        self.coeff_proj_decoder = nn.Linear(hidden_dim_small, 2 * num_vars * rank).to(device)   
-        # for prev_coeffs
+            self.decoding_coeff_proj = nn.Linear(hidden_dim_small, 2 * num_vars * rank).to(device)  
+            # produces U and V for low-rank coeffs
 
-        self._log_and_print('Number of parameters in encoder: {}', self._count_parameters(self.encoder))
-        self._log_and_print('Number of parameters in decoding_input_proj: {}', self._count_parameters(self.decoding_input_proj))
-        self._log_and_print('Number of parameters in decoding_attn: {}', self._count_parameters(self.decoding_attn))
-        self._log_and_print('Number of parameters in decoding_output_proj: {}', self._count_parameters(self.decoding_output_proj))
-        self._log_and_print('Number of parameters in decoding_coeff_proj: {}', self._count_parameters(self.decoding_coeff_proj))
-        self._log_and_print('Number of parameters in decoding_norm: {}', self._count_parameters(self.decoding_norm))
-        self._log_and_print('Number of parameters in temporal_attn_decoder: {}', self._count_parameters(self.temporal_attn_decoder))
-        self._log_and_print('Number of parameters in coeff_proj_decoder: {}', self._count_parameters(self.coeff_proj_decoder))
+            self.coeff_proj_decoder = nn.Linear(hidden_dim_small, 2 * num_vars * rank).to(device)   
+            # for prev_coeffs
 
-        #self._log_and_print('Number of parameters in decoder: {}', self._count_parameters(self.decoder))
-        #self._log_and_print('Number of parameters in decoder_prev: {}', self._count_parameters(self.decoder_prev))
-        #self.total_params = (self._count_parameters(self.encoder) +
-        #                     self._count_parameters(self.decoder) +
-        #                     self._count_parameters(self.decoder_prev)  )
-        self.total_params = (self._count_parameters(self.encoder) +
-                            self._count_parameters(self.decoding_input_proj) +
-                            self._count_parameters(self.decoding_attn) +
-                            self._count_parameters(self.decoding_output_proj) +
-                            self._count_parameters(self.decoding_coeff_proj) +
-                            self._count_parameters(self.decoding_norm)+
-                            self._count_parameters(self.temporal_attn_decoder) +
-                            self._count_parameters(self.coeff_proj_decoder))
+            self._log_and_print('Number of parameters in encoder: {}', self._count_parameters(self.encoder))
+            self._log_and_print('Number of parameters in decoding_input_proj: {}', self._count_parameters(self.decoding_input_proj))
+            self._log_and_print('Number of parameters in decoding_attn: {}', self._count_parameters(self.decoding_attn))
+            self._log_and_print('Number of parameters in decoding_output_proj: {}', self._count_parameters(self.decoding_output_proj))
+            self._log_and_print('Number of parameters in decoding_coeff_proj: {}', self._count_parameters(self.decoding_coeff_proj))
+            self._log_and_print('Number of parameters in decoding_norm: {}', self._count_parameters(self.decoding_norm))
+            self._log_and_print('Number of parameters in temporal_attn_decoder: {}', self._count_parameters(self.temporal_attn_decoder))
+            self._log_and_print('Number of parameters in coeff_proj_decoder: {}', self._count_parameters(self.coeff_proj_decoder))
+
+
+            self.total_params = (self._count_parameters(self.encoder) +
+                                self._count_parameters(self.decoding_input_proj) +
+                                self._count_parameters(self.decoding_attn) +
+                                self._count_parameters(self.decoding_output_proj) +
+                                self._count_parameters(self.decoding_coeff_proj) +
+                                self._count_parameters(self.decoding_norm)+
+                                self._count_parameters(self.temporal_attn_decoder) +
+                                self._count_parameters(self.coeff_proj_decoder))
         print('----------------------------------')
         print(f'Total number of parameters in AERCA: {self.total_params}')
         print('----------------------------------')
-        self.options = options if options is not None else {}
+        
         
         self.num_vars = num_vars
         self.hidden_layer_size = hidden_layer_size
@@ -103,7 +112,8 @@ class AERCA(nn.Module):
         self.mse_loss_wo_reduction = nn.MSELoss(reduction='none')
         self.log_lambda_indep = nn.Parameter(torch.tensor(0.0))  # log of lambda_indep
         self.log_lambda_corr = nn.Parameter(torch.tensor(0.0))   # log of lambda_corr
-        self.log_lambda_mmd = nn.Parameter(torch.tensor(0.0))     # log of lambda_mmd        
+        self.log_lambda_mmd = nn.Parameter(torch.tensor(0.0))     # log of lambda_mmd    
+        self.alpha_param = nn.Parameter(torch.tensor(0.0))    
         self.optimizer = torch.optim.Adam(self.parameters(), lr=lr)
         self.encoder.to(self.device)
         #self.decoder.to(self.device)
@@ -161,7 +171,72 @@ class AERCA(nn.Module):
         us = preds - nexts                    # shape: (B, hidden_size)
         return us, coeffs, nexts[self.window_size:], winds[:-self.window_size]
 
-    def decoding(self, us, winds, add_u=True):
+    def decoding_1decoder_norm2(self, us, winds, add_u=True, attn_dropout=0.1, residual_alpha=0.9):
+        """
+        Attention-based decoding replacing dual decoders.
+        us: latent states (B, T, num_vars)
+        winds: original windows (B, T, num_vars)
+        """
+        batch_size, p = us.shape
+        rank = self.decoding_coeff_proj.out_features // (2 * p)  # dynamically recover rank
+
+        # --- Sliding windows ---
+        u_windows = sliding_window_view_torch(us, self.window_size + 1)
+        u_winds = u_windows[:, :-1, :]  # (B, window, p)
+        u_next = u_windows[:, -1, :]    # (B, p)
+
+        # --- Project and attend ---
+        u_proj = self.decoding_input_proj(u_winds)   # (B, window, hidden_dim)
+        attn_out, _ = self.decoding_attn(u_proj, u_proj, u_proj)  # (B, window, hidden_dim)
+        attn_out = F.dropout(attn_out, p=attn_dropout, training=self.training)
+
+        # Residual + norm
+        u_proj_resid = attn_out + residual_alpha * u_proj
+        attn_norm = self.decoding_norm(u_proj_resid)
+
+        query = attn_norm[:, -1:, :]   # (B, 1, hidden_dim)
+        temp_out, _ = self.temporal_attn_decoder(query, attn_norm, attn_norm)  # (B, 1, hidden_dim)
+
+        # Residual + norm again
+        temp_out = temp_out + residual_alpha * query
+        temp_out = self.decoding_norm(temp_out)
+
+        # --- Predictions ---
+        preds = self.decoding_output_proj(temp_out).squeeze(1)  # (B, p)
+
+        # --- Low-rank coefficient reconstruction ---
+        coeff_flat = self.decoding_coeff_proj(temp_out)  # (B, 1, 2 * p * rank)
+        U, V = torch.split(coeff_flat, p * rank, dim=-1)
+        U = U.view(-1, 1, p, rank)
+        V = V.view(-1, 1, p, rank)
+        coeffs = torch.matmul(U, V.transpose(-2, -1))   # (B, 1, p, p)
+
+        # --- Previous coefficients from winds ---
+        winds_proj = self.decoding_input_proj(winds)
+        winds_attn, _ = self.decoding_attn(winds_proj, winds_proj, winds_proj)
+        winds_attn = F.dropout(winds_attn, p=attn_dropout, training=self.training)
+
+        winds_resid = winds_attn + residual_alpha * winds_proj
+        winds_norm = self.decoding_norm(winds_resid)
+
+        winds_temp, _ = self.temporal_attn_decoder(winds_norm[:, -1:, :], winds_norm, winds_norm)
+        winds_temp = winds_temp + residual_alpha * winds_norm[:, -1:, :]
+        winds_temp = self.decoding_norm(winds_temp)
+
+        prev_flat = self.coeff_proj_decoder(winds_temp)  # (B, 1, 2 * p * rank)
+        U_prev, V_prev = torch.split(prev_flat, p * rank, dim=-1)
+        U_prev = U_prev.view(-1, 1, p, rank)
+        V_prev = V_prev.view(-1, 1, p, rank)
+        prev_coeffs = torch.matmul(U_prev, V_prev.transpose(-2, -1))  # (B, 1, p, p)
+
+        prev_preds = self.decoding_output_proj(winds_temp).squeeze(1)  # (B, p)
+
+        # --- Final next-step prediction ---
+        nexts_hat = preds + u_next + prev_preds if add_u else preds + prev_preds
+
+        return nexts_hat, coeffs, prev_coeffs
+
+    def decoding_1decoder(self, us, winds, add_u=True, attn_dropout=0.1, residual_alpha=0.9):
         """
         Attention-based decoding replacing dual decoders.
         us: latent states (B, T, num_vars)
@@ -210,9 +285,8 @@ class AERCA(nn.Module):
         nexts_hat = preds + u_next + prev_preds if add_u else preds + prev_preds
 
         return nexts_hat, coeffs, prev_coeffs
-
     
-    def decoding____(self, us, winds, add_u=True):
+    def decoding_2decoders(self, us, winds, add_u=True):
         u_windows = sliding_window_view_torch(us, self.window_size + 1)
         u_winds = u_windows[:, :-1, :]
         u_next = u_windows[:, -1, :]
@@ -226,6 +300,72 @@ class AERCA(nn.Module):
             nexts_hat = preds + prev_preds
         return nexts_hat, coeffs, prev_coeffs
 
+
+    def decoding_norm_residual(self, us, winds, add_u=True):
+        """
+        Attention-based decoding replacing dual decoders.
+        us: latent states (B, T, num_vars)
+        winds: original windows (B, T, num_vars)
+        """
+        _, p = us.shape
+        attn_dropout = 0.1  # dropout for attention layers
+        rank = self.decoding_coeff_proj.out_features // (2 * p)  # dynamically recover rank
+
+        # --- Sliding windows ---
+        u_windows = sliding_window_view_torch(us, self.window_size + 1)
+        u_winds = u_windows[:, :-1, :]  # (B, window, p)
+        u_next = u_windows[:, -1, :]    # (B, p)
+
+        # --- Project and attend ---
+        u_proj = self.decoding_input_proj(u_winds)                   # (B, window, hidden_dim)
+        attn_out, _ = self.decoding_attn(u_proj, u_proj, u_proj)    
+        attn_out = F.dropout(attn_out, p=attn_dropout, training=self.training)
+        attn_norm = self.decoding_norm(attn_out)
+
+        # --- Temporal attention with residual scaling ---
+        query = attn_norm[:, -1:, :]
+        temp_out, _ = self.temporal_attn_decoder(query, attn_norm, attn_norm)
+        alpha = 0.9
+        temp_out = temp_out + alpha * query  # residual connection
+        temp_out = F.layer_norm(temp_out, temp_out.shape[-1:])
+
+        # --- Predictions ---
+        preds = self.decoding_output_proj(temp_out).squeeze(1)
+
+        # --- Low-rank coefficient reconstruction ---
+        coeff_flat = self.decoding_coeff_proj(temp_out)
+        U, V = torch.split(coeff_flat, p * rank, dim=-1)
+        U = U.view(-1, 1, p, rank)
+        V = V.view(-1, 1, p, rank)
+        coeffs = torch.matmul(U, V.transpose(-2, -1))
+
+        # --- Previous coefficients from winds ---
+        winds_proj = self.decoding_input_proj(winds)
+        winds_attn, _ = self.decoding_attn(winds_proj, winds_proj, winds_proj)
+        winds_attn = F.dropout(winds_attn, p=attn_dropout, training=self.training)
+        winds_norm = self.decoding_norm(winds_attn)
+
+        winds_temp, _ = self.temporal_attn_decoder(winds_norm[:, -1:, :], winds_norm, winds_norm)
+        winds_temp = winds_temp + alpha * winds_norm[:, -1:, :]
+        winds_temp = F.layer_norm(winds_temp, winds_temp.shape[-1:])
+
+        prev_flat = self.coeff_proj_decoder(winds_temp)
+        U_prev, V_prev = torch.split(prev_flat, p * rank, dim=-1)
+        U_prev = U_prev.view(-1, 1, p, rank)
+        V_prev = V_prev.view(-1, 1, p, rank)
+        prev_coeffs = torch.matmul(U_prev, V_prev.transpose(-2, -1))
+        prev_preds = self.decoding_output_proj(winds_temp).squeeze(1)
+
+        # --- Final next-step prediction ---
+        nexts_hat = preds + u_next + prev_preds if add_u else preds + prev_preds
+
+        return nexts_hat, coeffs, prev_coeffs
+
+    def decoding(self, us, winds, add_u=True):
+        if self.options["coeff_architecture"] == "deep_mlp":
+            return self.decoding_2decoders(us, winds, add_u=add_u)
+        elif self.options["coeff_architecture"] == "TemporalGNN_Attention":
+            return self.decoding_1decoder(us, winds, add_u=add_u)
 
     def decoding_batch(self, us, winds, add_u=True):
         # us: (B, P)
@@ -270,7 +410,7 @@ class AERCA(nn.Module):
         nexts_hat, decoder_coeffs, prev_coeffs = self.decoding(us, winds, add_u=add_u)
         return nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us
 
-    def _training_step(self, x, add_u=True):
+    def _training_step_old(self, x, add_u=True):
         nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us = self.forward(x, add_u=add_u)
         loss_recon = self.mse_loss(nexts_hat, nexts)
         logging.info('Reconstruction loss: %s', loss_recon.item())
@@ -319,6 +459,74 @@ class AERCA(nn.Module):
         
         return loss, losses_dict
 
+    def _training_step(self, x, add_u=True):
+        # Forward pass
+        nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us = self.forward(x, add_u=add_u)
+
+        # === Full reconstruction loss ===
+        loss_full_recon = self.mse_loss(nexts_hat, nexts)
+        logging.info('Reconstruction loss (full): %s', loss_full_recon.item())
+
+        # === Mean/Std reconstruction loss ===
+        mean_target = nexts.mean(dim=1, keepdim=True)
+        std_target = nexts.std(dim=1, keepdim=True)
+
+        mean_hat = nexts_hat.mean(dim=1, keepdim=True)
+        std_hat = nexts_hat.std(dim=1, keepdim=True)
+
+        loss_mean = self.mse_loss(mean_hat, mean_target)
+        loss_std = self.mse_loss(std_hat, std_target)
+        loss_stats_recon = loss_mean + loss_std
+        logging.info('Reconstruction loss (mean+std): %s', loss_stats_recon.item())
+
+        # === Combine both with a learnable parameter ===
+        # sigmoid ensures weight ∈ (0,1), so it's interpretable
+        alpha = torch.sigmoid(self.alpha_param)  
+        loss_recon = alpha * loss_full_recon + (1 - alpha) * loss_stats_recon
+        logging.info('Blended reconstruction loss: %s (alpha=%.4f)' % (loss_recon.item(), alpha.item()))
+
+        # === Sparsity losses ===
+        loss_encoder_coeffs = self._sparsity_loss(encoder_coeffs, self.encoder_alpha)
+        loss_decoder_coeffs = self._sparsity_loss(decoder_coeffs, self.decoder_alpha)
+        loss_prev_coeffs    = self._sparsity_loss(prev_coeffs, self.decoder_alpha)
+
+        # === Smoothness losses ===
+        loss_encoder_smooth = self._smoothness_loss(encoder_coeffs)
+        loss_decoder_smooth = self._smoothness_loss(decoder_coeffs)
+        loss_prev_smooth    = self._smoothness_loss(prev_coeffs)
+
+        # === KL divergence loss ===
+        loss_kl = kl_div
+
+        # === Regularization ===
+        reg_lambda = 0.01 * (self.log_lambda_indep ** 2 + self.log_lambda_corr ** 2)
+
+        # === Total loss ===
+        loss = (loss_recon +
+                self.encoder_lambda * loss_encoder_coeffs +
+                self.decoder_lambda * (loss_decoder_coeffs + loss_prev_coeffs) +
+                self.encoder_gamma * loss_encoder_smooth +
+                self.decoder_gamma * (loss_decoder_smooth + loss_prev_smooth) +
+                self.beta * loss_kl +
+                reg_lambda)
+
+        # === Logging all losses ===
+        losses_dict = {
+            "loss_full_recon": loss_full_recon.item(),
+            "loss_stats_recon": loss_stats_recon.item(),
+            "alpha": alpha.item(),
+            "loss_encoder_coeffs": loss_encoder_coeffs.item(),
+            "loss_decoder_coeffs": loss_decoder_coeffs.item(),
+            "loss_prev_coeffs": loss_prev_coeffs.item(),
+            "loss_encoder_smooth": loss_encoder_smooth.item(),
+            "loss_decoder_smooth": loss_decoder_smooth.item(),
+            "loss_prev_smooth": loss_prev_smooth.item(),
+            "loss_kl": loss_kl.item(),
+            "reg_lambda": reg_lambda.item()
+        }
+
+        return loss, losses_dict
+
     def _training(self, xs):
         if len(xs) == 1:
             xs_train = xs[:, :int(0.8 * len(xs[0]))]
@@ -362,6 +570,8 @@ class AERCA(nn.Module):
             if epoch_val_loss < best_val_loss:
                 count = 0
                 logging.info(f'Saving model at epoch {epoch + 1}')
+                if self.options["early_stopping"]: #AERCA paper style early stopping
+                    best_val_loss = epoch_val_loss
                 torch.save(self.state_dict(), os.path.join(self.save_dir, f'{self.model_name}.pt'))
             if count >= 20:
                 print('Early stopping')
@@ -457,7 +667,7 @@ class AERCA(nn.Module):
 
 
 
-    def _testing_step(self, x, label=None, add_u=True):
+    def _testing_step_old(self, x, label=None, add_u=True):
         nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us = self.forward(x, add_u=add_u)
 
         if label is not None:
@@ -501,6 +711,70 @@ class AERCA(nn.Module):
             logging.info('Total loss: %s', loss.item())
 
         return loss, nexts_hat, nexts, encoder_coeffs, decoder_coeffs, kl_div, preprocessed_label, us
+
+
+    def _testing_step(self, x, label=None, add_u=True):
+        # Forward pass
+        nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us = self.forward(x, add_u=add_u)
+
+        # Compute mean and std targets for anomaly detection
+        mean_target = nexts.mean(dim=1, keepdim=True)
+        std_target = nexts.std(dim=1, keepdim=True)
+
+        # Predict mean and std from the decoder output (assuming nexts_hat has same shape)
+        mean_hat = nexts_hat.mean(dim=1, keepdim=True)
+        std_hat = nexts_hat.std(dim=1, keepdim=True)
+
+        # Reconstruction loss on mean and std
+        loss_mean = self.mse_loss(mean_hat, mean_target)
+        loss_std = self.mse_loss(std_hat, std_target)
+        loss_recon = loss_mean + loss_std
+        logging.info('Reconstruction loss (mean+std): %s', loss_recon.item())
+
+        # KL divergence loss
+        loss_kl = kl_div
+        logging.info('KL loss: %s', loss_kl.item())
+
+        # Encoder/decoder coefficient losses and smoothness (for deep_mlp)
+        if self.options["coeff_architecture"] == "deep_mlp":
+            loss_encoder_coeffs = self._sparsity_loss(encoder_coeffs, self.encoder_alpha)
+            logging.info('Encoder coeffs loss: %s', loss_encoder_coeffs.item())
+
+            loss_decoder_coeffs = self._sparsity_loss(decoder_coeffs, self.decoder_alpha)
+            logging.info('Decoder coeffs loss: %s', loss_decoder_coeffs.item())
+
+            loss_prev_coeffs = self._sparsity_loss(prev_coeffs, self.decoder_alpha)
+            logging.info('Prev coeffs loss: %s', loss_prev_coeffs.item())
+
+            loss_encoder_smooth = self._smoothness_loss(encoder_coeffs)
+            logging.info('Encoder smooth loss: %s', loss_encoder_smooth.item())
+
+            loss_decoder_smooth = self._smoothness_loss(decoder_coeffs)
+            logging.info('Decoder smooth loss: %s', loss_decoder_smooth.item())
+
+            loss_prev_smooth = self._smoothness_loss(prev_coeffs)
+            logging.info('Prev smooth loss: %s', loss_prev_smooth.item())
+
+            loss = (loss_recon +
+                    self.encoder_lambda * loss_encoder_coeffs +
+                    self.decoder_lambda * (loss_decoder_coeffs + loss_prev_coeffs) +
+                    self.encoder_gamma * loss_encoder_smooth +
+                    self.decoder_gamma * (loss_decoder_smooth + loss_prev_smooth) +
+                    self.beta * loss_kl)
+        else:
+            # Simple reconstruction + KL loss
+            loss = loss_recon + self.beta * loss_kl
+            logging.info('Total loss: %s', loss.item())
+
+        # Keep preprocessed label for evaluation if needed
+        if label is not None:
+            preprocessed_label = sliding_window_view(label, (self.window_size + 1, self.num_vars))[self.window_size:, 0, :-1, :]
+        else:
+            preprocessed_label = None
+
+        return loss, nexts_hat, nexts, encoder_coeffs, decoder_coeffs, kl_div, preprocessed_label, us
+
+
 
     def _get_recon_threshold(self, xs):
         self.eval()
