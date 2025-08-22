@@ -44,6 +44,7 @@ def create_arg_parser():
     parser.add_argument('--risk', type=float, default=1e-2, help='Risk (default: 1e-2)')
     parser.add_argument('--initial_level', type=float, default=0.00, help='Initial level (default: 0.00)')
     parser.add_argument('--num_candidates', type=int, default=100, help='Number of candidates (default: 100)')
+    parser.add_argument('--early_stopping', type=int, default=0, help='Flag for early stopping (default: 0)')
 
     # Dual KL arguments
     parser.add_argument('--correlated_KL', type=int, default=1, help='Flag for correlated KL (default: 1)')
