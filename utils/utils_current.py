@@ -583,6 +583,8 @@ def write_results(args, ac_at,k_at_step_all, file_name='result.csv'):
         'AC@5': ac_at[2],
         'AC@10': ac_at[3],
         'Avg@10': np.mean(k_at_step_all),
+        'AMOC_Loss': args['AMOC_Loss'],
+        'mean_std_recon_loss': args['mean_std_recon_loss'],
     }
     
 

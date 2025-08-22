@@ -346,7 +346,7 @@ def topk_at_step(scores, labels, k_range=10):
     return np.array(k_lst).reshape(-1, k_range).mean(axis=0)
 
 
-def write_results(args, local_model_name, ac_at,k_at_step_all, file_name='result.csv'):
+def write_results(args, local_model_name, ac_at,k_at_step_all, total_params,file_name='result.csv'):
     file_path = file_name
     #infodict = {'pr':ps, 'rc':rs, 'auc':auc, 'ap':ap, 'f1':effection}
     
@@ -361,12 +361,21 @@ def write_results(args, local_model_name, ac_at,k_at_step_all, file_name='result
 
         'correlated_KL': "correlated_&_normal" if args['correlated_KL'] == 1 else "normal_KL",
         'architecture': args['coeff_architecture'],
+        'attention_dim': args['attention_dim'],
+        'num_attention_heads': args['num_attention_heads'],
+        'lr': args['lr'],
+        
 
         'AC@1': ac_at[0],
         'AC@3': ac_at[1],
         'AC@5': ac_at[2],
         'AC@10': ac_at[3],
         'Avg@10': np.mean(k_at_step_all),
+
+        'total_params': total_params,
+        'window_size': args['window_size'],
+        'early_stopping': args['early_stopping'],
+        'num_epochs': args['epochs'],
     }
     
 

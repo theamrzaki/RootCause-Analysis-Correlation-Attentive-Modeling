@@ -409,56 +409,7 @@ class AERCA(nn.Module):
             kl_div = compute_kl_divergence(us, self.device)
         nexts_hat, decoder_coeffs, prev_coeffs = self.decoding(us, winds, add_u=add_u)
         return nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us
-
-    def _training_step_old(self, x, add_u=True):
-        nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us = self.forward(x, add_u=add_u)
-        loss_recon = self.mse_loss(nexts_hat, nexts)
-        logging.info('Reconstruction loss: %s', loss_recon.item())
-
-        loss_encoder_coeffs = self._sparsity_loss(encoder_coeffs, self.encoder_alpha)
-        logging.info('Encoder coeffs loss: %s', loss_encoder_coeffs.item())
-        
-        loss_decoder_coeffs = self._sparsity_loss(decoder_coeffs, self.decoder_alpha)
-        logging.info('Decoder coeffs loss: %s', loss_decoder_coeffs.item())
-        
-        loss_prev_coeffs = self._sparsity_loss(prev_coeffs, self.decoder_alpha)
-        logging.info('Prev coeffs loss: %s', loss_prev_coeffs.item())
-        
-        loss_encoder_smooth = self._smoothness_loss(encoder_coeffs)
-        logging.info('Encoder smooth loss: %s', loss_encoder_smooth.item())
-        
-        loss_decoder_smooth = self._smoothness_loss(decoder_coeffs)
-        logging.info('Decoder smooth loss: %s', loss_decoder_smooth.item())
-        
-        loss_prev_smooth = self._smoothness_loss(prev_coeffs)
-        logging.info('Prev smooth loss: %s', loss_prev_smooth.item())
-
-        loss_kl = kl_div
-        logging.info('KL loss: %s', loss_kl.item())
-
-        
-        reg_lambda = 0.01 * (self.log_lambda_indep ** 2 + self.log_lambda_corr ** 2)
-
-        loss = (loss_recon +
-                self.encoder_lambda * loss_encoder_coeffs +
-                self.decoder_lambda * (loss_decoder_coeffs + loss_prev_coeffs) +
-                self.encoder_gamma * loss_encoder_smooth +
-                self.decoder_gamma * (loss_decoder_smooth + loss_prev_smooth) +
-                self.beta * loss_kl +
-                reg_lambda)
-        losses_dict = {
-            "loss_recon": loss_recon.item(),
-            "loss_encoder_coeffs": loss_encoder_coeffs.item(),
-            "loss_decoder_coeffs": loss_decoder_coeffs.item(),
-            "loss_prev_coeffs": loss_prev_coeffs.item(),
-            "loss_encoder_smooth": loss_encoder_smooth.item(),
-            "loss_decoder_smooth": loss_decoder_smooth.item(),
-            "loss_prev_smooth": loss_prev_smooth.item(),
-            "loss_kl": loss_kl.item(),
-            "reg_lambda": reg_lambda.item()}
-        
-        return loss, losses_dict
-
+    
     def _training_step(self, x, add_u=True):
         # Forward pass
         nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us = self.forward(x, add_u=add_u)
@@ -467,23 +418,23 @@ class AERCA(nn.Module):
         loss_full_recon = self.mse_loss(nexts_hat, nexts)
         logging.info('Reconstruction loss (full): %s', loss_full_recon.item())
 
-        # === Mean/Std reconstruction loss ===
-        mean_target = nexts.mean(dim=1, keepdim=True)
-        std_target = nexts.std(dim=1, keepdim=True)
-
-        mean_hat = nexts_hat.mean(dim=1, keepdim=True)
-        std_hat = nexts_hat.std(dim=1, keepdim=True)
-
-        loss_mean = self.mse_loss(mean_hat, mean_target)
-        loss_std = self.mse_loss(std_hat, std_target)
-        loss_stats_recon = loss_mean + loss_std
-        logging.info('Reconstruction loss (mean+std): %s', loss_stats_recon.item())
-
-        # === Combine both with a learnable parameter ===
-        # sigmoid ensures weight ∈ (0,1), so it's interpretable
-        alpha = torch.sigmoid(self.alpha_param)  
-        loss_recon = alpha * loss_full_recon + (1 - alpha) * loss_stats_recon
-        logging.info('Blended reconstruction loss: %s (alpha=%.4f)' % (loss_recon.item(), alpha.item()))
+        # === Mean/Std reconstruction loss (optional) ===
+        if self.options.get("mean_std_recon_loss", False):
+            mean_target = nexts.mean(dim=1, keepdim=True)
+            std_target  = nexts.std(dim=1, keepdim=True)
+            mean_hat = nexts_hat.mean(dim=1, keepdim=True)
+            std_hat  = nexts_hat.std(dim=1, keepdim=True)
+            loss_mean = self.mse_loss(mean_hat, mean_target)
+            loss_std  = self.mse_loss(std_hat, std_target)
+            loss_stats_recon = loss_mean + loss_std
+            logging.info('Reconstruction loss (mean+std): %s', loss_stats_recon.item())
+            alpha = torch.sigmoid(self.alpha_param)
+            loss_recon = alpha * loss_full_recon + (1 - alpha) * loss_stats_recon
+            logging.info('Blended reconstruction loss: %s (alpha=%.4f)' % (loss_recon.item(), alpha.item()))
+        else:
+            loss_recon = loss_full_recon
+            loss_stats_recon = torch.tensor(0.0)
+            alpha = torch.tensor(0.0)
 
         # === Sparsity losses ===
         loss_encoder_coeffs = self._sparsity_loss(encoder_coeffs, self.encoder_alpha)
@@ -501,6 +452,15 @@ class AERCA(nn.Module):
         # === Regularization ===
         reg_lambda = 0.01 * (self.log_lambda_indep ** 2 + self.log_lambda_corr ** 2)
 
+        # === Latent AMOC loss (optional) ===
+        if self.options.get("AMOC_Loss", False):
+            diffs = (us[1:, :] - us[:-1, :]).pow(2).mean(dim=-1)
+            latent_disc_loss = (diffs.sum() - diffs.max()) / diffs.shape[0]
+            lambda_amoc = self.options.get("lambda_amoc", 0.1)
+        else:
+            latent_disc_loss = torch.tensor(0.0)
+            lambda_amoc = 0.0
+
         # === Total loss ===
         loss = (loss_recon +
                 self.encoder_lambda * loss_encoder_coeffs +
@@ -508,7 +468,8 @@ class AERCA(nn.Module):
                 self.encoder_gamma * loss_encoder_smooth +
                 self.decoder_gamma * (loss_decoder_smooth + loss_prev_smooth) +
                 self.beta * loss_kl +
-                reg_lambda)
+                reg_lambda +
+                lambda_amoc * latent_disc_loss)
 
         # === Logging all losses ===
         losses_dict = {
@@ -522,7 +483,8 @@ class AERCA(nn.Module):
             "loss_decoder_smooth": loss_decoder_smooth.item(),
             "loss_prev_smooth": loss_prev_smooth.item(),
             "loss_kl": loss_kl.item(),
-            "reg_lambda": reg_lambda.item()
+            "reg_lambda": reg_lambda.item(),
+            "latent_disc_loss": latent_disc_loss.item()
         }
 
         return loss, losses_dict

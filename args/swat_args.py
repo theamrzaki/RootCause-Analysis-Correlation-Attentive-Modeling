@@ -44,15 +44,20 @@ def create_arg_parser():
     parser.add_argument('--risk', type=float, default=1e-5, help='Risk (default: 1e-5)')
     parser.add_argument('--initial_level', type=float, default=0.9, help='Initial level (default: 0.00)')
     parser.add_argument('--num_candidates', type=int, default=100, help='Number of candidates (default: 100)')
+    parser.add_argument('--early_stopping', type=int, default=0, help='Flag for early stopping (default: 0)')
+    parser.add_argument('--mean_std_recon_loss', type=int, default=0, help='Patience for early stopping (default: 50)')
+    parser.add_argument('--AMOC_Loss', type=int, default=0, help='Minimum delta for early stopping (default: 1e-4)')
 
     # Dual KL arguments
     parser.add_argument('--correlated_KL', type=int, default=0, help='Flag for correlated KL (default: 1)')
     parser.add_argument('--lambda_indep', type=float, default=1.0, help='Lambda for independence (default: 1.0)')
     parser.add_argument('--lambda_corr', type=float, default=1.0, help='Lambda for correlated (default: 1.0)')
-    parser.add_argument('--shrinkage', type=float, default=0.07, help='Shrinkage factor (default: 0.07)') 
+    parser.add_argument('--shrinkage', type=float, default=0.5, help='Shrinkage factor (default: 0.07)') 
     
     # Architecture arguments
     parser.add_argument('--coeff_architecture', type=str, default='deep_mlp', help='Coefficient architecture options (deep_mlp, gnn_attention) (default: deep_mlp)')
+    parser.add_argument('--attention_dim', type=int, default=64, help='Attention dimension (default: 64)')
+    parser.add_argument('--num_attention_heads', type=int, default=4, help='Number of attention heads (default: 4)')
 
     # Attention arguments
     parser.add_argument('--global_attention_over_all_lag', type=str)
