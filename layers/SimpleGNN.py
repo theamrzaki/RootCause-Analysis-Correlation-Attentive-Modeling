@@ -553,7 +553,7 @@ class RecurrentAttentionGNN_Attn_nocoeff(nn.Module):
 
 
 class RecurrentAttentionGNN_Attn(nn.Module):
-    def __init__(self, num_vars, rank, order, hidden_dim=128, num_heads=1, device="cpu", attention_heads=4, attention_dim=64):
+    def __init__(self, num_vars, rank, order, hidden_dim=256, num_heads=2, device="cpu", attention_heads=4, attention_dim=64):
         super().__init__()
         self.num_vars = num_vars
         self.rank = rank
