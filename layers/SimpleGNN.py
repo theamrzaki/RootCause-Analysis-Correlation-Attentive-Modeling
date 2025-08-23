@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import math
 
 class SimpleCoeffGNN(nn.Module):
     def __init__(self, num_vars: int, rank: int, hidden_dim: int = 128, residual_scale: float = 0.1):
@@ -552,7 +553,8 @@ class RecurrentAttentionGNN_Attn_nocoeff(nn.Module):
         return preds, None
 
 
-class RecurrentAttentionGNN_Attn(nn.Module):
+
+class RecurrentAttentionGNN_Attn_old(nn.Module):
     def __init__(self, num_vars, rank, order, hidden_dim=256, num_heads=2, device="cpu", attention_heads=4, attention_dim=64):
         super().__init__()
         self.num_vars = num_vars
@@ -602,6 +604,83 @@ class RecurrentAttentionGNN_Attn(nn.Module):
             attn_out, _ = self.temporal_attn(attn_input, attn_input, attn_input)  # (B_chunk, O, hidden_dim)
 
             # --- Step 4: map attention outputs back to coeffs ---
+            coeffs_seq = self.coeff_proj(attn_out)               # (B_chunk, O, P*P)
+            coeffs_seq = coeffs_seq.view(B_chunk, O, P, P)       # (B_chunk, O, P, P)
+
+            # --- Step 5: prediction using coeffs ---
+            preds_chunk = torch.zeros((B_chunk, P), device=device)
+            for k in range(O):
+                preds_chunk += torch.matmul(coeffs_seq[:, k, :, :], 
+                                            x_chunk[:, k, :].unsqueeze(-1)).squeeze(-1)
+
+            preds_list.append(preds_chunk)
+            coeffs_list.append(coeffs_seq)
+
+        preds = torch.cat(preds_list, dim=0)                    # (B, P)
+        coeffs = torch.cat(coeffs_list, dim=0)                  # (B, O, P, P)
+
+        return preds, coeffs
+
+
+class RecurrentAttentionGNN_Attn(nn.Module):
+    def __init__(self, num_vars, rank, order, hidden_dim=256, num_heads=2, device="cpu",
+                 attention_heads=4, attention_dim=64, pe_scale=0.01):
+        super().__init__()
+        self.num_vars = num_vars
+        self.rank = rank
+        self.order = order  # number of lags
+        self.hidden_dim = hidden_dim
+        self.device = device
+        self.pe_scale = pe_scale  # scale factor for positional embedding
+
+        # Base GNN per lag
+        self.base_net = AttentionCoeffGNN_multihead_fixed(
+            num_vars=num_vars, rank=rank, hidden_dim=attention_dim, heads=attention_heads
+        )
+
+        # Project flattened GNN output to hidden_dim for attention
+        self.in_proj = nn.Linear(num_vars * num_vars, hidden_dim)
+
+        # Temporal attention across lags
+        self.temporal_attn = nn.MultiheadAttention(
+            embed_dim=hidden_dim, num_heads=num_heads, batch_first=True
+        )
+
+        # Map attention hidden state back to coefficients
+        self.coeff_proj = nn.Linear(hidden_dim, num_vars * num_vars)
+
+        # Learnable positional embedding (small initial scale)
+        self.pos_enc = nn.Parameter(torch.randn(1, order, hidden_dim) * pe_scale)
+
+    def forward(self, inputs: torch.Tensor, batch_chunk_size: int = 10000):
+        B, O, P = inputs.shape
+        device = inputs.device
+
+        preds_list = []
+        coeffs_list = []
+
+        # Use positional encoding
+        pos_embeddings = self.pos_enc[:, :O, :]  # shape (1, O, hidden_dim)
+
+        for start in range(0, B, batch_chunk_size):
+            end = min(start + batch_chunk_size, B)
+            x_chunk = inputs[start:end]  # (B_chunk, O, P)
+            B_chunk = x_chunk.size(0)
+
+            # --- Step 1: extract features per lag ---
+            features_seq = []
+            for k in range(O):
+                feat_k = self.base_net(x_chunk[:, k, :])        # (B_chunk, P, P)
+                features_seq.append(feat_k.view(B_chunk, -1))   # (B_chunk, P*P)
+            features_seq = torch.stack(features_seq, dim=1)      # (B_chunk, O, P*P)
+
+            # --- Step 2: project to hidden_dim for attention + add positional encoding ---
+            attn_input = self.in_proj(features_seq) + pos_embeddings  # (B_chunk, O, hidden_dim)
+
+            # --- Step 3: temporal attention ---
+            attn_out, _ = self.temporal_attn(attn_input, attn_input, attn_input)  # (B_chunk, O, hidden_dim)
+
+            # --- Step 4: map attention outputs back to coefficients ---
             coeffs_seq = self.coeff_proj(attn_out)               # (B_chunk, O, P*P)
             coeffs_seq = coeffs_seq.view(B_chunk, O, P, P)       # (B_chunk, O, P, P)
 
