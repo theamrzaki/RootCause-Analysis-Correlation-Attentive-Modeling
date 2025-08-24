@@ -3,12 +3,12 @@
 # --- Configurations ---
 seeds=(1 2 3)
 coeff_architecture=("TemporalGNN_Attention")
-dataset="msds"
-lrs=("5e-4" "1e-4")
-attention_dims=(128 256)
-num_heads=(1 2 4)
+dataset=("swat")
+lrs=("5e-4")
+attention_dims=(128)
+num_heads=(2)
 corelated_list=(0)
-window_size=1
+window_size=(1 3 6)
 
 # --- Helper function to run experiments ---
 run_experiment() {
@@ -32,7 +32,7 @@ run_experiment() {
                                 --num_attention_heads=$heads"
 
                             if [ "$use_amoc" -eq 1 ]; then
-                                cmd="$cmd --AMOC_Loss=1 --mean_std_recon_loss=1"
+                                cmd="$cmd --AMOC_Loss=0 --mean_std_recon_loss=0"
                             fi
 
                             eval $cmd
@@ -45,8 +45,5 @@ run_experiment() {
 }
 
 # --- Run experiments ---
-# 1. Without AMOC
-run_experiment 0
-
 # 2. With AMOC
 run_experiment 1
