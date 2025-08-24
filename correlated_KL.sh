@@ -4,16 +4,16 @@
 seeds=(1 2 3)
 coeff_architecture=("TemporalGNN_Attention")
 dataset=("swat")
-lrs=("5e-4")
+lrs=("5e-5" "1e-5")
 attention_dims=(128)
 num_heads=(2)
 corelated_list=(0)
-window_size=(1 3 6)
+window_size=(1)
 
 # --- Helper function to run experiments ---
 run_experiment() {
     local use_amoc=$1  # 0 = no AMOC, 1 = AMOC
-    for correlated_KL in "${corelated_list[@]}"; do
+    for window_size_item in "${window_size[@]}"; do
         for arch in "${coeff_architecture[@]}"; do
             for seed in "${seeds[@]}"; do
                 for lr in "${lrs[@]}"; do
@@ -22,12 +22,12 @@ run_experiment() {
                             echo "Running: dataset=$dataset | seed=$seed | arch=$arch | lr=$lr | att_dim=$att_dim | heads=$heads | AMOC=$use_amoc"
 
                             cmd="python3 main.py \
-                                --correlated_KL=$correlated_KL \
+                                --correlated_KL=0 \
                                 --seed=$seed \
                                 --dataset=$dataset \
                                 --coeff_architecture=$arch \
                                 --lr=$lr \
-                                --window_size=$window_size \
+                                --window_size=$window_size_item \
                                 --attention_dim=$att_dim \
                                 --num_attention_heads=$heads"
 
