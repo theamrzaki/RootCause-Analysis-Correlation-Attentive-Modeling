@@ -1,112 +1,102 @@
 import os
 import pandas as pd
-import tqdm
-import numpy as np
-from os.path import basename, dirname
 
-BASE_PATH = "/home/db2003/Desktop/Amr/amocrca/data/combined"
-DATASETS = ["sock-shop", "online-boutique", "train-ticket"]
-TRAIN_RATIO = 0.7  # 70% train, 30% test
+def build_sockshop_dataset_dynamic(root_dir, output_dir="datasets/sock-shop"):
+    os.makedirs(output_dir, exist_ok=True)
 
-def get_metric_folders(dataset_name):
-    """Return all metric folder names under any root folder (baro, rcd, rca-eval, etc.) for a dataset."""
-    dataset_path = os.path.join(BASE_PATH, dataset_name)
-    root_folders = [os.path.join(dataset_path, f) for f in os.listdir(dataset_path) if os.path.isdir(os.path.join(dataset_path, f))]
-    metric_names = set()
-    for folder in root_folders:
-        for metric_name in os.listdir(folder):
-            metric_path = os.path.join(folder, metric_name)
-            if os.path.isdir(metric_path):
-                metric_names.add(metric_name)
-    return sorted(list(metric_names))
+    train_dfs, test_dfs = [], []
+    all_columns = set()
 
-def process_dataset(dataset_name):
-    dataset_path = os.path.join(BASE_PATH, dataset_name)
+    # Step 1: Discover all columns from normal and anomalous CSVs
+    for service in os.listdir(root_dir):
+        service_path = os.path.join(root_dir, service)
+        if not os.path.isdir(service_path):
+            continue
+        for run in os.listdir(service_path):
+            run_path = os.path.join(service_path, run)
+            if not os.path.isdir(run_path):
+                continue
+            for fname in ["normal.csv", "anomalous.csv"]:
+                fpath = os.path.join(run_path, fname)
+                if os.path.exists(fpath):
+                    df = pd.read_csv(fpath)
+                    all_columns.update(df.columns)
     
-    all_train, all_test = [], []
-    all_train_labels, all_test_labels = [], []
+    # Sort columns to have consistent order
+    # remove "-" and "_" from column names
+    all_columns = [col.replace("-", "").replace("_", "") for col in all_columns]
+    all_columns = sorted(list(all_columns))
+    column_map = {col: idx for idx, col in enumerate(all_columns)}
+    print("Column map:", column_map)
 
-    allowed_columns = get_metric_folders(dataset_name)
-    metric_to_idx = {m: i for i, m in enumerate(allowed_columns)}
-    print(f"{dataset_name}: Found {len(allowed_columns)} allowed metric columns.")
+    # Step 2: Combine all normals for train
+    for service in os.listdir(root_dir):
+        service_path = os.path.join(root_dir, service)
+        if not os.path.isdir(service_path):
+            continue
+        for run in os.listdir(service_path):
+            run_path = os.path.join(service_path, run)
+            if not os.path.isdir(run_path):
+                continue
+            normal_file = os.path.join(run_path, "normal.csv")
+            if os.path.exists(normal_file):
+                df_normal = pd.read_csv(normal_file)
+                train_dfs.append(df_normal)
 
-    root_folders = [os.path.join(dataset_path, f) for f in os.listdir(dataset_path) if os.path.isdir(os.path.join(dataset_path, f))]
+    train_df = pd.concat(train_dfs, ignore_index=True) if train_dfs else pd.DataFrame()
+    train_df.to_csv(os.path.join(output_dir, "train.csv"), index=False)
 
-    for folder in tqdm.tqdm(root_folders, desc=f"Processing root folders for {dataset_name}"):
-        services = [os.path.join(folder, s) for s in os.listdir(folder) if os.path.isdir(os.path.join(folder, s))]
-        for service_path in tqdm.tqdm(services, desc=f"Processing services", leave=False):
-            metrics = [os.path.join(service_path, m) for m in os.listdir(service_path) if os.path.isdir(os.path.join(service_path, m))]
-            
-            for metric_path in metrics:
-                data_file = os.path.join(metric_path, "simple_data.csv")
-                label_file = os.path.join(metric_path, "inject_time.txt")
-                if not os.path.exists(data_file):
-                    continue
+    # Step 3: Combine all anomalies for test and build labels
+    labels_list = []
+    for service in os.listdir(root_dir):
+        service_path = os.path.join(root_dir, service)
+        if not os.path.isdir(service_path):
+            continue
+        for run in os.listdir(service_path):
+            run_path = os.path.join(service_path, run)
+            if not os.path.isdir(run_path):
+                continue
+            anomalous_file = os.path.join(run_path, "anomalous.csv")
+            if os.path.exists(anomalous_file):
+                df_anom = pd.read_csv(anomalous_file)
+                test_dfs.append(df_anom)
 
-                df = pd.read_csv(data_file)
-                if 'time' not in df.columns:
-                    raise ValueError(f"'time' column not found in {data_file}")
-                
-                # Keep only allowed metric columns + 'time'
-                metric_name = basename(dirname(metric_path))
-                if metric_name not in allowed_columns:
-                    continue
-                df = df[['time'] + [c for c in df.columns if c == metric_name]]
+                # Initialize zero labels
+                label_matrix = pd.DataFrame(0, index=range(len(df_anom)), columns=all_columns)
 
-                # Initialize full label matrix (rows=time steps, cols=all allowed metrics)
-                full_labels = np.zeros((len(df), len(allowed_columns)), dtype=int)
+                # remove "-" and "_" from service name to match column names
+                service = service.replace("-", "").replace("_", "")
+                # Set 1 only for the column corresponding to this service folder
+                if service in all_columns:
+                    label_matrix[service] = 1
+                else:
+                    # Optional: if service not in columns, you can create it
+                    label_matrix[service] = 1
+                    if service not in all_columns:
+                        all_columns.append(service)
 
-                # Load anomaly times (assume CSV uses same timestamps as df['time'])
-                anomaly_times = []
-                if os.path.exists(label_file):
-                    with open(label_file) as f:
-                        anomaly_times = [int(x) for x in f.read().strip().split(",") if x.strip()]
+                labels_list.append(label_matrix)
 
-                # Mark anomalies in the column corresponding to this metric
-                col_idx = metric_to_idx[metric_name]
-                for t in anomaly_times:
-                    if 0 <= t < len(df):
-                        full_labels[t, col_idx] = 1
 
-                # Split into train/test
-                normal_rows = np.where(full_labels.sum(axis=1) == 0)[0]
-                train_len = int(len(normal_rows) * TRAIN_RATIO)
-                train_rows = normal_rows[:train_len]
-                test_rows = np.setdiff1d(np.arange(len(df)), train_rows)
+    test_df = pd.concat(test_dfs, ignore_index=True) if test_dfs else pd.DataFrame()
 
-                train_df = df.iloc[train_rows].copy()
-                test_df = df.iloc[test_rows].copy()
-                train_labels = full_labels[train_rows]
-                test_labels = full_labels[test_rows]
+    labels_df = pd.concat(labels_list, ignore_index=True) if labels_list else pd.DataFrame()
+    labels_df.insert(0, 'index', range(len(labels_df)))
+    labels_df = labels_df[["index"] + all_columns]
+    # Assertions
+    assert len(test_df) == len(labels_df), f"Mismatch: test={len(test_df)} vs labels={len(labels_df)}"
+    #assert list(labels_df.columns) == all_columns+1, "Label columns do not match expected columns"
 
-                all_train.append(train_df)
-                all_test.append(test_df)
-                all_train_labels.append(train_labels)
-                all_test_labels.append(test_labels)
+    # Save test and labels
+    test_df.to_csv(os.path.join(output_dir, "test.csv"), index=False)
+    labels_df.to_csv(os.path.join(output_dir, "labels.csv"), index=False)
 
-    # Combine all runs for dataset
-    if all_train:
-        train_df = pd.concat(all_train).reset_index(drop=True)
-        test_df = pd.concat(all_test).reset_index(drop=True)
-        train_labels_df = pd.DataFrame(np.vstack(all_train_labels), columns=allowed_columns)
-        test_labels_df = pd.DataFrame(np.vstack(all_test_labels), columns=allowed_columns)
+    print("✅ Done!")
+    print(f"Train: {train_df.shape}, Test: {test_df.shape}, Labels: {labels_df.shape}")
 
-        # Add index column
-        train_df.insert(0, 'index', range(len(train_df)))
-        test_df.insert(0, 'index', range(len(test_df)))
-        train_labels_df.insert(0, 'index', range(len(train_labels_df)))
-        test_labels_df.insert(0, 'index', range(len(test_labels_df)))
 
-        os.makedirs(f"datasets/{dataset_name}", exist_ok=True)
-        train_df.to_csv(f"datasets/{dataset_name}/train.csv", index=False)
-        test_df.to_csv(f"datasets/{dataset_name}/test.csv", index=False)
-        train_labels_df.to_csv(f"datasets/{dataset_name}/train_labels.csv", index=False)
-        test_labels_df.to_csv(f"datasets/{dataset_name}/test_labels.csv", index=False)
+BASE_PATH = "/home/db2003/Desktop/Amr/amocrca/data/combined/sock-shop/sock-shop-rcd"
+build_sockshop_dataset_dynamic(BASE_PATH)
 
-        print(f"{dataset_name}: Saved train/test + train_labels/test_labels")
-    else:
-        print(f"{dataset_name}: No data found to process!")
 
-# Process all datasets
-for dataset in DATASETS:
-    process_dataset(dataset)
+
