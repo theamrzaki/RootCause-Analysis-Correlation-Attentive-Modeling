@@ -76,7 +76,7 @@ class SWaT:
         df_normal = df_normal.loc[df_normal['Normal/Attack'] == 'Normal']
         # Drop unnecessary columns and downsample by taking every 10th row
         df_normal.drop(columns=[' Timestamp', 'Normal/Attack'], inplace=True)
-        df_normal = df_normal[::10].reset_index(drop=True)
+        df_normal = df_normal[::3].reset_index(drop=True)
 
         # ----------------------------
         # Clean Abnormal Data
@@ -99,6 +99,11 @@ class SWaT:
         col_dic = {}
         for i in df_abnormal.columns.values[1:-2]:
             col_dic[i.lstrip()] = len(col_dic)
+
+
+        # --- Add binary/continuous flags ---
+        # 1 if binary (e.g., ON/OFF pumps), 0 if continuous
+        self.binary_flags = np.array([1 if df_abnormal[col].nunique() == 2 else 0 for col in df_abnormal.columns.values[1:-2]])
 
         # ----------------------------
         # Process Each Attack Event for Abnormal Data

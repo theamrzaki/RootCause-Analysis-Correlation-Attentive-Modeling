@@ -2,9 +2,10 @@ import sys
 import os
 import logging
 import argparse
+import numpy as np
 
-from datasets import linear, lotka_volterra, lorenz96, swat, nonlinear, msds
-from args import linear_args, lotka_volterra_args, lorenz96_args, swat_args, msds_args, nonlinear_args
+from datasets import linear, lotka_volterra, lorenz96, swat, nonlinear, msds, sock
+from args import linear_args, lotka_volterra_args, lorenz96_args, swat_args, msds_args, nonlinear_args, sock_args
 from models import aerca
 from utils import utils
 import warnings
@@ -62,6 +63,12 @@ def main(argv):
             "log_file": "msds.log",
             "use_slice": False
         },
+        "sock": {
+            "args": sock_args.create_arg_parser,
+            "dataset_class": sock.sock,
+            "log_file": "sock.log",
+            "use_slice": False
+        },
         "swat": {
             "args": swat_args.create_arg_parser,
             "dataset_class": swat.SWaT,
@@ -103,7 +110,7 @@ def main(argv):
 
     # Set the random seed for reproducibility.
     utils.set_seed(options['seed'])
-    print('Set seed: {}'.format(options['seed']), 'window_size:', options['window_size'])
+    print('Set seed: {}, lr: {}'.format(options['seed'], options["lr"]), 'window_size:', options['window_size'])
     print(f"shrinkage :{options['shrinkage']}")
     # Instantiate the dataset class and generate or load data based on the preprocessing flag.
     data_class = mapping["dataset_class"](options)
@@ -149,8 +156,29 @@ def main(argv):
         else:
             training_data = data_class.data_dict['x_n_list']
         print('Start training AERCA model...')
+        
         aerca_model._training(training_data)
         print('Done training')
+
+        """
+        # Convert each sequence into sliding windows of shape (window_size+1, num_vars)
+        batched_training_data = []
+        for seq in training_data:
+            seq = np.array(seq)  # (seq_len, num_vars)
+            # sliding windows along time axis
+            for start in range(0, len(seq) - options['window_size']):
+                window = seq[start:start + options['window_size'] + 1]
+                batched_training_data.append(window)
+
+        # Now batched_training_data is a list of (window_size+1, num_vars) arrays
+        print(f"Number of training windows: {len(batched_training_data)}")
+        aerca_model._training_batches(batched_training_data, batch_size=1000)
+        print('Done training')
+        """
+        xs_val = training_data[int(0.8 * len(training_data)):]
+        aerca_model._get_recon_threshold(xs_val)
+        aerca_model._get_root_cause_threshold_encoder(xs_val)
+        aerca_model._get_root_cause_threshold_decoder(xs_val)
     aerca_model.example_normal_window = data_class.data_dict['x_n_list'][0]
     # Testing phase for causal discovery (applies only if slicing is used).
     if mapping["use_slice"]:

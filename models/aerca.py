@@ -5,7 +5,7 @@ import torch
 import math
 from utils.utils import (compute_kl_divergence, sliding_window_view_torch,
                          eval_causal_structure, eval_causal_structure_binary,
-                         pot, topk, topk_at_step,write_results)
+                         pot, topk,topk_no_threshold, topk_at_step,write_results)
 from utils.utils_current import compute_correlated_kl, compute_mmd
 from numpy.lib.stride_tricks import sliding_window_view
 import logging
@@ -15,6 +15,13 @@ from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 from collections import defaultdict
 import torch.nn.functional as F
+from models.scoring import scoring
+
+from sklearn.cluster import KMeans
+import numpy as np
+import torch
+
+
 class AERCA(nn.Module):
     def __init__(self, num_vars: int, hidden_layer_size: int, num_hidden_layers: int, device: torch.device,
                  window_size: int, stride: int = 1, encoder_alpha: float = 0.5, decoder_alpha: float = 0.5,
@@ -29,7 +36,32 @@ class AERCA(nn.Module):
         self.device = device
         self.options = options if options is not None else {}
         self.encoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers,args=options, device=device)
-        
+        self.num_vars = num_vars
+        self.num_modalities = 3
+        self.num_vars_mod = num_vars // self.num_modalities  # integer division
+        self.hidden_size = hidden_layer_size  # latent size from each encoder
+        """
+        # One encoder per modality
+        self.encoders = nn.ModuleList([
+            SENNGC(self.num_vars_mod, window_size, hidden_layer_size, num_hidden_layers, args=options, device=device).to(device)
+            for _ in range(self.num_modalities)
+        ])
+        """
+        # Projection layers to merge modalities
+        # Projection layers to merge modalities
+        self.us_proj = nn.Linear(self.num_modalities * self.hidden_size, self.hidden_size).to(device)
+
+        # For coeffs, keep the original shape (B, 1, num_vars, num_vars)
+        self.coeff_proj = nn.Linear(self.num_modalities * self.num_vars_mod, self.num_vars).to(device)
+
+        # For winds: (B, window_size, num_vars)
+        self.winds_proj = nn.Linear(self.num_modalities * self.num_vars_mod, self.num_vars).to(device)
+
+        # For nexts: (B, num_vars)
+        self.nexts_proj = nn.Linear(self.num_modalities * self.num_vars_mod, self.num_vars).to(device)
+
+
+
 
         if(self.options["coeff_architecture"] == "deep_mlp"):
             self.decoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, args=options, device=device).to(device)
@@ -66,7 +98,7 @@ class AERCA(nn.Module):
             self.coeff_proj_decoder = nn.Linear(hidden_dim_small, 2 * num_vars * rank).to(device)   
             # for prev_coeffs
 
-            self._log_and_print('Number of parameters in encoder: {}', self._count_parameters(self.encoder))
+            #self._log_and_print('Number of parameters in encoder: {}', self._count_parameters(self.encoder))
             self._log_and_print('Number of parameters in decoding_input_proj: {}', self._count_parameters(self.decoding_input_proj))
             self._log_and_print('Number of parameters in decoding_attn: {}', self._count_parameters(self.decoding_attn))
             self._log_and_print('Number of parameters in decoding_output_proj: {}', self._count_parameters(self.decoding_output_proj))
@@ -89,7 +121,7 @@ class AERCA(nn.Module):
         print('----------------------------------')
         
         
-        self.num_vars = num_vars
+        
         self.hidden_layer_size = hidden_layer_size
         self.num_hidden_layers = num_hidden_layers
         self.window_size = window_size
@@ -161,14 +193,90 @@ class AERCA(nn.Module):
     def _smoothness_loss(self, coeffs):
         return torch.norm(coeffs[:, 1:, :, :] - coeffs[:, :-1, :, :], dim=1).mean()
 
+    def encoding_batch(self, xs):  # xs shape: (batch, T, num_vars)
+        batch_windows = []
+        for x in xs:  # each x: (T, num_vars)
+            windows = sliding_window_view(x, (self.window_size + 1, self.num_vars))[:, 0, :, :]
+            batch_windows.append(windows)
+        return np.stack(batch_windows)  
+        # shape: (batch, T - window_size, window_size+1, num_vars)
+
     def encoding(self, xs):
-        windows = sliding_window_view(xs, (self.window_size + 1, self.num_vars))[:, 0, :, :]
-        winds = windows[:, :-1, :]
-        nexts = windows[:, -1, :]
+        #
+        try:
+            windows = self.encoding_batch(xs.cpu().numpy())
+            winds = windows[:, 0, :-1, :]   # (1000, 30, 10)
+            nexts = windows[:, 0, -1, :]    # (1000, 10)
+        except:
+            #when testing
+            windows = sliding_window_view(xs, (self.window_size + 1, self.num_vars))[:, 0, :, :]
+            winds = windows[:, :-1, :]
+            nexts = windows[:, -1, :]
         winds = torch.tensor(winds).float().to(self.device)
         nexts = torch.tensor(nexts).float().to(self.device)
-        preds, coeffs = self.encoder(winds)
+        preds, coeffs, attn_weights = self.encoder(winds)
         us = preds - nexts                    # shape: (B, hidden_size)
+        """
+        us.shape
+            torch.Size([999, 51])
+        coeffs.shape
+            torch.Size([999, 1, 51, 51])
+        nexts.shape
+            torch.Size([999, 51])
+        nexts[self.window_size:].shape
+            torch.Size([998, 51])
+        winds.shape
+            torch.Size([999, 1, 51])
+        winds[:-self.window_size].shape
+            torch.Size([998, 1, 51])
+        """
+        return us, coeffs, nexts[self.window_size:], winds[:-self.window_size], attn_weights
+
+    def encoding_new(self, xs):
+        # Split features into modalities
+        modalities = self.split_by_clusters(xs)
+        
+        us_list, coeff_list = [], []
+        winds_list, nexts_list = [], []
+
+        for i, x_mod in enumerate(modalities):
+            # Sliding window
+            windows = sliding_window_view(x_mod.cpu().numpy(), (self.window_size + 1, x_mod.shape[1]))[:, 0, :, :]
+            winds = torch.tensor(windows[:, :-1, :]).float().to(self.device)
+            nexts = torch.tensor(windows[:, -1, :]).float().to(self.device)
+
+            preds, coeffs = self.encoders[i](winds)
+            us = preds - nexts
+
+            us_list.append(us)
+            coeff_list.append(coeffs)
+            winds_list.append(winds)
+            nexts_list.append(nexts)
+
+        # --- Combine modalities ---
+        us = torch.cat(us_list, dim=-1)
+        # coeff_list: list of (B, 1, vars_mod, vars_mod), e.g. 3 × [999, 1, 17, 17]
+        B, C, _, _ = coeff_list[0].shape
+        num_blocks = len(coeff_list)
+        vars_mod = coeff_list[0].shape[-1]
+        total_vars = num_blocks * vars_mod
+
+        # Initialize empty block matrix
+        coeffs = coeff_list[0].new_zeros((B, C, total_vars, total_vars))
+
+        # Fill diagonal blocks
+        for i, block in enumerate(coeff_list):
+            start = i * vars_mod
+            end = (i + 1) * vars_mod
+            coeffs[:, :, start:end, start:end] = block
+
+        winds_flat = torch.cat(winds_list, dim=-1)
+        winds = self.winds_proj(winds_flat)
+
+        nexts_flat = torch.cat(nexts_list, dim=-1)
+        nexts = self.nexts_proj(nexts_flat)
+
+        # Return shapes compatible with previous code
         return us, coeffs, nexts[self.window_size:], winds[:-self.window_size]
 
     def decoding_1decoder_norm2(self, us, winds, add_u=True, attn_dropout=0.1, residual_alpha=0.9):
@@ -381,18 +489,18 @@ class AERCA(nn.Module):
 
         return nexts_hat, coeffs, prev_coeffs
 
-    def forward(self, x, add_u=True):
-        us, encoder_coeffs, nexts, winds = self.encoding(x)
+    def forward(self, x,add_u=True):
+        us, encoder_coeffs, nexts, winds, attn_weights = self.encoding(x)
         if(self.options["correlated_KL"] == 1):
             kl_indep = compute_kl_divergence(us,self.device)  
             latent_dim = us.shape[1]
             split = latent_dim // 2
-            
+
             lambda_indep = torch.exp(self.log_lambda_indep)
             lambda_corr = torch.exp(self.log_lambda_corr)
             lambda_mmd = torch.exp(self.log_lambda_mmd)
             shrinkage=self.options["shrinkage"]
-            
+
             kl_corr = compute_correlated_kl(us, shrinkage=shrinkage)
             # Weighted combination
             s = (us[:, 0] > us[:, 0].median()).long()
@@ -410,7 +518,7 @@ class AERCA(nn.Module):
         nexts_hat, decoder_coeffs, prev_coeffs = self.decoding(us, winds, add_u=add_u)
         return nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us
     
-    def _training_step(self, x, add_u=True):
+    def _training_step(self, x,add_u=True):
         # Forward pass
         nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us = self.forward(x, add_u=add_u)
 
@@ -496,6 +604,10 @@ class AERCA(nn.Module):
         else:
             xs_train = xs[:int(0.8 * len(xs))]
             xs_val = xs[int(0.8 * len(xs)):]
+
+        #xs_array = np.concatenate([x.cpu().numpy() if isinstance(x, torch.Tensor) else x for x in xs_train], axis=0)
+        #self.cluster_assignments = self.cluster_modalities(xs_array, n_clusters=self.num_modalities)  # fixed split
+
         best_val_loss = np.inf
         count = 0
         for epoch in tqdm(range(self.epochs), desc=f'Epoch'):
@@ -542,13 +654,51 @@ class AERCA(nn.Module):
                 self.writer.flush()
         self.load_state_dict(torch.load(os.path.join(self.save_dir, f'{self.model_name}.pt'), map_location=self.device))
         logging.info('Training complete')
-        self._get_recon_threshold(xs_val)
-        self._get_root_cause_threshold_encoder(xs_val)
-        self._get_root_cause_threshold_decoder(xs_val)
+        #self._get_recon_threshold(xs_val)
+        #self._get_root_cause_threshold_encoder(xs_val)
+        #self._get_root_cause_threshold_decoder(xs_val)
+
+    def cluster_modalities(self, xs, n_clusters=4, random_state=42):
+        """
+        Cluster metrics (columns) into modalities using KMeans.
+        
+        Args:
+            xs: np.ndarray of shape (num_samples, num_vars)
+            n_clusters: int, number of clusters/modalities
+            random_state: int, for reproducibility
+        
+        Returns:
+            cluster_assignments: np.ndarray of shape (num_vars,), mapping each metric to a cluster
+        """
+        # Transpose so that columns are "samples" for clustering
+        X_cols = xs.T  # shape: (num_vars, num_samples)
+        
+        kmeans = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10)
+        kmeans.fit(X_cols)
+        
+        cluster_assignments = kmeans.labels_  # shape: (num_vars,)
+        return cluster_assignments
+
+    def split_by_clusters(self, x):
+        """
+        Split features into fixed-size modalities.
+        x: (num_samples, num_vars) tensor or ndarray
+        Returns: list of tensors, one per modality
+        """
+        modalities = []
+        start = 0
+        for i in range(self.num_modalities):
+            end = start + self.num_vars_mod
+            modalities.append(x[:, start:end])
+            start = end
+        # Convert to tensor if needed
+        modalities = [m if isinstance(m, torch.Tensor) else torch.tensor(m).float().to(self.device)
+                    for m in modalities]
+        return modalities
 
 
 
-    def _training_batch(self, xs, batch_size=200):
+    def _training_batches(self, xs,batch_size=200):
         """
         xs: list of windows, each of shape (window_size+1, num_vars)
         batch_size: number of windows per batch
@@ -559,9 +709,10 @@ class AERCA(nn.Module):
         xs_val = xs[split_idx:]
 
         best_val_loss = np.inf
-        early_stop_count = 0
+        count = 0
 
         for epoch in tqdm(range(self.epochs), desc='Epoch'):
+            count += 1
             self.current_epoch = epoch
             self.train()
             epoch_loss = 0
@@ -604,17 +755,25 @@ class AERCA(nn.Module):
             logging.info('Epoch val loss: %s', val_loss)
 
             # --- Early stopping ---
+            #if val_loss < best_val_loss:
+            #    best_val_loss = val_loss
+            #    early_stop_count = 0
+            #    logging.info(f'Saving model at epoch {epoch + 1}')
+            #    torch.save(self.state_dict(), os.path.join(self.save_dir, f'{self.model_name}.pt'))
+            #else:
+            #    early_stop_count += 1
+            #    if early_stop_count >= 20:
+            #        print('Early stopping')
+            #        break
             if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                early_stop_count = 0
+                count = 0
                 logging.info(f'Saving model at epoch {epoch + 1}')
+                if self.options["early_stopping"]: #AERCA paper style early stopping
+                    best_val_loss = val_loss
                 torch.save(self.state_dict(), os.path.join(self.save_dir, f'{self.model_name}.pt'))
-            else:
-                early_stop_count += 1
-                if early_stop_count >= 20:
-                    print('Early stopping')
-                    break
-
+            if count >= 20:
+                print('Early stopping')
+                break
             if epoch % 5 == 0:
                 self.writer.flush()
 
@@ -623,13 +782,13 @@ class AERCA(nn.Module):
         logging.info('Training complete')
 
         # --- Compute thresholds ---
-        self._get_recon_threshold(xs_val)
-        self._get_root_cause_threshold_encoder(xs_val)
-        self._get_root_cause_threshold_decoder(xs_val)
+        #self._get_recon_threshold(xs_val)
+        #self._get_root_cause_threshold_encoder(xs_val)
+        #self._get_root_cause_threshold_decoder(xs_val)
 
 
 
-    def _testing_step_old(self, x, label=None, add_u=True):
+    def _testing_step(self, x, label=None, add_u=True):
         nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us = self.forward(x, add_u=add_u)
 
         if label is not None:
@@ -675,10 +834,9 @@ class AERCA(nn.Module):
         return loss, nexts_hat, nexts, encoder_coeffs, decoder_coeffs, kl_div, preprocessed_label, us
 
 
-    def _testing_step(self, x, label=None, add_u=True):
+    def _testing_step_(self, x, label=None, add_u=True):
         # Forward pass
-        nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us = self.forward(x, add_u=add_u)
-
+        nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us, attn_weights = self.forward(x, add_u=add_u)
         # Compute mean and std targets for anomaly detection
         mean_target = nexts.mean(dim=1, keepdim=True)
         std_target = nexts.std(dim=1, keepdim=True)
@@ -694,8 +852,8 @@ class AERCA(nn.Module):
         logging.info('Reconstruction loss (mean+std): %s', loss_recon.item())
 
         # KL divergence loss
-        loss_kl = kl_div
-        logging.info('KL loss: %s', loss_kl.item())
+        #loss_kl = kl_div
+        #logging.info('KL loss: %s', loss_kl.item())
 
         # Encoder/decoder coefficient losses and smoothness (for deep_mlp)
         if self.options["coeff_architecture"] == "deep_mlp":
@@ -721,11 +879,11 @@ class AERCA(nn.Module):
                     self.encoder_lambda * loss_encoder_coeffs +
                     self.decoder_lambda * (loss_decoder_coeffs + loss_prev_coeffs) +
                     self.encoder_gamma * loss_encoder_smooth +
-                    self.decoder_gamma * (loss_decoder_smooth + loss_prev_smooth) +
-                    self.beta * loss_kl)
+                    self.decoder_gamma * (loss_decoder_smooth + loss_prev_smooth) 
+                    )
         else:
             # Simple reconstruction + KL loss
-            loss = loss_recon + self.beta * loss_kl
+            loss = loss_recon #+ self.beta * loss_kl
             logging.info('Total loss: %s', loss.item())
 
         # Keep preprocessed label for evaluation if needed
@@ -739,11 +897,11 @@ class AERCA(nn.Module):
 
 
     def _get_recon_threshold(self, xs):
-        self.eval()
+        self.eval()#(1,10000,10)
         losses_list = []
         with torch.no_grad():
             for x in xs:
-                _, nexts_hat, nexts, _, _, _, _, _ = self._testing_step(x, add_u=False)
+                loss, nexts_hat, nexts, encoder_coeffs, decoder_coeffs, kl_div, preprocessed_label, us = self._testing_step(x, add_u=False)
                 loss_arr = self.mse_loss_wo_reduction(nexts_hat, nexts).cpu().numpy().ravel()
                 losses_list.append(loss_arr)
         recon_losses = np.concatenate(losses_list)
@@ -848,7 +1006,7 @@ class AERCA(nn.Module):
         np.save(os.path.join(self.save_dir, f'{self.model_name}_us_std_decoder.npy'), self.us_std_decoder)
 
 
-    def _testing_root_cause(self, xs, labels):
+    def _testing_root_cause(self, xs, labels,alpha: float = 0.5, use_attention_fusion: bool = False):
         # Load model and only the encoder-related parameters required for the POT computations.
         self.load_state_dict(torch.load(os.path.join(self.save_dir, f'{self.model_name}.pt'),
                                         map_location=self.device))
@@ -859,13 +1017,18 @@ class AERCA(nn.Module):
         # Collect the latent representations from each sample.
         us_list = []
         us_sample_list = []
+        attn_list = []
         with torch.no_grad():
             for i in range(len(xs)):
                 x = xs[i]
                 label = labels[i]
-                us = self._testing_step(x, label, add_u=False)[-1]
+                loss, nexts_hat, nexts, encoder_coeffs, decoder_coeffs, kl_div, preprocessed_label, us = self._testing_step(x, label, add_u=False)
                 us_sample_list.append(us[self.window_size:].cpu().numpy())
                 us_list.append(us.cpu().numpy())
+                if use_attention_fusion:
+                    # aggregate attention over time (mean across timesteps)
+                    attn_mean = attn_weights.mean(dim=0).cpu().numpy()  # shape [num_vars]
+                    attn_list.append(attn_mean)
 
         # Combine all latent representations for POT threshold computation.
         us_all = np.concatenate(us_list, axis=0).reshape(-1, self.num_vars)
@@ -883,6 +1046,39 @@ class AERCA(nn.Module):
         for i in range(len(xs)):
             us_sample = us_sample_list[i]
             z_scores = (-(us_sample - self.us_mean_encoder) / self.us_std_encoder)
+            if use_attention_fusion:
+                # broadcast attn to match z_scores shape [T, num_vars]
+                #attn_importance = attn_list[i].mean(axis=(0, 1))  # mean over lags and “from” vars → shape (P,)
+                #attn_importance = np.expand_dims(attn_importance, axis=0).repeat(z_scores.shape[0], axis=0)  # (T, P)
+                # attn_seq: shape (O, P, P) -> (lags, to_vars, from_vars)
+                # mean over the "from" dimension → importance per "to" variable per lag
+                attn_per_lag = attn_list[i].mean(axis=2)  # shape (O, P)
+
+                # Then mean over lags
+                attn_importance = attn_per_lag.mean(axis=0)  # shape (P,)
+
+                # Broadcast to match z_scores (T, P)
+                attn_importance = np.expand_dims(attn_importance, axis=0).repeat(z_scores.shape[0], axis=0)
+                """
+                # Assume z_scores[0] and attn_importance[0] are lists of length P
+                z_scores_list = z_scores[0].tolist()
+                attn_list = attn_importance[0].tolist()
+
+                # Sort descending and keep track of indices
+                z_scores_sorted = sorted(enumerate(z_scores_list), key=lambda x: x[1], reverse=True)
+                attn_sorted = sorted(enumerate(attn_list), key=lambda x: x[1], reverse=True)
+
+                print("Top variables by z_scores:")
+                for idx, val in z_scores_sorted[:10]:  # top 10
+                    print(f"Var {idx}: {val:.4f}")
+
+                print("\nTop variables by attention:")
+                for idx, val in attn_sorted[:10]:  # top 10
+                    print(f"Var {idx}: {val:.4f}")
+                """
+                z_scores = alpha * z_scores + (1 - alpha) * attn_importance
+            else:
+                z_scores = z_scores
             k_lst = topk(z_scores, labels[i][self.window_size * 2:], us_all_z_score_pot)
             k_at_step = topk_at_step(z_scores, labels[i][self.window_size * 2:])
             k_all.append(k_lst)
@@ -902,7 +1098,205 @@ class AERCA(nn.Module):
         self._log_and_print('Root cause analysis AC*@100: {:.5f}', ac_star_at[2])
         self._log_and_print('Root cause analysis AC*@500: {:.5f}', ac_star_at[3])
         self._log_and_print('Root cause analysis Avg*@500: {:.5f}', np.mean(k_all))
-        write_results(self.options,self.local_model_name,ac_at,k_at_step_all,self.total_params,'./result_2.csv')
+        write_results(self.options,self.local_model_name,ac_at,k_at_step_all,self.total_params,'RQ_swat_windows.csv')
+
+    def _testing_root_cause_new(self, xs, labels, alphas=np.arange(0, 1.1, 0.1), use_attention_fusion=True, sample_idx_for_plot=0):
+        # Load model and encoder stats
+        self.load_state_dict(torch.load(os.path.join(self.save_dir, f'{self.model_name}.pt'),
+                                        map_location=self.device))
+        self.eval()
+        self.us_mean_encoder = np.load(os.path.join(self.save_dir, f'{self.model_name}_us_mean_encoder.npy'))
+        self.us_std_encoder = np.load(os.path.join(self.save_dir, f'{self.model_name}_us_std_encoder.npy'))
+
+        # Collect latent representations and attention weights
+        us_list = []
+        us_sample_list = []
+        attn_list = []
+
+        with torch.no_grad():
+            for i in range(len(xs)):
+                x = xs[i]
+                label = labels[i]
+                loss, nexts_hat, nexts, encoder_coeffs, decoder_coeffs, kl_div, preprocessed_label, us, attn_weights = self._testing_step(x, label, add_u=False)
+                us_sample_list.append(us[self.window_size:].cpu().numpy())
+                us_list.append(us.cpu().numpy())
+                if use_attention_fusion:
+                    attn_mean = attn_weights.mean(dim=0).cpu().numpy()  # shape [num_vars]
+                    attn_list.append(attn_mean)
+
+        # POT threshold computation
+        us_all = np.concatenate(us_list, axis=0).reshape(-1, self.num_vars)
+        us_all_z_score = (-(us_all - self.us_mean_encoder) / self.us_std_encoder)
+        us_all_z_score_pot = [pot(us_all_z_score[:, i], self.risk, self.initial_level, self.num_candidates)[0] for i in range(self.num_vars)]
+        us_all_z_score_pot = np.array(us_all_z_score_pot)
+
+        # Sweep over alphas
+        ac1_list, ac3_list, ac5_list, ac10_list = [], [], [], []
+
+        for alpha in alphas:
+            k_all = []
+            k_at_step_all = []
+            for i in range(len(xs)):
+                us_sample = us_sample_list[i]
+                z_scores = (-(us_sample - self.us_mean_encoder) / self.us_std_encoder)
+
+                if use_attention_fusion:
+                    attn_importance = attn_list[i]
+                    attn_importance = np.expand_dims(attn_importance, axis=0).repeat(z_scores.shape[0], axis=0)
+                    attn_importance = attn_importance.reshape(1, -1)  # (1, 51)
+                    z_scores = alpha * z_scores + (1 - alpha) * attn_importance
+
+                k_lst = topk(z_scores, labels[i][self.window_size*2:], us_all_z_score_pot)
+                k_at_step = topk_at_step(z_scores, labels[i][self.window_size*2:])
+                k_all.append(k_lst)
+                k_at_step_all.append(k_at_step)
+
+            k_all_mean = np.array(k_all).mean(axis=0)
+            k_at_step_mean = np.array(k_at_step_all).mean(axis=0)
+            ac1_list.append(k_at_step_mean[0])
+            ac3_list.append(k_at_step_mean[2])
+            ac5_list.append(k_at_step_mean[4])
+            ac10_list.append(k_at_step_mean[9])
+
+        # Plot AC@K vs alpha
+        plt.figure(figsize=(8,5))
+        plt.plot(alphas, ac1_list, '-o', label='AC@1')
+        plt.plot(alphas, ac3_list, '-o', label='AC@3')
+        plt.plot(alphas, ac5_list, '-o', label='AC@5')
+        plt.plot(alphas, ac10_list, '-o', label='AC@10')
+        plt.xlabel('Alpha (weight for z-score)')
+        plt.ylabel('AC@K')
+        plt.title(f'AC@K vs Alpha for {self.model_name}')
+        plt.legend()
+        plt.grid(True)
+        plt.show()
+
+        # Visualize variable-level fusion for a sample
+        latent_sample = (-(us_sample_list[sample_idx_for_plot] - self.us_mean_encoder) / self.us_std_encoder)
+        if use_attention_fusion:
+            attn_sample = attn_list[sample_idx_for_plot]
+            fused_sample = alpha * latent_sample + (1 - alpha) * np.expand_dims(attn_sample, axis=0).repeat(latent_sample.shape[0], axis=0)
+        else:
+            fused_sample = latent_sample
+            attn_sample = np.zeros_like(latent_sample[0])
+
+        # Plot per-variable scores
+        plt.figure(figsize=(12,4))
+        plt.plot(normalize(latent_sample.mean(axis=0)), label='Latent z-score')
+        plt.plot(normalize(attn_sample), label='Attention importance')
+        plt.plot(normalize(fused_sample.mean(axis=0)), label='Fused score', linewidth=2)
+        plt.scatter(np.where(labels[sample_idx_for_plot][self.window_size*2:]==1)[0],
+                    normalize(fused_sample.mean(axis=0))[labels[sample_idx_for_plot][self.window_size*2:]==1],
+                    color='red', label='True anomalies')
+        plt.xlabel('Variable index')
+        plt.ylabel('Score')
+        plt.title(f'Variable-level latent vs attention vs fused for sample {sample_idx_for_plot}')
+        plt.legend()
+        plt.show()
+
+    def _testing_root_cause_(self, xs, labels):
+        # Load model and encoder stats
+        self.load_state_dict(torch.load(os.path.join(self.save_dir, f'{self.model_name}.pt'),
+                                        map_location=self.device))
+        self.eval()
+        self.us_mean_encoder = np.load(os.path.join(self.save_dir, f'{self.model_name}_us_mean_encoder.npy'))
+        self.us_std_encoder = np.load(os.path.join(self.save_dir, f'{self.model_name}_us_std_encoder.npy'))
+
+        # Collect latent representations
+        us_list = []
+        us_sample_list = []
+        with torch.no_grad():
+            for i in range(len(xs)):
+                x = xs[i]
+                label = labels[i]
+                us = self._testing_step(x, label, add_u=False)[-1]
+                us_sample_list.append(us[self.window_size:].cpu().numpy())
+                us_list.append(us.cpu().numpy())
+
+        # Combine latent representations for RCA
+        us_all = np.concatenate(us_list, axis=0).reshape(-1, self.num_vars)
+        import pandas as pd
+        import time
+        data_for_rca = pd.DataFrame(us_all, columns=[f"var_{i}" for i in range(self.num_vars)])
+
+        # Determine anomaly index (example: first anomalous step)
+        anomaly_idx = 0  
+
+        # Run RCA
+        sorted_scores = self.run_rca(anomaly_idx, data_for_rca, data_for_rca)
+
+        # Convert sorted_scores to a dict for easier indexing
+        score_dict = dict(sorted_scores)
+
+        # Compute top-k metrics for each sample
+        k_all = []
+        k_at_step_all = []
+        for i in range(len(xs)):
+            # Use the same columns as the latent space
+            z_scores = np.array([score_dict[f"var_{j}"] for j in range(self.num_vars)])
+            k_lst = topk_no_threshold(z_scores, labels[i][self.window_size * 2:])
+            k_at_step = topk_at_step(z_scores, labels[i][self.window_size * 2:])
+            k_all.append(k_lst)
+            k_at_step_all.append(k_at_step)
+
+        k_all = np.array(k_all).mean(axis=0)
+        k_at_step_all = np.array(k_at_step_all).mean(axis=0)
+
+        # Log metrics
+        ac_at = [k_at_step_all[0], k_at_step_all[2], k_at_step_all[4], k_at_step_all[9]]
+        self._log_and_print('Root cause analysis AC@1: {:.5f}', ac_at[0])
+        self._log_and_print('Root cause analysis AC@3: {:.5f}', ac_at[1])
+        self._log_and_print('Root cause analysis AC@5: {:.5f}', ac_at[2])
+        self._log_and_print('Root cause analysis AC@10: {:.5f}', ac_at[3])
+        self._log_and_print('Root cause analysis Avg@10: {:.5f}', np.mean(k_at_step_all))
+
+        ac_star_at = [k_all[0], k_all[9], k_all[99], k_all[499]]
+        self._log_and_print('Root cause analysis AC*@1: {:.5f}', ac_star_at[0])
+        self._log_and_print('Root cause analysis AC*@10: {:.5f}', ac_star_at[1])
+        self._log_and_print('Root cause analysis AC*@100: {:.5f}', ac_star_at[2])
+        self._log_and_print('Root cause analysis AC*@500: {:.5f}', ac_star_at[3])
+        self._log_and_print('Root cause analysis Avg*@500: {:.5f}', np.mean(k_all))
+
+        write_results(self.options, self.local_model_name, ac_at, k_at_step_all, self.total_params, 'RQ_swat_windows.csv')
+
+
+    def run_rca(self, anomaly, data, data_scaled):
+        scores = scoring(data=data, data_scaled=data_scaled, anomaly=anomaly)
+        sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+
+        return sorted_scores
+
+
+    def run_for_datapath(datapath, args):
+        args.datapath = datapath
+
+        data, data_scaled, inject_time = prepare_data(datapath=datapath)
+            
+        if args.ad is None or args.ad == "inject":
+            anomaly = inject_time
+        else:
+            dataset = datapath.strip(os.sep).split(os.sep)[3]
+
+            complexity = "simple" if "simple" in datapath else "full"
+            anomalies_path = f"./evaluation_ad/{args.ad}_{dataset}_{complexity}.txt"
+
+            anomalies = None
+            with open(anomalies_path, "r") as file:
+                for line in file:
+                    if args.datapath in line.lower():
+                        anomalies = line.strip()
+                        break
+            
+            anomalies = re.search(r'\[(.*?)\]', anomalies).groups()[0]
+            anomaly = anomalies.split(",")[0]
+            anomaly = int(anomaly)    
+        
+        rca_start = time()
+        sorted_scores = run_rca(args, anomaly, data, data_scaled)
+        rca_end = time()    
+
+        return datapath, rca_end-rca_start, sorted_scores
+
 
     def _testing_causal_discover(self, xs, causal_struct_value):
         self.load_state_dict(torch.load(os.path.join(self.save_dir, f'{self.model_name}.pt'),

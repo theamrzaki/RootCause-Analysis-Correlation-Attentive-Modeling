@@ -334,6 +334,36 @@ def topk(z_scores, label, threshold, k_range=500):
         k_lst.append(sum(count)/min(k, len(label_ind)))
     return np.array(k_lst)
 
+def topk_no_threshold(scores, label, k_range=500):
+    """
+    Top-k using RCA scores (no threshold needed).
+
+    Args:
+        scores: anomaly scores (1D array or list)
+        label: ground truth (binary)
+        k_range: how many top-k to compute
+
+    Returns:
+        k_lst: fraction of anomalies detected in top-k
+    """
+    scores = np.array(scores).flatten()
+    label = np.array(label).flatten()
+    
+    # Ranking: highest score first
+    ranking = np.argsort(scores)[::-1]
+    
+    # Indices of actual anomalies
+    label_ind = np.where(label == 1)[0]
+    
+    k_lst = []
+    for k in range(1, k_range+1):
+        topk_indices = ranking[:k]
+        count = sum([1 if i in label_ind else 0 for i in topk_indices])
+        k_lst.append(count / min(k, len(label_ind)))
+    
+    return np.array(k_lst)
+
+
 def topk_at_step(scores, labels, k_range=10):
     k_lst = []
     for i in range(len(labels)):
@@ -347,7 +377,7 @@ def topk_at_step(scores, labels, k_range=10):
 
 
 def write_results(args, local_model_name, ac_at,k_at_step_all, total_params,file_name='result.csv'):
-    file_path = file_name
+    file_path = "./results/"+file_name
     #infodict = {'pr':ps, 'rc':rs, 'auc':auc, 'ap':ap, 'f1':effection}
     
     ac_at = [k_at_step_all[0], k_at_step_all[2], k_at_step_all[4], k_at_step_all[9]]
@@ -376,6 +406,11 @@ def write_results(args, local_model_name, ac_at,k_at_step_all, total_params,file
         'window_size': args['window_size'],
         'early_stopping': args['early_stopping'],
         'num_epochs': args['epochs'],
+
+        'AMOC_Loss': args['AMOC_Loss'],
+        'mean_std_recon_loss': args['mean_std_recon_loss'],
+        'outer_hidden_dim': args['outer_hidden_dim'],
+        'outer_heads_num': args['outer_heads_num'],
     }
     
 

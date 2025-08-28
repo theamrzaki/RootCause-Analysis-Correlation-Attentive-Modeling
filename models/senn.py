@@ -183,13 +183,15 @@ class SENNGC(nn.Module):
 
 
         elif args["coeff_architecture"] == "TemporalGNN_Attention":
-            self.rank = 1
+            self.rank = 51
             
             self.coeff_net = RecurrentAttentionGNN_Attn(
                 num_vars=num_vars,
                 rank=self.rank,
                 order=order,
                 device=device,
+                hidden_dim = args.get("outer_hidden_dim", 64),  # default to 64 if not specified
+                num_heads = args.get("outer_heads_num", 4),  # default to 4 heads if not specified
                 attention_heads = args.get("num_attention_heads", 4),  # default to 4 heads if not specified
                 attention_dim = args.get("attention_dim", 64)  # default to 64 if not specified
             )
@@ -422,8 +424,8 @@ class SENNGC(nn.Module):
         inputs: (B, order, num_vars)
         TemporalGNN processes the entire lag sequence recurrently.
         """
-        preds, coeffs = self.coeff_net(inputs)  # let TemporalGNN return preds + coeffs
-        return preds, coeffs
+        preds, coeffs, attn_weights = self.coeff_net(inputs)  # let TemporalGNN return preds + coeffs
+        return preds, coeffs, attn_weights
     
     def forward(self, inputs: torch.Tensor):
         if self.args["coeff_architecture"] == "deep_mlp":
