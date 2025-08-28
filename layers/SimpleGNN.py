@@ -269,7 +269,8 @@ class AttentionCoeffGNN_multihead_fixed(nn.Module):
 
         # Attention
         attn_logits = torch.matmul(Q, K.transpose(-2, -1)) / (self.num_vars ** 0.5)
-        attn_weights = F.softmax(attn_logits, dim=-1)
+        tau = 0.3  # temperature for sharper attention
+        attn_weights = F.softmax(attn_logits / tau, dim=-1)  # try tau ∈ {0.3, 0.5, 0.7, 1.0}
 
         # Attention dropout
         attn_weights = F.dropout(attn_weights, p=attn_dropout, training=self.training)
@@ -298,7 +299,8 @@ class AttentionCoeffGNN_multihead_fixed(nn.Module):
 
         # Reconstruct coefficient matrix
         coeffs_k = torch.bmm(U, V.transpose(1, 2))
-        return coeffs_k
+        attn_mean = attn_weights.mean(dim=1)
+        return coeffs_k,attn_mean
 
 class RecurrentAttentionCoeffGNN__(nn.Module):
     def __init__(self, num_vars, rank, order, hidden_dim=64, num_layers=1, device="cpu"):
@@ -553,75 +555,6 @@ class RecurrentAttentionGNN_Attn_nocoeff(nn.Module):
         return preds, None
 
 
-
-class RecurrentAttentionGNN_Attn_old(nn.Module):
-    def __init__(self, num_vars, rank, order, hidden_dim=256, num_heads=2, device="cpu", attention_heads=4, attention_dim=64):
-        super().__init__()
-        self.num_vars = num_vars
-        self.rank = rank
-        self.order = order
-        self.hidden_dim = hidden_dim
-        self.device = device
-
-        # Base GNN per lag
-        self.base_net = AttentionCoeffGNN_multihead_fixed(num_vars=num_vars, rank=rank, hidden_dim=attention_dim, heads=attention_heads)
-
-        # Project flattened GNN output to hidden dimension for attention
-        self.in_proj = nn.Linear(num_vars * num_vars, hidden_dim)
-
-        # Temporal attention across lags
-        self.temporal_attn = nn.MultiheadAttention(
-            embed_dim=hidden_dim, num_heads=num_heads, batch_first=True
-        )
-
-        # Map attention hidden state back to coefficients
-        self.coeff_proj = nn.Linear(hidden_dim, num_vars * num_vars)
-
-    def forward(self, inputs: torch.Tensor, batch_chunk_size: int = 10000):
-        B, O, P = inputs.shape
-        device = inputs.device
-
-        preds_list = []
-        coeffs_list = []
-
-        for start in range(0, B, batch_chunk_size):
-            end = min(start + batch_chunk_size, B)
-            x_chunk = inputs[start:end]  # (B_chunk, O, P)
-            B_chunk = x_chunk.size(0)
-
-            # --- Step 1: extract features per lag ---
-            features_seq = []
-            for k in range(O):
-                feat_k = self.base_net(x_chunk[:, k, :])        # (B_chunk, P, P)
-                features_seq.append(feat_k.view(B_chunk, -1))   # (B_chunk, P*P)
-
-            features_seq = torch.stack(features_seq, dim=1)      # (B_chunk, O, P*P)
-
-            # --- Step 2: project to hidden_dim for attention ---
-            attn_input = self.in_proj(features_seq)              # (B_chunk, O, hidden_dim)
-
-            # --- Step 3: temporal attention ---
-            attn_out, _ = self.temporal_attn(attn_input, attn_input, attn_input)  # (B_chunk, O, hidden_dim)
-
-            # --- Step 4: map attention outputs back to coeffs ---
-            coeffs_seq = self.coeff_proj(attn_out)               # (B_chunk, O, P*P)
-            coeffs_seq = coeffs_seq.view(B_chunk, O, P, P)       # (B_chunk, O, P, P)
-
-            # --- Step 5: prediction using coeffs ---
-            preds_chunk = torch.zeros((B_chunk, P), device=device)
-            for k in range(O):
-                preds_chunk += torch.matmul(coeffs_seq[:, k, :, :], 
-                                            x_chunk[:, k, :].unsqueeze(-1)).squeeze(-1)
-
-            preds_list.append(preds_chunk)
-            coeffs_list.append(coeffs_seq)
-
-        preds = torch.cat(preds_list, dim=0)                    # (B, P)
-        coeffs = torch.cat(coeffs_list, dim=0)                  # (B, O, P, P)
-
-        return preds, coeffs
-
-
 class RecurrentAttentionGNN_Attn(nn.Module):
     def __init__(self, num_vars, rank, order, hidden_dim=256, num_heads=2, device="cpu",
                  attention_heads=4, attention_dim=64, pe_scale=0.01):
@@ -670,7 +603,7 @@ class RecurrentAttentionGNN_Attn(nn.Module):
             # --- Step 1: extract features per lag ---
             features_seq = []
             for k in range(O):
-                feat_k = self.base_net(x_chunk[:, k, :])        # (B_chunk, P, P)
+                feat_k, _ = self.base_net(x_chunk[:, k, :])        # (B_chunk, P, P)
                 features_seq.append(feat_k.view(B_chunk, -1))   # (B_chunk, P*P)
             features_seq = torch.stack(features_seq, dim=1)      # (B_chunk, O, P*P)
 
@@ -680,7 +613,7 @@ class RecurrentAttentionGNN_Attn(nn.Module):
             # --- Step 3: temporal attention ---
             attn_out, _ = self.temporal_attn(attn_input, attn_input, attn_input)  # (B_chunk, O, hidden_dim)
 
-            # --- Step 4: map attention outputs back to coefficients ---
+            # --- Step 4: map attention outputs back to coeffs ---
             coeffs_seq = self.coeff_proj(attn_out)               # (B_chunk, O, P*P)
             coeffs_seq = coeffs_seq.view(B_chunk, O, P, P)       # (B_chunk, O, P, P)
 
@@ -696,7 +629,92 @@ class RecurrentAttentionGNN_Attn(nn.Module):
         preds = torch.cat(preds_list, dim=0)                    # (B, P)
         coeffs = torch.cat(coeffs_list, dim=0)                  # (B, O, P, P)
 
-        return preds, coeffs
+        return preds, coeffs, None 
+
+
+class RecurrentAttentionGNN_Attn_new(nn.Module):
+    def __init__(self, num_vars, rank, order, hidden_dim=256, num_heads=4,
+                 attention_heads=6, attention_dim=128, pe_scale=0.05, device="cpu"):
+        super().__init__()
+        self.num_vars = num_vars
+        self.rank = rank
+        self.order = order
+        self.hidden_dim = hidden_dim
+        self.device = device
+        self.pe_scale = pe_scale
+
+        # --- Base GNN per lag ---
+        self.base_net = AttentionCoeffGNN_multihead_fixed(
+            num_vars=num_vars, rank=rank, hidden_dim=attention_dim, heads=attention_heads
+        )
+
+        # --- Project GNN output to attention hidden_dim ---
+        self.in_proj = nn.Linear(num_vars * num_vars, hidden_dim)
+
+        # --- Learnable positional embedding ---
+        self.pos_enc = nn.Parameter(torch.randn(1, order, hidden_dim) * pe_scale)
+
+        # --- Temporal multi-head attention (residual + normalization) ---
+        self.temporal_attn = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=num_heads, batch_first=True)
+        self.attn_layer_norm = nn.LayerNorm(hidden_dim)
+
+        # --- Dilated temporal convolution (optional, helps multi-scale) ---
+        self.dilated_conv = nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3, padding=2, dilation=2)
+
+        # --- Map attention output back to coefficients ---
+        self.coeff_proj = nn.Linear(hidden_dim, num_vars * num_vars)
+
+    def forward(self, inputs: torch.Tensor, batch_chunk_size: int = 10000):
+        B, O, P = inputs.shape
+        device = inputs.device
+
+        preds_list, coeffs_list, attn_seq = [], [], []
+
+        pos_embeddings = self.pos_enc[:, :O, :]
+
+        for start in range(0, B, batch_chunk_size):
+            end = min(start + batch_chunk_size, B)
+            x_chunk = inputs[start:end]
+            B_chunk = x_chunk.size(0)
+
+            # --- Step 1: base GNN per lag ---
+            features_seq = []
+            attn_lags = []
+            for k in range(O):
+                feat_k, attn_k = self.base_net(x_chunk[:, k, :])
+                features_seq.append(feat_k.view(B_chunk, -1))
+                attn_lags.append(attn_k)
+            features_seq = torch.stack(features_seq, dim=1)  # (B_chunk, O, P*P)
+            attn_lags = torch.stack(attn_lags, dim=1)        # (B_chunk, O, P, P)
+
+            # --- Step 2: project to hidden_dim + positional encoding ---
+            attn_input = self.in_proj(features_seq) + pos_embeddings
+
+            # --- Step 3: temporal attention with residual ---
+            attn_out, _ = self.temporal_attn(attn_input, attn_input, attn_input)
+            attn_out = self.attn_layer_norm(attn_out + attn_input)
+
+            # --- Step 4: dilated temporal conv (multi-scale) ---
+            attn_out = self.dilated_conv(attn_out.transpose(1, 2)).transpose(1, 2)
+
+            # --- Step 5: map back to coefficient matrix ---
+            coeffs_seq = self.coeff_proj(attn_out).view(B_chunk, O, P, P)
+
+            # --- Step 6: prediction ---
+            preds_chunk = torch.zeros(B_chunk, P, device=device)
+            for k in range(O):
+                preds_chunk += torch.matmul(coeffs_seq[:, k, :, :], x_chunk[:, k, :].unsqueeze(-1)).squeeze(-1)
+
+            preds_list.append(preds_chunk)
+            coeffs_list.append(coeffs_seq)
+            attn_seq.append(attn_lags)
+
+        preds = torch.cat(preds_list, dim=0)
+        coeffs = torch.cat(coeffs_list, dim=0)
+        attn_seq = torch.cat(attn_seq, dim=0)  # (B, O, P, P)
+
+        return preds, coeffs, attn_seq
+
 
 import torch
 import torch.nn as nn
@@ -774,6 +792,220 @@ class TemporalGNN(nn.Module):
 
     
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from math import log
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+# ---------- Lightweight Temporal Encoder (efficient) ----------
+class TemporalDilatedEncoderFast(nn.Module):
+    def __init__(self, num_vars, hidden_dim=128, dilations=(1,2,4,8)):
+        super().__init__()
+        self.proj = nn.Linear(num_vars, hidden_dim)
+        # Use small stack of depthwise separable friendly convs (fast)
+        self.layers = nn.ModuleList([
+            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3, padding=d, dilation=d)
+            for d in dilations
+        ])
+        self.norms = nn.ModuleList([nn.LayerNorm(hidden_dim) for _ in dilations])
+
+    def forward(self, x):  # x: (B,O,P)
+        h = self.proj(x)                # (B,O,H)
+        h = h.transpose(1,2)            # (B,H,O)
+        for conv, ln in zip(self.layers, self.norms):
+            z = conv(h)                 # (B,H,O)
+            z = F.gelu(z)
+            # LayerNorm expects (B,O,H) so transpose
+            z_t = z.transpose(1,2)      # (B,O,H)
+            z_t = ln(z_t)
+            z = z_t.transpose(1,2)     # (B,H,O)
+            h = h + z                  # residual (same shapes)
+        h = h.transpose(1,2)            # (B,O,H)
+        return h
+
+# ---------- Deterministic Graph Learner (fast, cached) ----------
+class GraphLearnerDeterministic(nn.Module):
+    def __init__(self, num_vars, hidden_dim=128):
+        super().__init__()
+        self.num_vars = num_vars
+        self.src = nn.Parameter(torch.randn(num_vars, hidden_dim) * 0.01)
+        self.dst = nn.Parameter(torch.randn(num_vars, hidden_dim) * 0.01)
+        self.scorer = nn.Linear(hidden_dim, 1)
+        # cache
+        self._cached_A = None
+        self._cached_device = None
+        self._cached_version = 0  # bump when force-recompute
+
+    def _compute_logits(self):
+        P = self.num_vars
+        src = self.src.unsqueeze(1).expand(P, P, -1)   # (P,P,H)
+        dst = self.dst.unsqueeze(0).expand(P, P, -1)   # (P,P,H)
+        h = torch.tanh(src + dst)                      # (P,P,H)
+        logits = self.scorer(h).squeeze(-1)            # (P,P)
+        mask_eye = torch.eye(P, device=logits.device).bool()
+        logits = logits.masked_fill(mask_eye, -1e9)
+        return logits
+
+    def forward(self, force_recompute=False):
+        # compute deterministic adjacency via sigmoid(logits)
+        device = self.src.device
+        if (self._cached_A is None) or force_recompute or (self._cached_device != device):
+            logits = self._compute_logits().to(device)
+            A = torch.sigmoid(logits)   # (P,P) deterministic
+            self._cached_A = A
+            self._cached_device = device
+            self._cached_version += 1
+        else:
+            A = self._cached_A
+        # l0 proxy (mean) can be used if you want a reg term externally
+        l0 = torch.mean(A)
+        return A, l0
+
+# ---------- Fast single-hop Message Passing (vectorized) ----------
+class GraphMessagePassingFast(nn.Module):
+    def __init__(self, hidden_dim=128):
+        super().__init__()
+        self.msg_out = nn.Linear(hidden_dim, hidden_dim)
+        self.norm = nn.LayerNorm(hidden_dim)
+
+    def forward(self, h_nodes, A):
+        # h_nodes: (B,O,P,H)
+        B, O, P, H = h_nodes.shape
+        # flatten (B*O,P,H) for single matmul
+        h_flat = h_nodes.view(B*O, P, H)                 # (B*O,P,H)
+        # neighbor aggregation via A^T (fast single matmul)
+        # new_nodes[bop] = A^T @ h_flat[bop]  -> (B*O, P, H)
+        new_nodes = torch.matmul(A.transpose(0,1), h_flat)  # (B*O,P,H)
+        new_nodes = self.msg_out(new_nodes)               # (B*O,P,H)
+        out = (h_flat + new_nodes).view(B, O, P, H)        # residual
+        return self.norm(out)
+
+# ---------- Lightweight "MoE-lite" -> small residual MLP ----------
+class MoELite(nn.Module):
+    def __init__(self, hidden_dim=128, n_hidden=1):
+        super().__init__()
+        layers = []
+        for _ in range(n_hidden):
+            layers.append(nn.Linear(hidden_dim, hidden_dim))
+            layers.append(nn.GELU())
+        self.net = nn.Sequential(*layers) if layers else nn.Identity()
+        self.norm = nn.LayerNorm(hidden_dim)
+
+    def forward(self, h):  # (B,O,P,H)
+        out = self.net(h)
+        return self.norm(h + out)
+
+# ---------- Hybrid Coefficient Decoder (same idea, vectorized) ----------
+class HybridCoeffDecoderFast(nn.Module):
+    def __init__(self, num_vars, hidden_dim=128, rank=32):
+        super().__init__()
+        self.num_vars = num_vars
+        self.rank = rank
+        self.u_head = nn.Linear(hidden_dim, num_vars * rank)
+        self.v_head = nn.Linear(hidden_dim, num_vars * rank)
+        self.diag_head = nn.Linear(hidden_dim, num_vars)
+        # remove huge sparse_head for speed (optional); keep lowrank+diag only
+        # if you want sparse residual keep a small head, but it's heavier.
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
+    def forward(self, h):  # h: (B,O,H)
+        B, O, H = h.shape
+        P = self.num_vars
+        U = self.u_head(h).view(B, O, P, self.rank)    # (B,O,P,r)
+        V = self.v_head(h).view(B, O, P, self.rank)    # (B,O,P,r)
+        # lowrank via einsum
+        lowrank = torch.einsum("boir,bojr->boij", U, V)   # (B,O,P,P)
+        diag = torch.diag_embed(self.diag_head(h).view(B, O, P))  # (B,O,P,P)
+        return lowrank + diag
+
+# ---------- Fast Temporal Causal Model (vectorized and cached A) ----------
+class TemporalCausalMoE(nn.Module):
+    def __init__(self, num_vars, order, rank=32, hidden_dim=128,
+                 dilations=(1,2,4,8), heads=8, n_experts=4, pe_scale=0.1,
+                 l0_lambda=1e-4, fast_mode=True, use_fp16=False):
+        """
+        Same external signature as before but optimized.
+        Set fast_mode=True to enable the fast path (default).
+        """
+        super().__init__()
+        self.num_vars = num_vars
+        self.order = order
+        self.hidden_dim = hidden_dim
+        self.rank = rank
+        self.fast_mode = fast_mode
+        self.use_fp16 = use_fp16
+
+        # lightweight temporal encoder
+        self.temporal = TemporalDilatedEncoderFast(num_vars, hidden_dim, dilations)
+
+        # positional encoding
+        self.pos_enc = nn.Parameter(torch.randn(1, order, hidden_dim) * pe_scale)
+
+        # deterministic graph learner (cached)
+        self.graph = GraphLearnerDeterministic(num_vars, hidden_dim)
+
+        # message passing (fast single matmul)
+        self.node_proj = nn.Linear(hidden_dim, hidden_dim)
+        self.gmp = GraphMessagePassingFast(hidden_dim)
+
+        # light MoE replacement
+        self.moe = MoELite(hidden_dim, n_hidden=1)
+
+        # coefficient decoder (lowrank + diag)
+        self.coeff_decoder = HybridCoeffDecoderFast(num_vars, hidden_dim, rank)
+
+    def forward(self, inputs, force_recompute_A=False):  # inputs: (B,O,P)
+        import contextlib
+
+        # optionally run in half precision
+        if self.use_fp16 and inputs.is_cuda:
+            dtype_switch = torch.cuda.amp.autocast(enabled=True)
+        else:
+            dtype_switch = contextlib.nullcontext()
+
+        with dtype_switch:
+            B, O, P = inputs.shape
+
+            # 1) temporal features (vectorized)
+            h_lag = self.temporal(inputs)                          # (B,O,H)
+            # add pos enc (broadcast)
+            pos = self.pos_enc[:, :O, :].to(h_lag.dtype).to(h_lag.device)
+            h_lag = h_lag + pos
+
+            # 2) broadcast to nodes (clone to avoid view inplace issues)
+            h_nodes = self.node_proj(h_lag).unsqueeze(2).expand(B, O, P, self.hidden_dim).clone()  # (B,O,P,H)
+
+            # 3) deterministic adjacency (cached) + message passing
+            A, l0 = self.graph(force_recompute_A)   # (P,P), scalar proxy
+            h_nodes = self.gmp(h_nodes, A)          # (B,O,P,H)
+
+            # 4) light MoE (small MLP)
+            h_nodes = self.moe(h_nodes)             # (B,O,P,H)
+
+            # 5) aggregate nodes per lag
+            h_agg = h_nodes.mean(dim=2)             # (B,O,H)
+
+            # 6) decode coefficients vectorized
+            coeffs_seq = self.coeff_decoder(h_agg)  # (B,O,P,P)
+
+            # 7) vectorized prediction: einsum over lag and input var -> (B,P)
+            preds = torch.einsum("boij,boj->bi", coeffs_seq, inputs)  # (B,P)
+
+        return preds, coeffs_seq
 
 
 
