@@ -124,5 +124,34 @@ swatTemporalGNN_Attention_(no mean)_normal_KL28_175723_1_0.0001_2_window_1,swat,
 swatTemporalGNN_Attention_(no mean)_normal_KL28_180759_1_0.0001_3_window_1,swat,3,normal_KL,TemporalGNN_Attention,128,1,0.0001,0.15,0.25,0.3,0.35,0.28500000000000003,3182267,1,0,100,0,0,256,4
 swatTemporalGNN_Attention_(no mean)_normal_KL28_181522_1_0.0001_3_window_1,swat,3,normal_KL,TemporalGNN_Attention,128,2,0.0001,0.05,0.1,0.2,0.4,0.225,3182267,1,0,100,0,0,256,4
 swatTemporalGNN_Attention_(no mean)_normal_KL28_182329_1_0.0001_3_window_1,swat,3,normal_KL,TemporalGNN_Attention,128,4,0.0001,0.05,0.15,0.25,0.25,0.205,3182267,1,0,100,0,0,256,4
-swatTemporalGNN_Attention_(no mean)_normal_KL28_183909_2_0.0001_1_window_2,swat,1,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.275,0.4,0.45,0.525,0.44000000000000006,6412219,2,0,100,0,0,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL28_183909_2_0.0001_1_window_2,swat,1,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.275,0.4,0.45,0.525,0.44000000000000006,6412219,2,0,100,0,0,256,4, rank 51
 swatTemporalGNN_Attention_(no mean)_normal_KL28_185447_3_0.0001_1_window_3,swat,1,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.2333333333333333,0.36666666666666664,0.36666666666666664,0.38333333333333336,0.36,6412475,3,0,100,0,0,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL28_191722_2_0.0001_1_window_2,swat,1,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.25,0.325,0.3375,0.4,0.35125,5101519,2,0,100,0,0,256,4, rank 1
+swatTemporalGNN_Attention_(no mean)_normal_KL28_193355_2_0.0001_1_window_2,swat,1,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.275,0.325,0.4,0.5,0.385,7696705,2,0,100,0,0,256,4, rank 100
+swatTemporalGNN_Attention_(no mean)_normal_KL28_195211_2_0.0001_1_window_2,swat,1,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.2,0.225,0.25,0.3,0.26499999999999996,7696705,2,0,100,0,0,256,2
+swatTemporalGNN_Attention_(no mean)_normal_KL28_200900_2_0.0001_1_window_2,swat,1,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.25,0.325,0.375,0.4875,0.38749999999999996,6412219,2,0,100,0,0,256,2
+swatTemporalGNN_Attention_(no mean)_normal_KL28_202327_1_0.0005_1_window_1,swat,1,normal_KL,TemporalGNN_Attention,128,2,0.0005,0.05,0.1,0.1,0.15,0.095,3182267,1,0,100,0,0,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL28_203638_2_0.0001_1_window_2,swat,1,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.225,0.35,0.375,0.375,0.35,6412219,2,0,100,1,1,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL28_205515_2_1e-05_1_window_2,swat,1,normal_KL,TemporalGNN_Attention,256,2,1e-05,0.3,0.375,0.375,0.45,0.38750000000000007,6412219,2,0,100,1,1,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL28_211045_1_0.0005_1_window_1,swat,1,normal_KL,TemporalGNN_Attention,128,2,0.0005,0.05,0.1,0.1,0.15,0.095,3182267,1,0,100,0,0,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL28_212123_1_0.0005_3_window_1,swat,3,normal_KL,TemporalGNN_Attention,128,2,0.0005,0.05,0.15,0.2,0.35,0.21000000000000002,3182267,1,0,100,0,0,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL29_010638_4_0.0001_1_window_4,swat,1,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.25,0.4,0.4125,0.4375,0.3875,6412731,4,0,100,1,1,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL29_013147_5_0.0001_1_window_5,swat,1,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.3,0.38,0.38,0.39,0.375,6412987,5,0,100,1,1,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL29_020200_6_0.0001_1_window_6,swat,1,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.29166666666666663,0.3916666666666667,0.4666666666666667,0.4916666666666667,0.43833333333333335,6413243,6,0,100,1,1,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL29_023739_1_0.0005_1_window_1,swat,1,normal_KL,TemporalGNN_Attention,128,2,0.0005,0.05,0.1,0.1,0.15,0.095,3182267,1,0,100,0,0,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL29_024810_1_0.0005_3_window_1,swat,3,normal_KL,TemporalGNN_Attention,128,2,0.0005,0.05,0.15,0.2,0.35,0.21000000000000002,3182267,1,0,100,0,0,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL29_051659_4_1e-05_1_window_4,swat,1,normal_KL,TemporalGNN_Attention,256,2,1e-05,0.3125,0.3875,0.3875,0.4,0.38249999999999995,6412731,4,0,100,1,1,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL29_054804_5_1e-05_1_window_5,swat,1,normal_KL,TemporalGNN_Attention,256,2,1e-05,0.28,0.36,0.36,0.39,0.35700000000000004,6412987,5,0,100,1,1,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL29_062014_6_1e-05_1_window_6,swat,1,normal_KL,TemporalGNN_Attention,256,2,1e-05,0.33333333333333337,0.39166666666666666,0.39166666666666666,0.4,0.38666666666666666,6413243,6,0,100,1,1,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL29_065811_4_1e-05_1_window_4,swat,1,normal_KL,TemporalGNN_Attention,256,2,1e-05,0.3125,0.35,0.3625,0.375,0.36,6412731,4,0,100,0,0,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL29_072403_5_1e-05_1_window_5,swat,1,normal_KL,TemporalGNN_Attention,256,2,1e-05,0.32,0.37,0.39,0.4,0.382,6412987,5,0,100,0,0,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL29_075546_6_1e-05_1_window_6,swat,1,normal_KL,TemporalGNN_Attention,256,2,1e-05,0.31666666666666665,0.38333333333333336,0.38333333333333336,0.4166666666666667,0.38416666666666666,6413243,6,0,100,0,0,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL29_083339_4_0.0001_1_window_4,swat,1,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.2875,0.4,0.45,0.5,0.4262499999999999,6412731,4,0,100,0,0,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL29_085954_5_0.0001_1_window_5,swat,1,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.26,0.38,0.39,0.4,0.37499999999999994,6412987,5,0,100,0,0,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL29_093209_6_0.0001_1_window_6,swat,1,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.25,0.3583333333333333,0.3916666666666667,0.4083333333333333,0.3733333333333333,6413243,6,0,100,0,0,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL29_103331_1_1e-05_1_window_1,swat,1,normal_KL,TemporalGNN_Attention,256,2,1e-05,0.3,0.35,0.4,0.45,0.38,6411963,1,0,100,0,0,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL29_104330_1_1e-05_2_window_1,swat,2,normal_KL,TemporalGNN_Attention,256,2,1e-05,0.25,0.3,0.35,0.45,0.35500000000000004,6411963,1,0,100,0,0,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL29_105336_1_1e-05_3_window_1,swat,3,normal_KL,TemporalGNN_Attention,256,2,1e-05,0.15,0.25,0.25,0.375,0.26250000000000007,6411963,1,0,100,0,0,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL29_110427_1_0.0001_1_window_1,swat,1,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.2,0.4,0.45,0.6,0.44000000000000006,6411963,1,0,100,0,0,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL29_111406_1_0.0001_2_window_1,swat,2,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.25,0.3,0.3,0.35,0.305,6411963,1,0,100,0,0,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL29_112348_1_0.0001_3_window_1,swat,3,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.15,0.25,0.3,0.4,0.295,6411963,1,0,100,0,0,256,4
