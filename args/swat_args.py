@@ -25,18 +25,18 @@ def create_arg_parser():
     # AERCA arguments
     parser.add_argument('--window_size', type=int, default=1, help='Window size (default: 1)')
     parser.add_argument('--stride', type=int, default=1, help='Stride (default: 1)')
-    parser.add_argument('--encoder_alpha', type=float, default=0.5, help='Encoder alpha (default: 0.5)')
-    parser.add_argument('--decoder_alpha', type=float, default=0.5, help='Decoder alpha (default: 0.5)')
-    parser.add_argument('--encoder_gamma', type=float, default=0.5, help='Encoder gamma (default: 0.5)')
-    parser.add_argument('--decoder_gamma', type=float, default=0.5, help='Decoder gamma (default: 0.5)')
+    parser.add_argument('--encoder_alpha', type=float, default=1.0, help='Encoder alpha (default: 0.5)')
+    parser.add_argument('--decoder_alpha', type=float, default=1.0, help='Decoder alpha (default: 0.5)')
+    parser.add_argument('--encoder_gamma', type=float, default=0.1, help='Encoder gamma (default: 0.5)')
+    parser.add_argument('--decoder_gamma', type=float, default=0.1, help='Decoder gamma (default: 0.5)')
     parser.add_argument('--encoder_lambda', type=float, default=0.5, help='Encoder lambda (default: 0.5)')
     parser.add_argument('--decoder_lambda', type=float, default=0.5, help='Decoder lambda (default: 0.5)')
-    parser.add_argument('--beta', type=float, default=0.5, help='Beta (default: 0.5)')
+    parser.add_argument('--beta', type=float, default=0.1, help='Beta (default: 0.5)')
     parser.add_argument('--lr', type=float, default=0.0001, help='Learning rate (default: 0.000001)')
-    parser.add_argument('--epochs', type=int, default=1000, help='Number of epochs (default: 5000)')
+    parser.add_argument('--epochs', type=int, default=100, help='Number of epochs (default: 5000)')
     parser.add_argument('--hidden_layer_size', type=int, default=1000, help='Hidden layer size (default: 1000)')
     parser.add_argument('--num_hidden_layers', type=int, default=8, help='Number of hidden layers (default: 8)')
-    parser.add_argument('--recon_threshold', type=float, default=0.95, help='Reconstruction threshold (default: 0.95)')
+    parser.add_argument('--recon_threshold', type=float, default=0.90, help='Reconstruction threshold (default: 0.95)')
     parser.add_argument('--root_cause_threshold_encoder', type=float, default=0.99, help='Root cause threshold for encoder (default: 0.99)')
     parser.add_argument('--root_cause_threshold_decoder', type=float, default=0.99, help='Root cause threshold for decoder (default: 0.99)')
     parser.add_argument('--training_aerca', type=int, default=1, help='Flag for training AERCA (default: 1)')
@@ -56,9 +56,11 @@ def create_arg_parser():
     
     # Architecture arguments
     parser.add_argument('--coeff_architecture', type=str, default='deep_mlp', help='Coefficient architecture options (deep_mlp, gnn_attention) (default: deep_mlp)')
-    parser.add_argument('--attention_dim', type=int, default=64, help='Attention dimension (default: 64)')
-    parser.add_argument('--num_attention_heads', type=int, default=4, help='Number of attention heads (default: 4)')
-
+    parser.add_argument('--attention_dim', type=int, default=256, help='Attention dimension (default: 64)')
+    parser.add_argument('--num_attention_heads', type=int, default=2, help='Number of attention heads (default: 4)')
+    parser.add_argument('--outer_heads_num', type=int, default=2, help='Number of outer attention heads (default: 4)')
+    parser.add_argument('--outer_hidden_dim', type=int, default=128, help='Outer hidden dimension (default: 64)')
+    
     # Attention arguments
     parser.add_argument('--global_attention_over_all_lag', type=str)
     parser.add_argument('--local_attention_per_lag', type=int, default=0, help='Flag for using local attention per lag (default: 0)')

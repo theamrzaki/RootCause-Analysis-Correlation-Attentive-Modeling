@@ -204,7 +204,7 @@ class SENNGC(nn.Module):
             print(f"Total parameters for temporal : {total_params}")
 
 
-        if args["coeff_architecture"] not in  ["TemporalGNN","cross_time_freq","cross_attention_single_coeff_network","TemporalGNN_Attention","trend_seasonal"]:
+        if args["coeff_architecture"] not in  ["TemporalGNN","cross_time_freq","cross_attention_single_coeff_network","TemporalGNN_Attention","trend_seasonal","rcd"]:
             total_params = sum(p.numel() for net in self.coeff_nets for p in net.parameters())
             print(f"Total parameters for {order} lags: {total_params}")
         
@@ -240,7 +240,7 @@ class SENNGC(nn.Module):
                 coeffs = torch.cat((coeffs, torch.unsqueeze(coeffs_k, 1)), 1)
             # coeffs[:, k, :, :] = coeffs_k
             preds = preds + torch.matmul(coeffs_k, inputs[:, k, :].unsqueeze(dim=2)).squeeze()
-        return preds, coeffs
+        return preds, coeffs, None
     
 
     def forward_gnn(self, inputs: torch.Tensor):
