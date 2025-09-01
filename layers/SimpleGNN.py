@@ -632,7 +632,7 @@ class RecurrentAttentionGNN_Attn(nn.Module):
         return preds, coeffs, None 
 
 
-class RecurrentAttentionGNN_Attn_new(nn.Module):
+class RecurrentAttentionGNN_Attn___(nn.Module):
     def __init__(self, num_vars, rank, order, hidden_dim=256, num_heads=4,
                  attention_heads=6, attention_dim=128, pe_scale=0.05, device="cpu"):
         super().__init__()

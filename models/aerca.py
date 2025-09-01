@@ -20,7 +20,10 @@ from models.scoring import scoring
 from sklearn.cluster import KMeans
 import numpy as np
 import torch
-
+import matplotlib.pyplot as plt
+import networkx as nx
+import numpy as np
+import pandas as pd
 
 class AERCA(nn.Module):
     def __init__(self, num_vars: int, hidden_layer_size: int, num_hidden_layers: int, device: torch.device,
@@ -40,6 +43,7 @@ class AERCA(nn.Module):
         self.num_modalities = 3
         self.num_vars_mod = num_vars // self.num_modalities  # integer division
         self.hidden_size = hidden_layer_size  # latent size from each encoder
+        self.total_params =0
         """
         # One encoder per modality
         self.encoders = nn.ModuleList([
@@ -399,8 +403,8 @@ class AERCA(nn.Module):
         u_winds = u_windows[:, :-1, :]
         u_next = u_windows[:, -1, :]
 
-        preds, coeffs = self.decoder(u_winds)
-        prev_preds, prev_coeffs = self.decoder_prev(winds)
+        preds, coeffs,_ = self.decoder(u_winds)
+        prev_preds, prev_coeffs,_ = self.decoder_prev(winds)
 
         if add_u:
             nexts_hat = preds + u_next + prev_preds
@@ -491,36 +495,104 @@ class AERCA(nn.Module):
 
     def forward(self, x,add_u=True):
         us, encoder_coeffs, nexts, winds, attn_weights = self.encoding(x)
-        if(self.options["correlated_KL"] == 1):
-            kl_indep = compute_kl_divergence(us,self.device)  
-            latent_dim = us.shape[1]
-            split = latent_dim // 2
+        #if(self.options["correlated_KL"] == 1):
+        #    kl_indep = compute_kl_divergence(us,self.device)  
+        #    latent_dim = us.shape[1]
+        #    split = latent_dim // 2
+#
+        #    lambda_indep = torch.exp(self.log_lambda_indep)
+        #    lambda_corr = torch.exp(self.log_lambda_corr)
+        #    lambda_mmd = torch.exp(self.log_lambda_mmd)
+        #    shrinkage=self.options["shrinkage"]
+#
+        #    kl_corr = compute_correlated_kl(us, shrinkage=shrinkage)
+        #    # Weighted combination
+        #    s = (us[:, 0] > us[:, 0].median()).long()
+#
+        #    us_0 = us[s == 0]
+        #    us_1 = us[s == 1]
+#
+        #    #fair_loss = compute_mmd(us_0, us_1)  # MMD loss between the two groups
+#
+        #    kl_div = lambda_indep * kl_indep + lambda_corr * kl_corr
+        #    #kl_div = kl_div + lambda_mmd * fair_loss
+        #else:
+        #    # --- KL divergence with independent prior ---
+        #    kl_div = compute_kl_divergence(us, self.device)
+
+        if self.options["correlated_KL"] == 1:
+            kl_indep = compute_kl_divergence(us, self.device)
+            # NEW: attention-weighted KL
+            attn_kl = self.compute_attention_weighted_kl(us, attn_weights, self.device)
 
             lambda_indep = torch.exp(self.log_lambda_indep)
-            lambda_corr = torch.exp(self.log_lambda_corr)
-            lambda_mmd = torch.exp(self.log_lambda_mmd)
-            shrinkage=self.options["shrinkage"]
+            lambda_attn = torch.exp(self.log_lambda_corr)  
 
-            kl_corr = compute_correlated_kl(us, shrinkage=shrinkage)
-            # Weighted combination
-            s = (us[:, 0] > us[:, 0].median()).long()
-
-            us_0 = us[s == 0]
-            us_1 = us[s == 1]
-
-            #fair_loss = compute_mmd(us_0, us_1)  # MMD loss between the two groups
-
-            kl_div = lambda_indep * kl_indep + lambda_corr * kl_corr
-            #kl_div = kl_div + lambda_mmd * fair_loss
+            kl_div = (                    lambda_attn * attn_kl)
         else:
-            # --- KL divergence with independent prior ---
             kl_div = compute_kl_divergence(us, self.device)
         nexts_hat, decoder_coeffs, prev_coeffs = self.decoding(us, winds, add_u=add_u)
-        return nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us
+        return nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us, attn_weights
     
+    
+    def compute_attention_weighted_kl(self,us: torch.Tensor, attn_weights: torch.Tensor, device: torch.device, eps: float = 1e-6, return_per_sample: bool = False):
+        """
+        Compute attention-weighted KL divergence between correlated latent variables and independent prior.
+
+        Args:
+            us: [B, D] - latent variables
+            attn_weights: [B, T, D, D] - spatial attention per sample and timestep
+            device: torch.device
+            eps: small number for numerical stability
+            return_per_sample: if True, return per-sample KL [B]
+
+        Returns:
+            attn_kl: scalar tensor - attention-weighted KL divergence
+            (optional) attn_kl_per_sample: [B] per-sample KL
+        """
+        B, D = us.shape
+        _, T, _, _ = attn_weights.shape
+
+        # --- Step 1: Compute latent correlation across batch ---
+        H = us - us.mean(dim=0, keepdim=True)         # [B, D]
+        cov = (H.t() @ H) / (B - 1 + eps)            # [D, D]
+        std = torch.sqrt(torch.diag(cov) + eps)      # [D]
+        corr = cov / (std[:, None] * std[None, :] + eps)
+        corr = corr.clamp(-0.999, 0.999)
+        kl_mat = -0.5 * torch.log(1 - corr**2 + eps)  # [D, D]
+
+        # --- Step 2: Normalize and symmetrize attention ---
+        A = 0.5 * (attn_weights + attn_weights.transpose(-2, -1))  # [B, T, D, D]
+
+        # Global normalization per matrix
+        A_min = A.view(B, T, -1).min(dim=-1, keepdim=True)[0].unsqueeze(-1)
+        A_max = A.view(B, T, -1).max(dim=-1, keepdim=True)[0].unsqueeze(-1)
+        A = (A - A_min) / (A_max - A_min + eps)
+
+        # Weight: low-attention → high KL penalty
+        W = 1.0 - A  # [B, T, D, D]
+
+        # --- Step 3: Mask diagonal ---
+        mask = ~torch.eye(D, dtype=torch.bool, device=device)  # [D, D]
+
+        # --- Step 4: Weighted KL per sample & timestep ---
+        attn_kl_per_sample_t = (W * kl_mat)[..., mask].view(B, T, D, D-1).mean(dim=(-1, -2))  # [B, T]
+
+        # --- Step 5: Reduce over timestep to get per-sample KL ---
+        attn_kl_per_sample = attn_kl_per_sample_t.mean(dim=1)  # [B]
+
+        # --- Step 6: Final scalar for loss ---
+        attn_kl = attn_kl_per_sample.mean()  # scalar
+
+        if return_per_sample:
+            return attn_kl, attn_kl_per_sample
+        else:
+            return attn_kl
+
+
     def _training_step(self, x,add_u=True):
         # Forward pass
-        nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us = self.forward(x, add_u=add_u)
+        nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us,_ = self.forward(x, add_u=add_u)
 
         # === Full reconstruction loss ===
         loss_full_recon = self.mse_loss(nexts_hat, nexts)
@@ -789,7 +861,7 @@ class AERCA(nn.Module):
 
 
     def _testing_step(self, x, label=None, add_u=True):
-        nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us = self.forward(x, add_u=add_u)
+        nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us, attn_weights = self.forward(x, add_u=add_u)
 
         if label is not None:
             preprocessed_label = sliding_window_view(label, (self.window_size + 1, self.num_vars))[self.window_size:, 0, :-1, :]
@@ -831,8 +903,7 @@ class AERCA(nn.Module):
                     self.beta * loss_kl)
             logging.info('Total loss: %s', loss.item())
 
-        return loss, nexts_hat, nexts, encoder_coeffs, decoder_coeffs, kl_div, preprocessed_label, us
-
+        return loss, nexts_hat, nexts, encoder_coeffs, decoder_coeffs, kl_div, preprocessed_label, us, attn_weights
 
     def _testing_step_(self, x, label=None, add_u=True):
         # Forward pass
@@ -901,7 +972,7 @@ class AERCA(nn.Module):
         losses_list = []
         with torch.no_grad():
             for x in xs:
-                loss, nexts_hat, nexts, encoder_coeffs, decoder_coeffs, kl_div, preprocessed_label, us = self._testing_step(x, add_u=False)
+                loss, nexts_hat, nexts, encoder_coeffs, decoder_coeffs, kl_div, preprocessed_label, us,_ = self._testing_step(x, add_u=False)
                 loss_arr = self.mse_loss_wo_reduction(nexts_hat, nexts).cpu().numpy().ravel()
                 losses_list.append(loss_arr)
         recon_losses = np.concatenate(losses_list)
@@ -917,7 +988,7 @@ class AERCA(nn.Module):
         us_list = []
         with torch.no_grad():
             for x in xs:
-                us = self._testing_step(x)[-1]
+                us = self._testing_step(x)[-2]
                 us_list.append(us.cpu().numpy())
         us_all = np.concatenate(us_list, axis=0).reshape(-1, self.num_vars)
         self.lower_encoder = np.quantile(us_all, (1 - self.root_cause_threshold_encoder) / 2, axis=0)
@@ -934,7 +1005,7 @@ class AERCA(nn.Module):
         diff_list = []
         with torch.no_grad():
             for x in xs:
-                _, nexts_hat, nexts, _, _, _, _, _ = self._testing_step(x, add_u=False)
+                _, nexts_hat, nexts, _, _, _, _, _, _ = self._testing_step(x, add_u=False)
                 diff = (nexts - nexts_hat).cpu().numpy().ravel()
                 diff_list.append(diff)
         us_all = np.concatenate(diff_list, axis=0).reshape(-1, self.num_vars)
@@ -1005,8 +1076,128 @@ class AERCA(nn.Module):
         np.save(os.path.join(self.save_dir, f'{self.model_name}_us_mean_decoder.npy'), self.us_mean_decoder)
         np.save(os.path.join(self.save_dir, f'{self.model_name}_us_std_decoder.npy'), self.us_std_decoder)
 
+    def _evaluate_rcd(self, xs, labels, bins=None, gamma=5):
+        """
+        RCD baseline for root cause analysis.
+        - xs: ndarray of shape [N, T, P]  (N windows, T timesteps, P variables)
+        - labels: ndarray of shape [N, T, P] (0=normal, 1=anomalous)
+        """
+        import pandas as pd
+        from models.baselines.rcd import rca_with_rcd
+
+        # Flatten across N and T → [N*T, P]
+        X_all = xs.reshape(-1, xs.shape[-1])          # (N*T, P)
+        y_all = labels.reshape(-1, labels.shape[-1])  # (N*T, P)
+
+        # Build masks correctly
+        mask_normal = (y_all == 0).all(axis=-1)   # row is normal if all vars = 0
+        mask_anom   = (y_all == 1).any(axis=-1)   # row is anomalous if any var = 1
+
+        # Apply masks
+        normal_X = X_all[mask_normal, :]          # keep 2D shape (M, P)
+        anomalous_X = X_all[mask_anom, :]
+
+        # Convert to DataFrame
+        cols = [f"var{i}" for i in range(X_all.shape[1])]
+        normal_df = pd.DataFrame(normal_X, columns=cols)
+        anomalous_df = pd.DataFrame(anomalous_X, columns=cols)
+
+        # Run RCD
+        result = rca_with_rcd(
+            normal_df,
+            anomalous_df,
+            bins=bins,
+            gamma=gamma,
+            localized=False,
+            verbose=False
+        )
+
+        return {
+            "root_cause": result['root_cause'],
+            "num_tests": result['tests'],
+            "time": result['time']
+        }
+
+
+    def plot_case_study(self, z_scores, labels=None, attn_importance=None, mlp_scores=None, num_vars=None, threshold=0.1):
+        """
+        Plots variable importance for a single sample and overlays true root causes.
+
+        Args:
+            z_scores: array of model's latent variable importance (T, P)
+            labels: array of ground truth (T, P)
+            attn_importance: optional array of attention importance (P,)
+            mlp_scores: optional array of baseline MLP importance (P,)
+            num_vars: number of variables
+            threshold: value above which a label is considered a root cause
+        """
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        if num_vars is None:
+            num_vars = z_scores.shape[1]
+
+        # Aggregate z_scores over time (mean)
+        mean_z = z_scores.mean(axis=0)
+
+        x = np.arange(num_vars)
+        width = 0.25
+        plt.figure(figsize=(12, 5))
+
+        plt.bar(x - width, mean_z, width, label='Summary Causal Graph')
+        if attn_importance is not None:
+            attn_per_var = attn_importance.mean(axis=0).mean(axis=1).ravel() # mean over first 2 axes → shape (10,)
+            plt.bar(x, attn_per_var, width, label='Attention')
+        if mlp_scores is not None:
+            plt.bar(x + width, mlp_scores, width, label='MLP per lag')
+
+        # Highlight true root causes
+        if labels is not None:
+            # aggregate labels over time
+            attn_arr = attn_per_var if attn_importance is not None else np.zeros_like(mean_z)
+            mlp_arr = mlp_scores if mlp_scores is not None else np.zeros_like(mean_z)
+
+            max_vals = np.maximum.reduce([mean_z, attn_arr, mlp_arr])
+            root_causes = labels.ravel() > threshold  # flatten to 1D
+            plt.scatter(x[root_causes], max_vals[root_causes] + 0.05, color='red', label='Ground truth')
+            root_df = pd.DataFrame({
+                "RootCauseX": x[root_causes],
+                "RootCauseY": max_vals[root_causes] + 0.05
+            })
+            
+
+        plt.xlabel('Variable')
+        plt.ylabel('Importance / Score')
+        #plt.title('Case Study: Variable Importance Comparison')
+        #save the plt as pdf
+        plt.legend()
+        coeff_architecture = self.options.get("coeff_architecture")
+        dataset_name = self.options.get("dataset_name")
+        plt.savefig("results/case_study_variable_importance("+dataset_name+")("+coeff_architecture+").pdf")
+        plt.show()
+
+        # Save data to CSV
+        df = pd.DataFrame({
+            "Variable": x,
+            "SummaryCausalGraph": mean_z,
+            "Attention": attn_arr,
+            "MLP": mlp_arr,
+        })
+
+        df.to_csv("results/case_study_variable_importance_data("+dataset_name+")("+coeff_architecture+").csv", index=False)
+        root_df.to_csv("results/case_study_root_causes("+dataset_name+")("+coeff_architecture+").csv", index=False)
 
     def _testing_root_cause(self, xs, labels,alpha: float = 0.5, use_attention_fusion: bool = False):
+        coeff_architecture = self.options["coeff_architecture"]
+        if coeff_architecture == "rcd":
+            # Run RCD baseline
+            rcd_result = self._evaluate_rcd(xs, labels, bins=None, gamma=5)
+            self._log_and_print('=' * 50)
+            self._log_and_print("RCD Root Causes: {}", rcd_result["root_cause"])
+            self._log_and_print("RCD #Tests: {}", rcd_result["num_tests"])
+            self._log_and_print("RCD Time: {:.4f}s", rcd_result["time"])
+            return rcd_result
+
         # Load model and only the encoder-related parameters required for the POT computations.
         self.load_state_dict(torch.load(os.path.join(self.save_dir, f'{self.model_name}.pt'),
                                         map_location=self.device))
@@ -1022,13 +1213,31 @@ class AERCA(nn.Module):
             for i in range(len(xs)):
                 x = xs[i]
                 label = labels[i]
-                loss, nexts_hat, nexts, encoder_coeffs, decoder_coeffs, kl_div, preprocessed_label, us = self._testing_step(x, label, add_u=False)
+                loss, nexts_hat, nexts, encoder_coeffs, decoder_coeffs, kl_div, preprocessed_label, us, attn_weights = self._testing_step(x, label, add_u=False)
                 us_sample_list.append(us[self.window_size:].cpu().numpy())
                 us_list.append(us.cpu().numpy())
                 if use_attention_fusion:
                     # aggregate attention over time (mean across timesteps)
                     attn_mean = attn_weights.mean(dim=0).cpu().numpy()  # shape [num_vars]
                     attn_list.append(attn_mean)
+                if self.options.get("plot_case_study", False) and i == 0:  # only plot first sample
+                    z_scores_sample = (-(us[self.window_size:].cpu().numpy() - self.us_mean_encoder) / self.us_std_encoder)
+                    try:
+                        self.plot_case_study(
+                            z_scores=(-(us[self.window_size:].cpu().numpy() - self.us_mean_encoder) / self.us_std_encoder),
+                            labels=labels[i][self.window_size*2:],  # ground truth for this sample
+                            attn_importance=attn_weights.cpu().numpy(),  # shape (1, O, P, P) or (1, P, P)
+                            mlp_scores=None,  # optional baseline if available
+                            num_vars=self.num_vars
+                        )
+                    except Exception as e:
+                        self.plot_case_study(
+                            z_scores=(-(us[self.window_size:].cpu().numpy() - self.us_mean_encoder) / self.us_std_encoder),
+                            labels=labels[i][self.window_size*2:],  # ground truth for this sample
+                            attn_importance=None,  # shape (1, O, P, P) or (1, P, P)
+                            mlp_scores=None,  # optional baseline if available
+                            num_vars=self.num_vars
+                        )
 
         # Combine all latent representations for POT threshold computation.
         us_all = np.concatenate(us_list, axis=0).reshape(-1, self.num_vars)

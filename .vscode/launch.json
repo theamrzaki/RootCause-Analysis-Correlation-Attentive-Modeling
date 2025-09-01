@@ -10,9 +10,17 @@
             "request": "launch",
             "program": "main.py",
             "args": [
+                "--seed","1",
                 "--dataset_name", "msds",
+                "--lr","5e-4",
+                "--window_size","1",
+                "--coeff_architecture","TemporalGNN_Attention",
+                "--num_epochs","10",
+                "--outer_heads_num","4",
+                "--outer_hidden_dim","256",
                 "--correlated_KL","0",
-                "--coeff_architecture","trend_seasonal"
+                "--AMOC_Loss","0",
+                "--mean_std_recon_loss","0"
             ],
             "console": "integratedTerminal"
         },
@@ -26,6 +34,14 @@
             ],
             "console": "integratedTerminal",
             "noDebug": true
+        },
+        {
+            "name": "Run Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": false
         }
     ]
 }
