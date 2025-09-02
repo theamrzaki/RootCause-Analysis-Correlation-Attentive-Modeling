@@ -1187,7 +1187,7 @@ class AERCA(nn.Module):
         df.to_csv("results/case_study_variable_importance_data("+dataset_name+")("+coeff_architecture+").csv", index=False)
         root_df.to_csv("results/case_study_root_causes("+dataset_name+")("+coeff_architecture+").csv", index=False)
 
-    def _testing_root_cause(self, xs, labels,alpha: float = 0.5, use_attention_fusion: bool = False):
+    def _testing_root_cause_(self, xs, labels,alpha: float = 0.5, use_attention_fusion: bool = False):
         coeff_architecture = self.options["coeff_architecture"]
         if coeff_architecture == "rcd":
             # Run RCD baseline
@@ -1403,55 +1403,148 @@ class AERCA(nn.Module):
         plt.legend()
         plt.show()
 
-    def _testing_root_cause_(self, xs, labels):
-        # Load model and encoder stats
+    def _testing_root_cause(self, xs, labels, alpha: float = 0.5, use_attention_fusion: bool = False):
+        import pandas as pd
+        import numpy as np
+        import torch
+        import os
+
+        coeff_architecture = self.options.get("coeff_architecture", "default").lower()
+
+        # -------------------------------
+        # Case 1: PyRCA-based baselines
+        # -------------------------------
+        if coeff_architecture in ["epsilon_diagnosis", "rcd", "circa"]:
+            try:
+                # Combine all xs into a single array
+                all_data = np.concatenate(xs, axis=0).reshape(-1, self.num_vars)
+                all_labels = np.concatenate(labels, axis=0).reshape(-1, self.num_vars)
+
+                # Split normal vs abnormal based on labels
+                normal_idx = (all_labels.sum(axis=1) == 0)
+                abnormal_idx = (all_labels.sum(axis=1) > 0)
+
+                normal_data = pd.DataFrame(all_data[normal_idx], columns=[f"var_{i}" for i in range(self.num_vars)])
+                abnormal_data = pd.DataFrame(all_data[abnormal_idx], columns=[f"var_{i}" for i in range(self.num_vars)])
+
+                # Run the chosen PyRCA baseline
+                if coeff_architecture == "epsilon_diagnosis":
+                    from pyrca.analyzers.epsilon_diagnosis import EpsilonDiagnosis, EpsilonDiagnosisConfig
+
+                    # Trim normal and abnormal data to the same number of rows
+                    min_len = min(len(normal_data), len(abnormal_data))
+                    normal_data_trim = normal_data.iloc[:min_len]
+                    abnormal_data_trim = abnormal_data.iloc[:min_len]
+
+                    # Train on normal data
+                    model = EpsilonDiagnosis(config=EpsilonDiagnosisConfig(alpha=0.01))
+                    model.train(normal_data_trim)
+
+                    # Find root causes
+                    results_raw = model.find_root_causes(abnormal_data_trim)
+
+                    # Convert results into a z_scores vector
+                    z_scores = np.zeros(self.num_vars)
+                    for var_name, _ in results_raw.root_cause_nodes:
+                        idx = int(var_name.replace("var_", ""))  # e.g., "var_3" -> 3
+                        z_scores[idx] = 1.0
+
+                elif coeff_architecture == "rcd":
+                    from pyrca.analyzers.rcd import RCD, RCDConfig
+                    model = RCD(config=RCDConfig(verbose=False))
+                    results_raw = model.find_root_causes(normal_data, abnormal_data)
+
+                    # Convert list of root cause indices to per-variable scores
+                    z_scores = np.zeros(self.num_vars)
+                    for var_name, _ in results_raw.root_cause_nodes:
+                        idx = int(var_name.replace("var_", ""))
+                        z_scores[idx] = 1.0  # or some score if needed
+                elif coeff_architecture == "circa":
+                    from pyrca.analyzers.circa import CIRCA
+                    model = CIRCA(config=CIRCA.config_class())
+                    results_raw = model.find_root_causes(normal_data, abnormal_data)
+
+                    # CIRCA returns DataFrame with 'score' column per variable
+                    z_scores = results_raw['score'].to_numpy()
+
+                
+                # Compute top-k metrics using labels
+                k_all, k_at_step_all = [], []
+                for i in range(len(xs)):
+                    sample_labels = labels[i][self.window_size * 2:]
+                    # broadcast z_scores if needed
+                    z_scores_sample = np.expand_dims(z_scores, axis=0).repeat(len(sample_labels), axis=0)
+                    k_all.append(topk(z_scores_sample, sample_labels, threshold=0.5))
+                    k_at_step_all.append(topk_at_step(z_scores_sample, sample_labels))
+
+                k_all = np.array(k_all).mean(axis=0)
+                k_at_step_all = np.array(k_at_step_all).mean(axis=0)
+
+                # Log AC metrics
+                ac_at = [k_at_step_all[0], k_at_step_all[2], k_at_step_all[4], k_at_step_all[9]]
+                self._log_and_print('Root cause analysis AC@1: {:.5f}', ac_at[0])
+                self._log_and_print('Root cause analysis AC@3: {:.5f}', ac_at[1])
+                self._log_and_print('Root cause analysis AC@5: {:.5f}', ac_at[2])
+                self._log_and_print('Root cause analysis AC@10: {:.5f}', ac_at[3])
+                self._log_and_print('Root cause analysis Avg@10: {:.5f}', np.mean(k_at_step_all))
+
+                ac_star_at = [k_all[0], k_all[9], k_all[99], k_all[499]]
+                self._log_and_print('Root cause analysis AC*@1: {:.5f}', ac_star_at[0])
+                self._log_and_print('Root cause analysis AC*@10: {:.5f}', ac_star_at[1])
+                self._log_and_print('Root cause analysis AC*@100: {:.5f}', ac_star_at[2])
+                self._log_and_print('Root cause analysis AC*@500: {:.5f}', ac_star_at[3])
+                self._log_and_print('Root cause analysis Avg*@500: {:.5f}', np.mean(k_all))
+
+                write_results(self.options, self.local_model_name, ac_at, k_at_step_all, self.total_params,
+                            f'RQ_{coeff_architecture}_windows.csv')
+
+            except ImportError:
+                self._log_and_print("PyRCA not installed. Run: pip install sfr-pyrca", "")
+            return  # skip latent-variable POT path
+
+        # -------------------------------
+        # Case 2: Latent-variable POT-based RCA
+        # -------------------------------
+        # Load model and encoder parameters
         self.load_state_dict(torch.load(os.path.join(self.save_dir, f'{self.model_name}.pt'),
                                         map_location=self.device))
         self.eval()
         self.us_mean_encoder = np.load(os.path.join(self.save_dir, f'{self.model_name}_us_mean_encoder.npy'))
         self.us_std_encoder = np.load(os.path.join(self.save_dir, f'{self.model_name}_us_std_encoder.npy'))
 
-        # Collect latent representations
-        us_list = []
-        us_sample_list = []
+        us_list, us_sample_list, attn_list = [], [], []
         with torch.no_grad():
             for i in range(len(xs)):
-                x = xs[i]
-                label = labels[i]
-                us = self._testing_step(x, label, add_u=False)[-1]
+                x, label = xs[i], labels[i]
+                _, _, _, _, _, _, _, us, attn_weights = self._testing_step(x, label, add_u=False)
                 us_sample_list.append(us[self.window_size:].cpu().numpy())
                 us_list.append(us.cpu().numpy())
+                if use_attention_fusion:
+                    attn_list.append(attn_weights.mean(dim=0).cpu().numpy())
 
-        # Combine latent representations for RCA
+        # Compute POT thresholds
         us_all = np.concatenate(us_list, axis=0).reshape(-1, self.num_vars)
-        import pandas as pd
-        import time
-        data_for_rca = pd.DataFrame(us_all, columns=[f"var_{i}" for i in range(self.num_vars)])
+        self._log_and_print('=' * 50)
+        us_all_z_score = (-(us_all - self.us_mean_encoder) / self.us_std_encoder)
+        us_all_z_score_pot = np.array([pot(us_all_z_score[:, i], self.risk, self.initial_level, self.num_candidates)[0]
+                                    for i in range(self.num_vars)])
 
-        # Determine anomaly index (example: first anomalous step)
-        anomaly_idx = 0  
-
-        # Run RCA
-        sorted_scores = self.run_rca(anomaly_idx, data_for_rca, data_for_rca)
-
-        # Convert sorted_scores to a dict for easier indexing
-        score_dict = dict(sorted_scores)
-
-        # Compute top-k metrics for each sample
-        k_all = []
-        k_at_step_all = []
+        # Compute top-k stats per sample
+        k_all, k_at_step_all = [], []
         for i in range(len(xs)):
-            # Use the same columns as the latent space
-            z_scores = np.array([score_dict[f"var_{j}"] for j in range(self.num_vars)])
-            k_lst = topk_no_threshold(z_scores, labels[i][self.window_size * 2:])
-            k_at_step = topk_at_step(z_scores, labels[i][self.window_size * 2:])
-            k_all.append(k_lst)
-            k_at_step_all.append(k_at_step)
+            z_scores = (-(us_sample_list[i] - self.us_mean_encoder) / self.us_std_encoder)
+            if use_attention_fusion:
+                attn_per_lag = attn_list[i].mean(axis=2)
+                attn_importance = attn_per_lag.mean(axis=0)
+                attn_importance = np.expand_dims(attn_importance, axis=0).repeat(z_scores.shape[0], axis=0)
+                z_scores = alpha * z_scores + (1 - alpha) * attn_importance
+            k_all.append(topk(z_scores, labels[i][self.window_size * 2:], us_all_z_score_pot))
+            k_at_step_all.append(topk_at_step(z_scores, labels[i][self.window_size * 2:]))
 
         k_all = np.array(k_all).mean(axis=0)
         k_at_step_all = np.array(k_at_step_all).mean(axis=0)
 
-        # Log metrics
+        # Log AC metrics
         ac_at = [k_at_step_all[0], k_at_step_all[2], k_at_step_all[4], k_at_step_all[9]]
         self._log_and_print('Root cause analysis AC@1: {:.5f}', ac_at[0])
         self._log_and_print('Root cause analysis AC@3: {:.5f}', ac_at[1])
@@ -1467,7 +1560,6 @@ class AERCA(nn.Module):
         self._log_and_print('Root cause analysis Avg*@500: {:.5f}', np.mean(k_all))
 
         write_results(self.options, self.local_model_name, ac_at, k_at_step_all, self.total_params, 'RQ_swat_windows.csv')
-
 
     def run_rca(self, anomaly, data, data_scaled):
         scores = scoring(data=data, data_scaled=data_scaled, anomaly=anomaly)
