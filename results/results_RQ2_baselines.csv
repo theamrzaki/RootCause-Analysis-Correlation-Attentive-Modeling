@@ -1,0 +1,13 @@
+scheme,dataset_name,seed,correlated_KL,architecture,attention_dim,num_attention_heads,lr,AC@1,AC@3,AC@5,AC@10,Avg@10,total_params,window_size,early_stopping,num_epochs,AMOC_Loss,mean_std_recon_loss,outer_hidden_dim,outer_heads_num
+swatrcd_(no mean)_normal_KL02_112513_1_0.0001_1_window_1,swat,1,normal_KL,rcd,256,2,0.0001,0.0,0.0,0.0,0.3,0.1,0,1,0,100,0,0,128,2
+swatrcd_(no mean)_normal_KL02_112527_1_0.0001_2_window_1,swat,2,normal_KL,rcd,256,2,0.0001,0.0,0.0,0.0,0.3,0.1,0,1,0,100,0,0,128,2
+swatrcd_(no mean)_normal_KL02_112542_1_0.0001_3_window_1,swat,3,normal_KL,rcd,256,2,0.0001,0.0,0.0,0.0,0.3,0.1,0,1,0,100,0,0,128,2
+swatepsilon_diagnosis_(no mean)_normal_KL02_112556_1_0.0001_1_window_1,swat,1,normal_KL,epsilon_diagnosis,256,2,0.0001,0.1,0.15,0.15,0.35,0.16999999999999998,0,1,0,100,0,0,128,2
+swatepsilon_diagnosis_(no mean)_normal_KL02_112619_1_0.0001_2_window_1,swat,2,normal_KL,epsilon_diagnosis,256,2,0.0001,0.1,0.15,0.15,0.35,0.16999999999999998,0,1,0,100,0,0,128,2
+swatepsilon_diagnosis_(no mean)_normal_KL02_112641_1_0.0001_3_window_1,swat,3,normal_KL,epsilon_diagnosis,256,2,0.0001,0.1,0.15,0.15,0.35,0.16999999999999998,0,1,0,100,0,0,128,2
+msdsrcd_(no mean)_normal_KL02_112722_1_1e-05_1_window_1,msds,1,normal_KL,rcd,128,2,1e-05,0.22772277227722773,0.9933993399339933,0.9966996699669968,1.0,0.842904290429043,0,1,0,1000,0,0,128,2
+msdsrcd_(no mean)_normal_KL02_112754_1_1e-05_2_window_1,msds,2,normal_KL,rcd,128,2,1e-05,0.22772277227722773,0.9933993399339933,0.9966996699669968,1.0,0.842904290429043,0,1,0,1000,0,0,128,2
+msdsrcd_(no mean)_normal_KL02_112827_1_1e-05_3_window_1,msds,3,normal_KL,rcd,128,2,1e-05,0.22772277227722773,0.9933993399339933,0.9966996699669968,1.0,0.842904290429043,0,1,0,1000,0,0,128,2
+msdsepsilon_diagnosis_(no mean)_normal_KL02_112900_1_1e-05_1_window_1,msds,1,normal_KL,epsilon_diagnosis,128,2,1e-05,0.1485148514851485,0.23102310231023102,0.6105610561056105,1.0,0.6603960396039603,0,1,0,1000,0,0,128,2
+msdsepsilon_diagnosis_(no mean)_normal_KL02_112950_1_1e-05_2_window_1,msds,2,normal_KL,epsilon_diagnosis,128,2,1e-05,0.1485148514851485,0.23102310231023102,0.6105610561056105,1.0,0.6603960396039603,0,1,0,1000,0,0,128,2
+msdsepsilon_diagnosis_(no mean)_normal_KL02_113042_1_1e-05_3_window_1,msds,3,normal_KL,epsilon_diagnosis,128,2,1e-05,0.1485148514851485,0.23102310231023102,0.6105610561056105,1.0,0.6603960396039603,0,1,0,1000,0,0,128,2
