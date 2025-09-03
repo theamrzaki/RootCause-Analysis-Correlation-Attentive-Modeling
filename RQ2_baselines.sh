@@ -154,7 +154,7 @@ run_experiment_RoGSTA_SWAT() {
 }
 # --- Run experiments ---
 # 2. With AMOC
-run_experiment_RoGSTA_SWAT 1
+#run_experiment_RoGSTA_SWAT 1
 
 
 
@@ -195,6 +195,8 @@ run_experiment_RoGSTA_MSDS() {
                                     --training_aerca=1 \
                                     --epochs=1000 \
                                     --early_stopping=0 \
+                                    --attention_dim=$att_dim \
+                                    --num_attention_heads=$heads \
                                     --outer_heads_num=$outer_heads_val \
                                     --outer_hidden_dim=$outer_att_dim_val \
                                     --results_csv=results_RQ2_baselines.csv"
