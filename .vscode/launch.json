@@ -11,10 +11,10 @@
             "program": "main.py",
             "args": [
                 "--seed","1",
-                "--dataset_name", "msds",
+                "--dataset_name", "swat",
                 "--lr","5e-4",
                 "--window_size","1",
-                "--coeff_architecture","TemporalGNN_Attention",
+                "--coeff_architecture","rcd",
                 "--num_epochs","10",
                 "--outer_heads_num","4",
                 "--outer_hidden_dim","256",

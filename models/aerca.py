@@ -1187,6 +1187,38 @@ class AERCA(nn.Module):
         df.to_csv("results/case_study_variable_importance_data("+dataset_name+")("+coeff_architecture+").csv", index=False)
         root_df.to_csv("results/case_study_root_causes("+dataset_name+")("+coeff_architecture+").csv", index=False)
 
+    def plot_case_study_heatmap(self, z_scores, labels=None, attn_importance=None, num_vars=None):
+        """
+        Heatmap case study: shows variable importance over time + ground truth overlay.
+        """
+        import matplotlib.pyplot as plt
+        import numpy as np
+        
+        if num_vars is None:
+            num_vars = z_scores.shape[1]
+        
+        # Normalize scores for visualization
+        norm_z = (z_scores - z_scores.min()) / (z_scores.max() - z_scores.min() + 1e-8)
+        
+        plt.figure(figsize=(14, 6))
+        plt.imshow(norm_z.T, aspect='auto', cmap='viridis', interpolation='nearest')
+        plt.colorbar(label="Normalized z-score")
+        plt.ylabel("Variable")
+        plt.xlabel("Time step")
+        
+        # Overlay ground truth anomalies in red
+        if labels is not None:
+            anomaly_indices = np.where(labels > 0)
+            plt.scatter(anomaly_indices[0], anomaly_indices[1], color="red", s=10, label="Ground Truth")
+            plt.legend()
+        
+        coeff_architecture = self.options.get("coeff_architecture")
+        dataset_name = self.options.get("dataset_name")
+        plt.title(f"Case Study Heatmap ({dataset_name}, {coeff_architecture})")
+        plt.savefig(f"results/case_study_heatmap({dataset_name})({coeff_architecture}).pdf")
+        plt.show()
+
+
     def _testing_root_cause_(self, xs, labels,alpha: float = 0.5, use_attention_fusion: bool = False):
         coeff_architecture = self.options["coeff_architecture"]
         if coeff_architecture == "rcd":
@@ -1404,11 +1436,6 @@ class AERCA(nn.Module):
         plt.show()
 
     def _testing_root_cause(self, xs, labels, alpha: float = 0.5, use_attention_fusion: bool = False):
-        import pandas as pd
-        import numpy as np
-        import torch
-        import os
-
         coeff_architecture = self.options.get("coeff_architecture", "default").lower()
 
         # -------------------------------
@@ -1416,19 +1443,6 @@ class AERCA(nn.Module):
         # -------------------------------
         if coeff_architecture in ["ht","epsilon_diagnosis", "rcd", "circa"]:
             try:
-                print("Combining data for RCA...")
-                # Combine all xs into a single array
-                all_data = np.concatenate(xs, axis=0).reshape(-1, self.num_vars)
-                all_labels = np.concatenate(labels, axis=0).reshape(-1, self.num_vars)
-
-                # Split normal vs abnormal based on labels
-                normal_idx = (all_labels.sum(axis=1) == 0)
-                abnormal_idx = (all_labels.sum(axis=1) > 0)
-
-                normal_data = pd.DataFrame(all_data[normal_idx], columns=[f"var_{i}" for i in range(self.num_vars)])
-                abnormal_data = pd.DataFrame(all_data[abnormal_idx], columns=[f"var_{i}" for i in range(self.num_vars)])
-                abnormal_labels = all_labels[abnormal_idx]
-
                 # Run the chosen PyRCA baseline
                 if coeff_architecture == "epsilon_diagnosis":
                     print("epsilon_diagnosis branch")
@@ -1494,49 +1508,6 @@ class AERCA(nn.Module):
 
                             k_all.append(topk(z_scores_broadcast, sample_labels, threshold=0.5))
                             k_at_step_all.append(topk_at_step(z_scores_broadcast, sample_labels))
-                elif coeff_architecture == "circa":
-                    from pyrca.analyzers.circa import CIRCA
-                    model = CIRCA(config=CIRCA.config_class())
-                    results_raw = model.find_root_causes(normal_data, abnormal_data)
-
-                    # CIRCA returns DataFrame with 'score' column per variable
-                    z_scores = results_raw['score'].to_numpy()
-
-                elif coeff_architecture == "ht":
-                    from pyrca.analyzers.ht import HT, HTConfig
-                    from pyrca.graphs.causal.pc import PC
-
-                    pc_model = PC(PC.config_class())
-                    graph_df = pc_model.train(normal_data)  # df_normal is your normal data
-                    model = HT(config=HTConfig(graph=graph_df))
-                    model.train(normal_data)
-
-                    for i in range(len(abnormal_data)):
-                        sample = abnormal_data.iloc[[i]]
-                        sample_labels = abnormal_labels[i]
-
-                        # pick first anomalous variable as target
-                        if sample_labels.sum() > 0:
-                            target_idx = np.argmax(sample_labels)
-                            target_var = f"var_{target_idx}"
-                        else:
-                            target_var = "var_0"
-
-                        results_raw = model.find_root_causes(sample, target=target_var, alpha=True)
-
-                        z_scores_sample = np.zeros(self.num_vars)
-                        for var_name, _ in results_raw.root_cause_nodes:
-                            idx = int(var_name.replace("var_", ""))
-                            z_scores_sample[idx] = 1.0
-                
-                # Compute top-k metrics using labels
-                #k_all, k_at_step_all = [], []
-                #for i in range(len(xs)):
-                #    sample_labels = labels[i][self.window_size * 2:]
-                #    # broadcast z_scores if needed
-                #    z_scores_sample = np.expand_dims(z_scores, axis=0).repeat(len(sample_labels), axis=0)
-                #    k_all.append(topk(z_scores_sample, sample_labels, threshold=0.5))
-                #    k_at_step_all.append(topk_at_step(z_scores_sample, sample_labels))
 
                 k_all = np.array(k_all).mean(axis=0)
                 k_at_step_all = np.array(k_at_step_all).mean(axis=0)
@@ -1557,7 +1528,7 @@ class AERCA(nn.Module):
                 self._log_and_print('Root cause analysis Avg*@500: {:.5f}', np.mean(k_all))
 
                 write_results(self.options, self.local_model_name, ac_at, k_at_step_all, self.total_params,
-                            f'RQ_Baselines.csv')
+                            self.options.get("results_csv", 'RQ_swat_windows.csv'))
 
             except ImportError:
                 self._log_and_print("PyRCA not installed. Run: pip install sfr-pyrca", "")
@@ -1594,6 +1565,16 @@ class AERCA(nn.Module):
         k_all, k_at_step_all = [], []
         for i in range(len(xs)):
             z_scores = (-(us_sample_list[i] - self.us_mean_encoder) / self.us_std_encoder)
+            if i == 0 and self.options.get("plot_case_study", False):
+                try:
+                    self.plot_case_study_heatmap(
+                        z_scores=z_scores,
+                        labels=labels[i][self.window_size * 2:],  # align with ground truth
+                        attn_importance=attn_list[i] if use_attention_fusion else None,
+                        num_vars=self.num_vars
+                    )
+                except Exception as e:
+                    self._log_and_print(f"Case study plotting failed: {e}", "")
             if use_attention_fusion:
                 attn_per_lag = attn_list[i].mean(axis=2)
                 attn_importance = attn_per_lag.mean(axis=0)
@@ -1620,7 +1601,7 @@ class AERCA(nn.Module):
         self._log_and_print('Root cause analysis AC*@500: {:.5f}', ac_star_at[3])
         self._log_and_print('Root cause analysis Avg*@500: {:.5f}', np.mean(k_all))
 
-        write_results(self.options, self.local_model_name, ac_at, k_at_step_all, self.total_params, 'RQ_swat_windows.csv')
+        write_results(self.options, self.local_model_name, ac_at, k_at_step_all, self.total_params, self.options.get("results_csv", 'RQ_swat_windows.csv'))
 
     def run_rca(self, anomaly, data, data_scaled):
         scores = scoring(data=data, data_scaled=data_scaled, anomaly=anomaly)
