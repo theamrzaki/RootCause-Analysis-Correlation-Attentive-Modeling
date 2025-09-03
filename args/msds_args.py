@@ -64,6 +64,9 @@ def create_arg_parser():
     # Attention arguments
     parser.add_argument('--global_attention_over_all_lag', type=str)
     parser.add_argument('--local_attention_per_lag', type=int, default=0, help='Flag for using local attention per lag (default: 0)')
+
+    # Results arguments
+    parser.add_argument('--results_csv', type=str, default='results.csv', help='Path to the results CSV file (default: results.csv)')
     return parser
 
 if __name__ == "__main__":
