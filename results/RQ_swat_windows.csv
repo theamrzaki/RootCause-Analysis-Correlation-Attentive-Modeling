@@ -335,3 +335,14 @@ swatTemporalGNN_Attention_(no mean)_normal_KL01_115141_1_0.0001_3_window_1,swat,
 swatTemporalGNN_Attention_(no mean)_normal_KL01_120054_1_0.0001_3_window_1,swat,3,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.1,0.125,0.175,0.325,0.19749999999999998,5548731,1,0,100,0,0,128,1
 swatTemporalGNN_Attention_(no mean)_normal_KL01_120938_1_0.0001_3_window_1,swat,3,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.1,0.125,0.175,0.325,0.19749999999999998,5548731,1,0,100,0,0,128,2
 swatTemporalGNN_Attention_(no mean)_normal_KL01_121824_1_0.0001_3_window_1,swat,3,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.1,0.125,0.175,0.325,0.19749999999999998,5548731,1,0,100,0,0,128,4
+swatTemporalGNN_Attention_(no mean)_normal_KL01_164129_1_0.0001_1_window_1,swat,1,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.2,0.35,0.35,0.45,0.36500000000000005,6411963,1,0,100,0,0,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL01_165057_1_0.0001_1_window_1,swat,1,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.2,0.4,0.45,0.6,0.44000000000000006,6411963,1,0,100,0,0,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL01_170459_1_0.0001_1_window_1,swat,1,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.2,0.2,0.25,0.35,0.255,6411963,1,0,100,0,0,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL01_171539_1_0.0001_1_window_1,swat,1,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.2,0.3,0.3,0.4,0.31999999999999995,6477755,1,0,100,0,0,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL01_172522_1_0.0001_1_window_1,swat,1,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.2,0.4,0.4,0.4,0.375,6411963,1,0,100,0,0,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL01_173544_1_0.0001_1_window_1,swat,1,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.3,0.4,0.4,0.45,0.4,6411963,1,0,100,0,0,256,4,temp(0.5)
+swatTemporalGNN_Attention_(no mean)_normal_KL01_174430_1_0.0001_2_window_1,swat,2,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.25,0.3,0.4,0.4,0.365,6411963,1,0,100,0,0,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL01_175355_1_0.0001_1_window_1,swat,1,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.2,0.25,0.3,0.55,0.35,6411964,1,0,100,0,0,256,4,adaptive temp
+swatTemporalGNN_Attention_(no mean)_normal_KL01_180649_1_0.0001_1_window_1,swat,1,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.25,0.4,0.45,0.45,0.41000000000000003,6411965,1,0,100,0,0,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL01_181807_1_0.0001_2_window_1,swat,2,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.2,0.4,0.4,0.5,0.4,6411965,1,0,100,0,0,256,4
+swatTemporalGNN_Attention_(no mean)_normal_KL01_182922_1_0.0001_3_window_1,swat,3,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.0,0.15,0.2,0.325,0.2125,6411965,1,0,100,0,0,256,4
