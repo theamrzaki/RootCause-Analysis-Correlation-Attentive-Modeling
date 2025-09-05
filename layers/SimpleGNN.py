@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
+from tqdm import tqdm
+import numpy as np
 
 class SimpleCoeffGNN(nn.Module):
     def __init__(self, num_vars: int, rank: int, hidden_dim: int = 128, residual_scale: float = 0.1):
@@ -630,6 +632,284 @@ class RecurrentAttentionGNN_Attn(nn.Module):
         coeffs = torch.cat(coeffs_list, dim=0)                  # (B, O, P, P)
 
         return preds, coeffs, None 
+
+
+class RecurrentAttentionGNN_Attn_fourier(nn.Module):
+    """
+    Time domain path: exactly like your current RecurrentAttentionGNN_Attn.
+    Freq domain path: rFFT over lags (per variable) -> magnitude -> per-bin GNN -> attention over bins.
+    Fusion: gated blend of (time coeffs) and (freq coeffs).
+    """
+    def __init__(self, num_vars, rank, order, hidden_dim=256, num_heads=2, device="cpu",
+                 attention_heads=4, attention_dim=64, pe_scale=0.01):
+        super().__init__()
+        self.num_vars = num_vars
+        self.rank = rank
+        self.order = order
+        self.hidden_dim = hidden_dim
+        self.device = device
+        self.pe_scale = pe_scale
+
+        # Shared per-slice GNN (use your fixed variant; swap if needed)
+        self.base_net = AttentionCoeffGNN_multihead_fixed(
+            num_vars=num_vars, rank=rank, hidden_dim=attention_dim, heads=attention_heads
+        )
+
+        # --- Time path ---
+        self.in_proj_time = nn.Linear(num_vars * num_vars, hidden_dim)
+        self.temporal_attn_time = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=num_heads, batch_first=True)
+        self.coeff_proj_time = nn.Linear(hidden_dim, num_vars * num_vars)
+        self.pos_enc_time = nn.Parameter(torch.randn(1, order, hidden_dim) * pe_scale)
+
+        # --- Freq path ---
+        # rFFT along lags ⇒ F = order//2 + 1 bins
+        self.in_proj_freq = nn.Linear(num_vars * num_vars, hidden_dim)
+        self.temporal_attn_freq = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=num_heads, batch_first=True)
+        self.coeff_proj_freq = nn.Linear(hidden_dim, num_vars * num_vars)
+        self.pos_enc_freq = nn.Parameter(torch.randn(1, (order // 2) + 1, hidden_dim) * pe_scale)
+
+        # --- Gated fusion (global context → α in [0,1]) ---
+        # take simple stats from the window as context
+        ctx_dim = 2 * num_vars  # mean & std per variable, concatenated
+        self.fusion_gate = nn.Sequential(
+            nn.Linear(ctx_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, 1),
+            nn.Sigmoid()
+        )
+
+    @torch.no_grad()
+    def _context_stats(self, x_win):  # x_win: (B, O, P)
+        mean = x_win.mean(dim=1)       # (B, P)
+        std = x_win.std(dim=1)         # (B, P)
+        return torch.cat([mean, std], dim=-1)  # (B, 2P)
+
+    def _time_path(self, x_chunk):  # x_chunk: (B_chunk, O, P)
+        Bc, O, P = x_chunk.shape
+        feats = []
+        for k in range(O):
+            # base_net expects (B, P) and returns (B, P, P)
+            coeff_k, _ = self.base_net(x_chunk[:, k, :])            # (Bc, P, P)
+            feats.append(coeff_k.view(Bc, -1))                      # (Bc, P*P)
+        seq = torch.stack(feats, dim=1)                              # (Bc, O, P*P)
+        attn_in = self.in_proj_time(seq) + self.pos_enc_time[:, :O, :]
+        attn_out, _ = self.temporal_attn_time(attn_in, attn_in, attn_in)  # (Bc, O, H)
+        coeffs_seq = self.coeff_proj_time(attn_out).view(Bc, O, P, P)     # (Bc, O, P, P)
+        # prediction using coeffs per lag
+        preds = torch.zeros((Bc, P), device=x_chunk.device)
+        for k in range(O):
+            preds += (coeffs_seq[:, k] @ x_chunk[:, k, :].unsqueeze(-1)).squeeze(-1)
+        return preds, coeffs_seq
+
+    def _freq_path(self, x_chunk):  # x_chunk: (B_chunk, O, P)
+        """
+        rFFT over the lag axis (dim=1). We use magnitude per variable & bin: (B, F, P).
+        Each frequency bin plays the role of a "lag slice" for base_net.
+        """
+        Bc, O, P = x_chunk.shape
+        X = torch.fft.rfft(x_chunk, dim=1)                     # (Bc, F, P) complex
+        Xmag = X.abs()                                         # (Bc, F, P) real magnitudes
+        Fbins = Xmag.size(1)
+
+        feats = []
+        for f in range(Fbins):
+            coeff_f, _ = self.base_net(Xmag[:, f, :])          # (Bc, P, P)
+            feats.append(coeff_f.view(Bc, -1))                 # (Bc, P*P)
+        seq = torch.stack(feats, dim=1)                        # (Bc, F, P*P)
+
+        attn_in = self.in_proj_freq(seq) + self.pos_enc_freq[:, :Fbins, :]
+        attn_out, _ = self.temporal_attn_freq(attn_in, attn_in, attn_in)   # (Bc, F, H)
+        coeffs_seq = self.coeff_proj_freq(attn_out).view(Bc, Fbins, P, P)  # (Bc, F, P, P)
+
+        # collapse over frequency bins (attention already weighs them; mean works well)
+        coeffs_collapsed = coeffs_seq.mean(dim=1)                              # (Bc, P, P)
+
+        # one-step prediction proxy: apply collapsed coeffs to the *latest* lag input
+        preds = (coeffs_collapsed @ x_chunk[:, -1, :].unsqueeze(-1)).squeeze(-1)  # (Bc, P)
+        return preds, coeffs_seq, coeffs_collapsed
+
+    def forward(self, inputs: torch.Tensor, batch_chunk_size: int = 1000):
+        B, O, P = inputs.shape
+        device = inputs.device
+
+        preds_out, coeffs_time_out, coeffs_freq_out = [], [], []
+        for start in range(0, B, batch_chunk_size):
+            end = min(start + batch_chunk_size, B)
+            x_chunk = inputs[start:end]  # (B_chunk, O, P)
+
+            # --- time path ---
+            preds_t, coeffs_t = self._time_path(x_chunk)             # (Bch,P), (Bch,O,P,P)
+
+            # --- freq path ---
+            preds_f, coeffs_f_seq, coeffs_f_collapsed = self._freq_path(x_chunk)  # (Bch,P), (Bch,F,P,P), (Bch,P,P)
+
+            # --- fusion gate ---
+            ctx = self._context_stats(x_chunk)                        # (Bch, 2P)
+            alpha = self.fusion_gate(ctx)                             # (Bch, 1) in [0,1]
+
+            # fuse predictions (optional; used mainly for training signal)
+            preds = alpha * preds_t + (1 - alpha) * preds_f
+
+            # fuse coefficients: time path gives per-lag; freq path is collapsed
+            # broadcast alpha to match (Bch, O, 1, 1) and (Bch, 1, 1)
+            alpha_time = alpha.view(-1, 1, 1, 1)
+            alpha_freq = (1 - alpha).view(-1, 1, 1)
+
+            # add freq coeffs into each lag as a global periodic prior
+            alpha_freq = alpha_freq.unsqueeze(-1)  # [131, 1, 1, 1]
+            coeffs_fused = alpha_time * coeffs_t + alpha_freq * coeffs_f_collapsed[:, None, :, :]  # (Bch,O,P,P)
+
+            preds_out.append(preds)
+            coeffs_time_out.append(coeffs_fused)
+            coeffs_freq_out.append(coeffs_f_seq)  # keep raw per-bin seq if you want diagnostics
+
+        preds = torch.cat(preds_out, dim=0)                     # (B, P)
+        coeffs_time_like = torch.cat(coeffs_time_out, dim=0)    # (B, O, P, P)  (fused)
+        coeffs_freq_seq = torch.cat(coeffs_freq_out, dim=0)     # (B, F, P, P)
+
+        return preds, coeffs_time_like, coeffs_freq_seq
+
+
+class RecurrentAttentionGNN_Attn_legendre(nn.Module):
+    """
+    Time domain path: same as original.
+    Freq domain path: Legendre polynomial projection over lags (using numpy) -> per-basis GNN -> attention over basis.
+    Fusion: gated blend of time and polynomial coefficients.
+    """
+    def __init__(self, num_vars, rank, order, hidden_dim=256, num_heads=2, device="cpu",
+                 attention_heads=4, attention_dim=64, pe_scale=0.01, num_basis=None):
+        super().__init__()
+        self.num_vars = num_vars
+        self.rank = rank
+        self.order = order
+        self.hidden_dim = hidden_dim
+        self.device = device
+        self.pe_scale = pe_scale
+        self.num_basis = num_basis or (order // 2 + 1)  # default similar to FFT bins
+
+        # Shared per-slice GNN
+        self.base_net = AttentionCoeffGNN_multihead_fixed(
+            num_vars=num_vars, rank=rank, hidden_dim=attention_dim, heads=attention_heads
+        )
+
+        # --- Time path ---
+        self.in_proj_time = nn.Linear(num_vars * num_vars, hidden_dim)
+        self.temporal_attn_time = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=num_heads, batch_first=True)
+        self.coeff_proj_time = nn.Linear(hidden_dim, num_vars * num_vars)
+        self.pos_enc_time = nn.Parameter(torch.randn(1, order, hidden_dim) * pe_scale)
+
+        # --- Legendre path ---
+        self.in_proj_legendre = nn.Linear(num_vars * num_vars, hidden_dim)
+        self.temporal_attn_legendre = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=num_heads, batch_first=True)
+        self.coeff_proj_legendre = nn.Linear(hidden_dim, num_vars * num_vars)
+        self.pos_enc_legendre = nn.Parameter(torch.randn(1, self.num_basis, hidden_dim) * pe_scale)
+
+        # --- Fusion gate ---
+        ctx_dim = 2 * num_vars  # mean & std per variable
+        self.fusion_gate = nn.Sequential(
+            nn.Linear(ctx_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, 1),
+            nn.Sigmoid()
+        )
+
+        # Precompute Legendre basis using NumPy
+        self.register_buffer("legendre_basis", self._compute_legendre_basis(order, self.num_basis))
+
+    def _compute_legendre_basis(self, order, num_basis):
+        """
+        Generate Legendre polynomials using NumPy.
+        Returns a tensor of shape (order, num_basis)
+        """
+        x = np.linspace(-1, 1, order)
+        basis = []
+        for n in range(num_basis):
+            Pn = np.polynomial.legendre.Legendre([0]*n + [1])(x)  # n-th Legendre polynomial
+            basis.append(Pn)
+        basis = np.stack(basis, axis=1)  # (order, num_basis)
+        return torch.tensor(basis, dtype=torch.float32)
+
+    @torch.no_grad()
+    def _context_stats(self, x_win):
+        mean = x_win.mean(dim=1)
+        std = x_win.std(dim=1)
+        return torch.cat([mean, std], dim=-1)
+
+    def _time_path(self, x_chunk):
+        Bc, O, P = x_chunk.shape
+        feats = []
+        for k in range(O):
+            coeff_k, _ = self.base_net(x_chunk[:, k, :])
+            feats.append(coeff_k.view(Bc, -1))
+        seq = torch.stack(feats, dim=1)
+        attn_in = self.in_proj_time(seq) + self.pos_enc_time[:, :O, :]
+        attn_out, _ = self.temporal_attn_time(attn_in, attn_in, attn_in)
+        coeffs_seq = self.coeff_proj_time(attn_out).view(Bc, O, P, P)
+
+        preds = torch.zeros((Bc, P), device=x_chunk.device)
+        for k in range(O):
+            preds += (coeffs_seq[:, k] @ x_chunk[:, k, :].unsqueeze(-1)).squeeze(-1)
+        return preds, coeffs_seq
+
+    def _legendre_path(self, x_chunk):
+        # x_chunk: (B, O, P)
+        Bc, O, P = x_chunk.shape
+        order, num_basis = self.legendre_basis.shape
+
+        # Resize legendre basis to match O
+        legendre_resized = []
+        for b in range(num_basis):
+            leg_b = self.legendre_basis[:, b].cpu().numpy()           # shape (order,)
+            leg_b_resized = np.interp(np.linspace(0, order-1, O), np.arange(order), leg_b)
+            legendre_resized.append(leg_b_resized)
+        legendre_resized = torch.tensor(np.stack(legendre_resized, axis=1), device=x_chunk.device, dtype=torch.float32)  # (O, num_basis)
+
+        # Project input
+        Xproj = torch.einsum('bok,kf->bfo', x_chunk, legendre_resized)
+
+        feats = []
+        for f in range(self.num_basis):
+            coeff_f, _ = self.base_net(Xproj[:, f, :])
+            feats.append(coeff_f.view(Bc, -1))
+        seq = torch.stack(feats, dim=1)
+
+        attn_in = self.in_proj_legendre(seq) + self.pos_enc_legendre[:, :self.num_basis, :]
+        attn_out, _ = self.temporal_attn_legendre(attn_in, attn_in, attn_in)
+        coeffs_seq = self.coeff_proj_legendre(attn_out).view(Bc, self.num_basis, P, P)
+
+        coeffs_collapsed = coeffs_seq.mean(dim=1)
+        preds = (coeffs_collapsed @ x_chunk[:, -1, :].unsqueeze(-1)).squeeze(-1)
+        return preds, coeffs_seq, coeffs_collapsed
+
+
+    def forward(self, inputs, batch_chunk_size=1000):
+        B, O, P = inputs.shape
+        preds_out, coeffs_time_out, coeffs_legendre_out = [], [], []
+        for start in range(0, B, batch_chunk_size):
+            end = min(start + batch_chunk_size, B)
+            x_chunk = inputs[start:end]
+
+            preds_t, coeffs_t = self._time_path(x_chunk)
+            preds_l, coeffs_l_seq, coeffs_l_collapsed = self._legendre_path(x_chunk)
+
+            ctx = self._context_stats(x_chunk)
+            alpha = self.fusion_gate(ctx)
+
+            preds = alpha * preds_t + (1 - alpha) * preds_l
+
+            alpha_time = alpha.view(-1, 1, 1, 1)
+            alpha_leg = (1 - alpha).view(-1, 1, 1).unsqueeze(-1)
+            coeffs_fused = alpha_time * coeffs_t + alpha_leg * coeffs_l_collapsed[:, None, :, :]
+
+            preds_out.append(preds)
+            coeffs_time_out.append(coeffs_fused)
+            coeffs_legendre_out.append(coeffs_l_seq)
+
+        preds = torch.cat(preds_out, dim=0)
+        coeffs_time_like = torch.cat(coeffs_time_out, dim=0)
+        coeffs_legendre_seq = torch.cat(coeffs_legendre_out, dim=0)
+
+        return preds, coeffs_time_like, coeffs_legendre_seq
 
 class RecurrentAttentionGNN_Attn_______(nn.Module):
     def __init__(self, num_vars, rank, order, hidden_dim=256, num_heads=2, device="cpu",
