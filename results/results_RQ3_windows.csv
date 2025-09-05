@@ -34,3 +34,4 @@ msdsdeep_mlp_(no mean)_normal_KL04_185711_3_1e-06_2_window_3,msds,2,normal_KL,de
 swatdeep_mlp_(no mean)_normal_KL04_190757_2_1e-06_3_window_2,swat,3,normal_KL,deep_mlp,256,2,1e-06,0.1,0.25,0.35,0.45,0.3425,57975606,2,1,5000,0,0,128,2
 msdsdeep_mlp_(no mean)_normal_KL04_191438_2_1e-06_3_window_2,msds,3,normal_KL,deep_mlp,128,2,1e-06,0.29365079365079366,0.9682539682539683,1.0,1.0,0.8944444444444445,18684600,2,1,5000,0,0,128,2
 swatdeep_mlp_(no mean)_normal_KL04_192551_3_1e-06_3_window_3,swat,3,normal_KL,deep_mlp,256,2,1e-06,0.1,0.26666666666666666,0.4,0.45,0.35000000000000003,86963409,3,1,5000,0,0,128,2
+msdsdeep_mlp_(no mean)_normal_KL04_193438_3_1e-06_3_window_3,msds,3,normal_KL,deep_mlp,128,2,1e-06,0.33687943262411346,0.925531914893617,1.0,1.0,0.8957446808510638,28026900,3,1,5000,0,0,128,2
