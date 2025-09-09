@@ -2,7 +2,7 @@
 
 
 # --- Configurations ---
-seeds=(1 2 3)
+seeds=(6)
 coeff_architecture=("TemporalGNN_Attention")
 dataset=("swat")
 lrs=("5e-4")
@@ -61,7 +61,7 @@ run_RQ1_attnheads_SWAT 1
 
 
 # --- Configurations ---
-seeds=(1 2 3)
+seeds=(4 5 6)
 coeff_architecture=("TemporalGNN_Attention")
 dataset=("msds")
 lrs=("5e-4")
@@ -111,4 +111,4 @@ run_RQ1_attnheads_msds() {
 }
 # --- Run experiments ---
 # 2. With AMOC
-run_RQ1_attnheads_msds 1
+#run_RQ1_attnheads_msds 1

@@ -530,7 +530,13 @@ class AERCA(nn.Module):
 
             kl_div = (                    lambda_attn * attn_kl)
         else:
-            kl_div = compute_kl_divergence(us, self.device)
+            try:
+                kl_div = compute_kl_divergence(us, self.device)
+            except Exception as e:
+                # In case of error, like when KL cannot be computed due to numerical issues, 
+                # sometimes happens when lr is high (0.0005 for SWAT) instead of 0.0001
+                print(f"Error computing KL divergence: {e}")
+                kl_div = torch.tensor(0.0, device=self.device)
         nexts_hat, decoder_coeffs, prev_coeffs = self.decoding(us, winds, add_u=add_u)
         return nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us, attn_weights
     
@@ -770,7 +776,7 @@ class AERCA(nn.Module):
 
 
 
-    def _training_batches(self, xs,batch_size=200):
+    def _training_batches(self, xs,batch_size=1000):
         """
         xs: list of windows, each of shape (window_size+1, num_vars)
         batch_size: number of windows per batch
@@ -793,7 +799,7 @@ class AERCA(nn.Module):
             np.random.shuffle(xs_train)
 
             # --- Training loop with batching ---
-            for i in tqdm(range(0, len(xs_train), batch_size)):
+            for i in range(0, len(xs_train), batch_size):
                 batch_windows = xs_train[i:i+batch_size]
                 x_batch = torch.tensor(batch_windows, dtype=torch.float32, device=self.device)  # (B, W, P)
 
