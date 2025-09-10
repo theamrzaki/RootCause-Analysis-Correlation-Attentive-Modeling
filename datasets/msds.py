@@ -140,6 +140,11 @@ class MSDS:
         df_label = df_label.values[::5, 1:]
         labels = np.max(df_label, axis=1)
 
+        """
+        unique, counts = np.unique(labels, return_counts=True)
+        total = counts.sum()
+        percentages = {u: (c / total) * 100 for u, c in zip(unique, counts)}
+        """
         x_n_list = []
         for i in range(0, len(df_normal), 10000):
             if i + 10000 < len(df_normal):
@@ -147,6 +152,7 @@ class MSDS:
         test_x_lst = []
         label_lst = []
 
+        #(before + current + after),
         for i in np.where(labels == 1)[0]:
             if i - 2 * self.window_size > 0 and i + self.window_size < len(df_abnormal):
                 if sum(labels[i - 2 * self.window_size:i]) == 0:

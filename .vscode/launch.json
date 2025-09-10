@@ -12,10 +12,9 @@
             "args": [
                 "--seed","1",
                 "--dataset_name", "swat",
-                "--lr","5e-4",
-                "--window_size","1",
-                "--coeff_architecture","rcd",
-                "--num_epochs","10",
+                "--lr","1e-4",
+                "--window_size","5",
+                "--coeff_architecture","TemporalGNN_Attention",
                 "--outer_heads_num","4",
                 "--outer_hidden_dim","256",
                 "--correlated_KL","0",

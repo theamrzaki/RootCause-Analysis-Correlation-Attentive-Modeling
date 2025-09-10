@@ -910,3 +910,7 @@ swatTemporalGNN_Attention_(no mean)_normal_KL23_112638_4_0.0001_4_window_4,swat,
 swatTemporalGNN_Attention_(no mean)_normal_KL23_123121_4_0.0001_5_window_4,swat,5,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.325,0.375,0.375,0.425,0.38375,5101007,4,0,1000, old loss (larger temporal)
 swatTemporalGNN_Attention_(no mean)_normal_KL23_133758_4_0.0001_4_window_4,swat,4,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.2875,0.3625,0.4,0.45,0.38750000000000007,5101007,4,0,1000
 swatTemporalGNN_Attention_(no mean)_normal_KL23_144441_4_0.0001_5_window_4,swat,5,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.275,0.3375,0.3375,0.35,0.3325,5101007,4,0,1000
+swatTemporalGNN_Attention_(no mean)_normal_KL23_165040_4_0.0001_4_window_4,swat,4,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.2375,0.35,0.3625,0.475,0.38749999999999996,5101007,4,0,1000,0,0
+swatTemporalGNN_Attention_(no mean)_normal_KL23_165841_4_0.0001_4_window_4,swat,4,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.2375,0.35,0.3625,0.475,0.38749999999999996,5101007,4,0,1000,0,0
+swatTemporalGNN_Attention_(no mean)_normal_KL23_170052_4_0.0001_4_window_4,swat,4,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.1,0.2,0.21875,0.35625,0.23875000000000002,5101007,4,0,1000,0,0
+swatTemporalGNN_Attention_(no mean)_normal_KL23_170139_4_0.0001_4_window_4,swat,4,normal_KL,TemporalGNN_Attention,256,2,0.0001,0.1,0.2,0.21875,0.35625,0.23875000000000002,5101007,4,0,1000,0,0

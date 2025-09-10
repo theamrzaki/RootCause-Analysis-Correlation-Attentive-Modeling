@@ -1,4 +1,7 @@
-/datasets
+/datasets/linear
+/datasets/msds
+/datasets/Sock
+/datasets/swat
 *.pyc
 *.log
 *.pkl
