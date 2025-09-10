@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- Configurations ---
-seeds=(1 2 3)
+seeds=(4 5 6)
 coeff_architecture=("rcd" "epsilon_diagnosis")
 dataset=("swat" "msds")
 lrs=("1e-4")
@@ -50,7 +50,7 @@ run_experiment1() {
 
 
 # --- Configurations ---
-seeds=(1 2 3)
+seeds=(4 5 6)
 coeff_architecture=("deep_mlp")
 dataset=("swat" "msds")
 lrs=("1e-6")
@@ -106,7 +106,7 @@ run_experiment_deepmlp() {
 
 
 # --- Configurations ---
-seeds=(1 2 3)
+seeds=(4 5 6)
 coeff_architecture=("TemporalGNN_Attention")
 dataset=("swat")
 lrs=("1e-4")
@@ -154,7 +154,7 @@ run_experiment_RoGSTA_SWAT() {
 }
 # --- Run experiments ---
 # 2. With AMOC
-#run_experiment_RoGSTA_SWAT 1
+run_experiment_RoGSTA_SWAT 1
 
 
 
@@ -162,7 +162,7 @@ run_experiment_RoGSTA_SWAT() {
 
 
 # --- Configurations ---
-seeds=(1 2 3)
+seeds=(4 5 6)
 coeff_architecture=("TemporalGNN_Attention")
 dataset=("msds")
 lrs=("5e-4")

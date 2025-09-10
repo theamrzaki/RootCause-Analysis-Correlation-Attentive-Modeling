@@ -678,6 +678,23 @@ class RecurrentAttentionGNN_Attn_fourier(nn.Module):
             nn.Sigmoid()
         )
 
+    
+    def _init_weights(self):
+        """Initialize weights for linear layers and attention projections."""
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.MultiheadAttention):
+                # PyTorch MHA already uses xavier for in_proj_weight internally, but can re-init if needed
+                nn.init.xavier_uniform_(m.in_proj_weight)
+                if m.in_proj_bias is not None:
+                    nn.init.zeros_(m.in_proj_bias)
+                nn.init.xavier_uniform_(m.out_proj.weight)
+                if m.out_proj.bias is not None:
+                    nn.init.zeros_(m.out_proj.bias)
+                    
     @torch.no_grad()
     def _context_stats(self, x_win):  # x_win: (B, O, P)
         mean = x_win.mean(dim=1)       # (B, P)
@@ -766,6 +783,137 @@ class RecurrentAttentionGNN_Attn_fourier(nn.Module):
         preds = torch.cat(preds_out, dim=0)                     # (B, P)
         coeffs_time_like = torch.cat(coeffs_time_out, dim=0)    # (B, O, P, P)  (fused)
         coeffs_freq_seq = torch.cat(coeffs_freq_out, dim=0)     # (B, F, P, P)
+
+        return preds, coeffs_time_like, coeffs_freq_seq
+
+
+class RecurrentAttentionGNN_Attn_crossattn(nn.Module):
+    """
+    Time domain path: like original RecurrentAttentionGNN_Attn.
+    Freq domain path: rFFT over lags (per variable) -> magnitude -> per-bin GNN -> attention over bins.
+    Cross-attention: time <-> freq interaction before prediction.
+    """
+    def __init__(self, num_vars, rank, order, hidden_dim=256, num_heads=2, device="cpu",
+                 attention_heads=4, attention_dim=64, pe_scale=0.01):
+        super().__init__()
+        self.num_vars = num_vars
+        self.rank = rank
+        self.order = order
+        self.hidden_dim = hidden_dim
+        self.device = device
+        self.pe_scale = pe_scale
+
+        # Shared GNN per slice
+        self.base_net = AttentionCoeffGNN_multihead_fixed(
+            num_vars=num_vars, rank=rank, hidden_dim=attention_dim, heads=attention_heads
+        )
+
+        # --- Time path ---
+        self.in_proj_time = nn.Linear(num_vars * num_vars, hidden_dim)
+        self.temporal_attn_time = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=num_heads, batch_first=True)
+        self.coeff_proj_time = nn.Linear(hidden_dim, num_vars * num_vars)
+        self.pos_enc_time = nn.Parameter(torch.randn(1, order, hidden_dim) * pe_scale)
+
+        # --- Freq path ---
+        self.in_proj_freq = nn.Linear(num_vars * num_vars, hidden_dim)
+        self.temporal_attn_freq = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=num_heads, batch_first=True)
+        self.coeff_proj_freq = nn.Linear(hidden_dim, num_vars * num_vars)
+        self.pos_enc_freq = nn.Parameter(torch.randn(1, (order // 2) + 1, hidden_dim) * pe_scale)
+
+        # --- Cross-attention ---
+        self.cross_attn_time_to_freq = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=num_heads, batch_first=True)
+        self.cross_attn_freq_to_time = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=num_heads, batch_first=True)
+
+    def _init_weights(self):
+        """Initialize weights for linear layers and attention projections."""
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.MultiheadAttention):
+                # PyTorch MHA already uses xavier for in_proj_weight internally, but can re-init if needed
+                nn.init.xavier_uniform_(m.in_proj_weight)
+                if m.in_proj_bias is not None:
+                    nn.init.zeros_(m.in_proj_bias)
+                nn.init.xavier_uniform_(m.out_proj.weight)
+                if m.out_proj.bias is not None:
+                    nn.init.zeros_(m.out_proj.bias)
+                    
+    @torch.no_grad()
+    def _context_stats(self, x_win):  # (B, O, P)
+        mean = x_win.mean(dim=1)      # (B, P)
+        std = x_win.std(dim=1)        # (B, P)
+        return torch.cat([mean, std], dim=-1)  # (B, 2P)
+
+    def _time_path(self, x_chunk):  # (B_chunk, O, P)
+        Bc, O, P = x_chunk.shape
+        feats = []
+        for k in range(O):
+            coeff_k, _ = self.base_net(x_chunk[:, k, :])  # (Bc, P, P)
+            feats.append(coeff_k.view(Bc, -1))            # (Bc, P*P)
+        seq = torch.stack(feats, dim=1)                   # (Bc, O, P*P)
+        attn_in = self.in_proj_time(seq) + self.pos_enc_time[:, :O, :]
+        attn_out, _ = self.temporal_attn_time(attn_in, attn_in, attn_in)  # (Bc, O, H)
+        return attn_out, seq  # return seq for potential diagnostics
+
+    def _freq_path(self, x_chunk):  # (B_chunk, O, P)
+        Bc, O, P = x_chunk.shape
+        X = torch.fft.rfft(x_chunk, dim=1)             # (Bc, F, P) complex
+        Xmag = X.abs()                                 # (Bc, F, P)
+        Fbins = Xmag.size(1)
+
+        feats = []
+        for f in range(Fbins):
+            coeff_f, _ = self.base_net(Xmag[:, f, :])  # (Bc, P, P)
+            feats.append(coeff_f.view(Bc, -1))         # (Bc, P*P)
+        seq = torch.stack(feats, dim=1)                # (Bc, F, P*P)
+        attn_in = self.in_proj_freq(seq) + self.pos_enc_freq[:, :Fbins, :]
+        attn_out, _ = self.temporal_attn_freq(attn_in, attn_in, attn_in)  # (Bc, F, H)
+        return attn_out, seq, Xmag
+
+    def forward(self, inputs: torch.Tensor, batch_chunk_size: int = 1000):
+        B, O, P = inputs.shape
+
+        preds_out, coeffs_time_out, coeffs_freq_out = [], [], []
+
+        for start in range(0, B, batch_chunk_size):
+            end = min(start + batch_chunk_size, B)
+            x_chunk = inputs[start:end]  # (B_chunk, O, P)
+
+            # --- encode time & freq ---
+            attn_time, _ = self._time_path(x_chunk)  # (Bch, O, H)
+            attn_freq, _, _ = self._freq_path(x_chunk)  # (Bch, F, H)
+
+            # --- cross-attention ---
+            attn_time_cross, _ = self.cross_attn_time_to_freq(attn_time, attn_freq, attn_freq)  # (Bch, O, H)
+            attn_freq_cross, _ = self.cross_attn_freq_to_time(attn_freq, attn_time, attn_time)  # (Bch, F, H)
+
+            # --- project to coeffs ---
+            coeffs_time_seq = self.coeff_proj_time(attn_time_cross)  # (Bch, O, P*P)
+            coeffs_time_seq = coeffs_time_seq.view(-1, O, P, P)
+
+            coeffs_freq_seq = self.coeff_proj_freq(attn_freq_cross)  # (Bch, F, P*P)
+            Fbins = coeffs_freq_seq.size(1)
+            coeffs_freq_seq = coeffs_freq_seq.view(-1, Fbins, P, P)
+            coeffs_freq_collapsed = coeffs_freq_seq.mean(dim=1)     # (Bch, P, P)
+
+            # --- prediction ---
+            preds_time = torch.zeros((x_chunk.size(0), P), device=x_chunk.device)
+            for k in range(O):
+                preds_time += (coeffs_time_seq[:, k] @ x_chunk[:, k, :].unsqueeze(-1)).squeeze(-1)
+            preds_freq = (coeffs_freq_collapsed @ x_chunk[:, -1, :].unsqueeze(-1)).squeeze(-1)
+
+            # --- final fused prediction ---
+            preds = 0.5 * preds_time + 0.5 * preds_freq  # can adjust weighting or use a learned gate
+
+            preds_out.append(preds)
+            coeffs_time_out.append(coeffs_time_seq)
+            coeffs_freq_out.append(coeffs_freq_seq)
+
+        preds = torch.cat(preds_out, dim=0)
+        coeffs_time_like = torch.cat(coeffs_time_out, dim=0)
+        coeffs_freq_seq = torch.cat(coeffs_freq_out, dim=0)
 
         return preds, coeffs_time_like, coeffs_freq_seq
 
