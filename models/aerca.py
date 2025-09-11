@@ -77,7 +77,7 @@ class AERCA(nn.Module):
                                  self._count_parameters(self.decoder) +
                                  self._count_parameters(self.decoder_prev)  )
             
-        elif(self.options["coeff_architecture"] == "TemporalGNN_Attention"):
+        elif(self.options["coeff_architecture"] in ["TemporalGNN_Attention", "TemporalGNN_Attention_fourier", "TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced"]):
             # --- Efficient attention-based decoder layers ---
             hidden_dim_small = min(hidden_layer_size, 64)  # smaller hidden dim to reduce parameters
             rank = 1                 # low-rank for coefficient matrices
@@ -476,7 +476,7 @@ class AERCA(nn.Module):
     def decoding(self, us, winds, add_u=True):
         if self.options["coeff_architecture"] == "deep_mlp":
             return self.decoding_2decoders(us, winds, add_u=add_u)
-        elif self.options["coeff_architecture"] == "TemporalGNN_Attention":
+        elif self.options["coeff_architecture"] in ["TemporalGNN_Attention", "TemporalGNN_Attention_fourier", "TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced"]:
             return self.decoding_1decoder(us, winds, add_u=add_u)
 
     def decoding_batch(self, us, winds, add_u=True):
@@ -647,6 +647,45 @@ class AERCA(nn.Module):
             latent_disc_loss = torch.tensor(0.0)
             lambda_amoc = 0.0
 
+        if self.options.get("loglikelihood_loss", False):
+            # === Log-likelihood loss ===
+            eps = 1e-8
+            lambda_hat = torch.relu(nexts_hat)
+
+            # event term: encourage high intensity at actual events
+            log_event_term = (torch.log(lambda_hat + eps) * nexts).sum()
+
+            # integral term: penalize overpredicting
+            integral_term = lambda_hat.sum()
+
+            nll_loss = -(log_event_term - integral_term) / nexts.size(0)
+        else:
+            nll_loss = torch.tensor(0.0)
+
+
+        # === Attribution Sparsity Loss ===
+        if self.options.get("attribution_sparsity_loss", True):
+            """
+            Encourage that anomalies map to sparse sets of root causes.
+            Example: penalize entropy of attention/coefficients so the model highlights a few variables instead of diffusing blame.
+            """
+            C = encoder_coeffs.squeeze(1)
+            p = C.softmax(dim=-1)
+            loss_rca_sparsity = -(p * torch.log(p + 1e-8)).sum(dim=-1).mean()
+        else:
+            loss_rca_sparsity = torch.tensor(0.0, device=x.device)
+
+        # === Causal Consistency Loss ===
+        if self.options.get("causal_consistency_loss", True):
+            """
+            If variable i strongly explains variable j, then anomaly at j should be traceable back to i.
+            Encourage symmetry or consistency between encoder and decoder attribution matrices.
+            """
+            C = encoder_coeffs.squeeze(1)
+            loss_causal_consistency = torch.norm(C - C.transpose(-1, -2), p=1) / C.numel()
+        else:
+            loss_causal_consistency = torch.tensor(0.0, device=x.device)
+
         # === Total loss ===
         loss = (loss_recon +
                 self.encoder_lambda * loss_encoder_coeffs +
@@ -655,7 +694,10 @@ class AERCA(nn.Module):
                 self.decoder_gamma * (loss_decoder_smooth + loss_prev_smooth) +
                 self.beta * loss_kl +
                 reg_lambda +
-                lambda_amoc * latent_disc_loss)
+                lambda_amoc * latent_disc_loss +
+                0.1 * nll_loss +
+                0.1 * loss_rca_sparsity +
+                0.1 * loss_causal_consistency)
 
         # === Logging all losses ===
         losses_dict = {
@@ -675,7 +717,7 @@ class AERCA(nn.Module):
 
         return loss, losses_dict
 
-    def _training(self, xs):
+    def _training_(self, xs):
         if len(xs) == 1:
             xs_train = xs[:, :int(0.8 * len(xs[0]))]
             xs_val = xs[:, int(0.8 * len(xs[0])):]
@@ -776,7 +818,7 @@ class AERCA(nn.Module):
 
 
 
-    def _training_batches(self, xs,batch_size=1000):
+    def _training(self, xs,batch_size=1000):
         """
         xs: list of windows, each of shape (window_size+1, num_vars)
         batch_size: number of windows per batch
