@@ -38,7 +38,7 @@ run_experiment_RoGSTA_SWAT() {
                                     --num_attention_heads=$heads \
                                     --outer_heads_num=$outer_heads_val \
                                     --outer_hidden_dim=$outer_att_dim_val \
-                                    --results_csv=results_fouriers.csv"
+                                    --results_csv=results_fouriers_windows_OLDLOSS.csv"
 
                                 eval $cmd
                             done

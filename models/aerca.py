@@ -664,7 +664,7 @@ class AERCA(nn.Module):
 
 
         # === Attribution Sparsity Loss ===
-        if self.options.get("attribution_sparsity_loss", True):
+        if self.options.get("attribution_sparsity_loss", False):
             """
             Encourage that anomalies map to sparse sets of root causes.
             Example: penalize entropy of attention/coefficients so the model highlights a few variables instead of diffusing blame.
@@ -676,7 +676,7 @@ class AERCA(nn.Module):
             loss_rca_sparsity = torch.tensor(0.0, device=x.device)
 
         # === Causal Consistency Loss ===
-        if self.options.get("causal_consistency_loss", True):
+        if self.options.get("causal_consistency_loss", False):
             """
             If variable i strongly explains variable j, then anomaly at j should be traceable back to i.
             Encourage symmetry or consistency between encoder and decoder attribution matrices.
@@ -685,6 +685,31 @@ class AERCA(nn.Module):
             loss_causal_consistency = torch.norm(C - C.transpose(-1, -2), p=1) / C.numel()
         else:
             loss_causal_consistency = torch.tensor(0.0, device=x.device)
+
+        # === Per-variable reconstruction error (SWaT-friendly) ===
+        # shape: (num_vars,)
+        per_var_error = ((nexts_hat - nexts) ** 2).mean(dim=(0, 1))
+        per_var_loss = per_var_error.mean()   # equal weight per variable
+
+        if self.options.get("per_var_loss", False):
+            lambda_per_var = self.options.get("lambda_per_var", 0.05)
+        else:
+            lambda_per_var = 0.0
+
+
+        # === Poisson NLL loss (for SWaT / anomaly detection) ===
+        if self.options.get("poisson_nll_loss", False):
+            eps = 1e-8
+            # Ensure non-negative predicted rates
+            lambda_hat = torch.relu(nexts_hat) + eps  
+
+            # Poisson log-likelihood per-element
+            # NLL = λ - k*log(λ) + log(k!) but log(k!) can be ignored for optimization
+            poisson_nll = (lambda_hat - nexts * torch.log(lambda_hat)).mean()
+
+            logging.info('Poisson NLL loss: %s', poisson_nll.item())
+        else:
+            poisson_nll = torch.tensor(0.0, device=x.device)
 
         # === Total loss ===
         loss = (loss_recon +
@@ -697,8 +722,10 @@ class AERCA(nn.Module):
                 lambda_amoc * latent_disc_loss +
                 0.1 * nll_loss +
                 0.1 * loss_rca_sparsity +
-                0.1 * loss_causal_consistency)
-
+                0.1 * loss_causal_consistency+
+                lambda_per_var * per_var_loss+
+                0.1 * poisson_nll) 
+        
         # === Logging all losses ===
         losses_dict = {
             "loss_full_recon": loss_full_recon.item(),
