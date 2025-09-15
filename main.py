@@ -184,7 +184,7 @@ def main(argv):
     if mapping["use_slice"]:
         test_causal = data_class.data_dict['x_n_list'][options['training_size']:]
         print('Start testing AERCA model for causal discovery...')
-        aerca_model._testing_causal_discover(test_causal, data_class.data_dict['causal_struct'])
+        #aerca_model._testing_causal_discover(test_causal, data_class.data_dict['causal_struct'])
         print('Done testing for causal discovery')
 
     # Testing phase for root cause analysis.

@@ -50,7 +50,7 @@ class LotkaVolterra:
         self.adlength = options['adlength']
         self.adtype = options['adtype']
 
-    def generate_example(self):
+    def generate_example_old(self):
         if self.seed is not None:
             np.random.seed(self.seed)
 
@@ -152,6 +152,114 @@ class LotkaVolterra:
             'causal_struct': causal_struct,
             'signed_causal_struct': signed_causal_struct
         }
+
+    def generate_example(self):
+        if self.seed is not None:
+            np.random.seed(self.seed)
+
+        lst_n = []
+        lst_ab = []
+        eps_n = []
+        eps_ab = []
+        lst_labels = []
+
+        lags = 5 # Number of past steps for temporal dependence
+
+        # Loop over each simulation
+        for _ in tqdm(range(self.n)):
+            # Generate simulation-specific adversarial timing and feature selection
+            base_t_p = np.random.randint(int(0.5 * self.t / self.downsample_factor),
+                                        self.t // self.downsample_factor, size=1)
+            t_p = base_t_p + np.arange(self.adlength) if self.adlength > 1 else base_t_p
+            trigger_indices = set(((t_p * self.downsample_factor) - 1).flatten())
+
+            pp_p = np.random.randint(0, 2, size=1)
+            n_features = np.random.randint(3, min(5, self.p) + 1) if self.p >= 3 else np.random.randint(2, min(5, self.p) + 1)
+            feature_p = np.random.permutation(self.p)[:n_features]
+
+            # Initial conditions
+            xs_0 = np.random.uniform(10, 20, size=self.p)
+            ys_0 = np.random.uniform(10, 20, size=self.p)
+
+            # Initialize arrays
+            xs = np.zeros((self.t, self.p))
+            ys = np.zeros((self.t, self.p))
+            eps_x = np.zeros((self.t, self.p))
+            eps_y = np.zeros((self.t, self.p))
+            xs_ab = np.zeros((self.t, self.p))
+            ys_ab = np.zeros((self.t, self.p))
+            eps_x_ab = np.zeros((self.t, self.p))
+            eps_y_ab = np.zeros((self.t, self.p))
+            label_x = np.zeros((self.t, self.p))
+            label_y = np.zeros((self.t, self.p))
+
+            xs[:lags] = xs_0
+            ys[:lags] = ys_0
+            xs_ab[:lags] = xs_0
+            ys_ab[:lags] = ys_0
+
+            count = 0
+            for k in range(lags, self.t - 1):
+                # Compute temporal contributions from previous `lags` steps
+                def nonlinear_contribution(arr, t_idx):
+                    contrib = np.zeros(self.p)
+                    for lag in range(lags):
+                        prev = arr[t_idx - lag - 1]
+                        nonlinear_prev = np.cos(prev + 1) + 0.5 * np.sin(prev)
+                        contrib += nonlinear_prev  # simple linear combination with past nonlinearities
+                    return contrib
+
+                # Determine if anomaly occurs
+                if k in trigger_indices:
+                    (xs[k + 1], ys[k + 1],
+                    eps_x[k + 1], eps_y[k + 1],
+                    xs_ab[k + 1], ys_ab[k + 1],
+                    eps_x_ab[k + 1], eps_y_ab[k + 1],
+                    label_x[k + 1], label_y[k + 1]) = self.next(
+                        xs[k], ys[k], xs_ab[k], ys_ab[k],
+                        self.dt, ab=1, pp_p=pp_p,
+                        feature_p=feature_p, adtype=self.adtype, seq_k=count)
+                    count += 1
+                else:
+                    # Add temporal dependence contribution
+                    xs_contrib = nonlinear_contribution(xs, k) + self.sigma * np.random.randn(self.p)
+                    ys_contrib = nonlinear_contribution(ys, k) + self.sigma * np.random.randn(self.p)
+                    xs[k + 1] = xs_contrib
+                    ys[k + 1] = ys_contrib
+                    xs_ab[k + 1] = xs_contrib
+                    ys_ab[k + 1] = ys_contrib
+                    eps_x[k + 1] = xs_contrib - xs[k]
+                    eps_y[k + 1] = ys_contrib - ys[k]
+                    eps_x_ab[k + 1] = eps_x[k + 1]
+                    eps_y_ab[k + 1] = eps_y[k + 1]
+
+            # Downsample and collect results
+            ds_slice = slice(None, None, self.downsample_factor)
+            lst_n.append(np.concatenate((xs[ds_slice], ys[ds_slice]), axis=1))
+            eps_n.append(np.concatenate((eps_x[ds_slice], eps_y[ds_slice]), axis=1))
+            lst_ab.append(np.concatenate((xs_ab[ds_slice], ys_ab[ds_slice]), axis=1))
+            eps_ab.append(np.concatenate((eps_x_ab[ds_slice], eps_y_ab[ds_slice]), axis=1))
+            lst_labels.append(np.concatenate((label_x[ds_slice], label_y[ds_slice]), axis=1))
+
+        # Construct causal structure matrices
+        causal_struct = np.zeros((self.p * 2, self.p * 2))
+        signed_causal_struct = np.zeros((self.p * 2, self.p * 2))
+        for j in range(self.p):
+            causal_struct[j, j] = 1
+            causal_struct[j + self.p, j + self.p] = 1
+            signed_causal_struct[j, j] = 1
+            signed_causal_struct[j + self.p, j + self.p] = -1
+
+        self.data_dict = {
+            'x_n_list': np.array(lst_n)[:, 50:, :],
+            'eps_n_list': np.array(eps_n)[:, 50:, :],
+            'x_ab_list': np.array(lst_ab)[:, 50:, :],
+            'eps_ab_list': np.array(eps_ab)[:, 50:, :],
+            'label_list': np.array(lst_labels)[:, 50:],
+            'causal_struct': causal_struct,
+            'signed_causal_struct': signed_causal_struct
+        }
+
 
     def next(self, x, y, x_ab, y_ab, dt, ab=0, pp_p=0, feature_p=None, adtype='non_causal', seq_k=0):
         dt2 = dt / 2.0

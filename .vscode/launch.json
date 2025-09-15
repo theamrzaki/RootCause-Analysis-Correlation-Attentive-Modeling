@@ -11,7 +11,7 @@
             "program": "main.py",
             "args": [
                 "--seed","1",
-                "--dataset_name", "swat",
+                "--dataset_name", "msds",
                 "--lr","1e-4",
                 "--window_size","10",
                 "--coeff_architecture","TemporalGNN_Attention_crossattn",

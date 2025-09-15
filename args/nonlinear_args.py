@@ -14,11 +14,11 @@ def create_arg_parser():
     parser.add_argument('--T', type=int, default=500, help='Length of the time series (default: 500)')
     parser.add_argument('--training_size', type=int, default=10, help='Size of the training set (default: 10)')
     parser.add_argument('--testing_size', type=int, default=100, help='Size of the testing set (default: 100)')
-    parser.add_argument('--num_vars', type=int, default=6, help='Number of variables (default: 6)')
+    parser.add_argument('--num_vars', type=int, default=15, help='Number of variables (default: 6)')
     parser.add_argument('--preprocessing_data', type=int, default=1, help='Flag for preprocessing data (default: 1)')
     parser.add_argument('--adlength', type=int, default=1, help='Ad length (default: 1)')
     parser.add_argument('--adtype', type=str, default='non_causal', help='Ad type (default: non_causal)')
-    parser.add_argument('--mul', type=int, default=10, help='Multiplier (default: 10)')
+    parser.add_argument('--mul', type=int, default=2, help='Multiplier (default: 10)')
     parser.add_argument('--data_dir', type=str, default=os.path.join(os.getcwd(), 'datasets', 'nonlinear'), help='Data directory (default: ./datasets/nonlinear)')
     parser.add_argument('--causal_quantile', type=float, default=0.80, help='Causal quantile (default: 0.80)')
     parser.add_argument('--m', type=int, default=7, help='Parameter m (default: 7)')
@@ -52,6 +52,29 @@ def create_arg_parser():
     parser.add_argument('--risk', type=float, default=1e-2, help='Risk (default: 1e-2)')
     parser.add_argument('--initial_level', type=float, default=0.98, help='Initial level (default: 0.98)')
     parser.add_argument('--num_candidates', type=int, default=100, help='Number of candidates (default: 100)')
+    parser.add_argument('--early_stopping', type=int, default=0, help='Flag for early stopping (default: 0)')
+    parser.add_argument('--AMOC_Loss', type=int, default=0, help='Minimum delta for early stopping (default: 1e-4)')
+    parser.add_argument('--mean_std_recon_loss', type=int, default=0, help='Patience for early stopping (default: 50)')
+
+    # Dual KL arguments
+    parser.add_argument('--correlated_KL', type=int, default=0, help='Flag for correlated KL (default: 1)')
+    parser.add_argument('--lambda_indep', type=float, default=1.0, help='Lambda for independence (default: 1.0)')
+    parser.add_argument('--lambda_corr', type=float, default=1.0, help='Lambda for correlated (default: 1.0)')
+    parser.add_argument('--shrinkage', type=float, default=0.07, help='Shrinkage factor (default: 0.07)') 
+    
+    # Architecture arguments
+    parser.add_argument('--coeff_architecture', type=str, default='deep_mlp', help='Coefficient architecture options (deep_mlp, gnn_attention) (default: deep_mlp)')
+    parser.add_argument('--attention_dim', type=int, default=128, help='Attention dimension (default: 64)')
+    parser.add_argument('--num_attention_heads', type=int, default=2, help='Number of attention heads (default: 4)')
+    parser.add_argument('--outer_heads_num', type=int, default=2, help='Number of outer attention heads (default: 4)')
+    parser.add_argument('--outer_hidden_dim', type=int, default=128, help='Outer hidden dimension (default: 64)')
+
+    # Attention arguments
+    parser.add_argument('--global_attention_over_all_lag', type=str)
+    parser.add_argument('--local_attention_per_lag', type=int, default=0, help='Flag for using local attention per lag (default: 0)')
+
+    # Results arguments
+    parser.add_argument('--results_csv', type=str, default='results.csv', help='Path to the results CSV file (default: results.csv)')
 
     return parser
 

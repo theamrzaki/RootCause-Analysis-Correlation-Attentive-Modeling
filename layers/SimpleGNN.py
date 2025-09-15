@@ -788,6 +788,79 @@ class RecurrentAttentionGNN_Attn_fourier(nn.Module):
         return preds, coeffs_time_like, coeffs_freq_seq
 
 
+import math
+
+class ConditionalDiffusion(nn.Module):
+    def __init__(self, num_vars, hidden_dim=256, timesteps=1000, device="cpu"):
+        super().__init__()
+        self.num_vars = num_vars
+        self.hidden_dim = hidden_dim
+        self.timesteps = timesteps
+        self.device = device
+
+        # Linear beta schedule
+        betas = torch.linspace(1e-4, 0.02, timesteps, device=device)
+        alphas = 1. - betas
+        alphas_cumprod = torch.cumprod(alphas, dim=0)
+
+        self.register_buffer("betas", betas)
+        self.register_buffer("alphas", alphas)
+        self.register_buffer("alphas_cumprod", alphas_cumprod)
+
+        # Timestep embedding (sinusoidal)
+        self.timestep_embed = nn.Embedding(timesteps, hidden_dim)
+
+        # Denoiser network (conditioned on coeffs)
+        self.denoise_net = nn.Sequential(
+            nn.Linear(num_vars + num_vars * num_vars + hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, num_vars)  # predict noise
+        )
+
+    def forward_diffusion(self, x0, t):
+        """
+        Sample forward process: q(x_t | x0)
+        """
+        sqrt_alpha_cum = torch.sqrt(self.alphas_cumprod[t]).unsqueeze(-1)
+        sqrt_one_minus = torch.sqrt(1 - self.alphas_cumprod[t]).unsqueeze(-1)
+        noise = torch.randn_like(x0)
+        xt = sqrt_alpha_cum * x0 + sqrt_one_minus * noise
+        return xt, noise
+
+    def predict_noise(self, xt, coeffs, t):
+        """
+        Predict noise eps ~ p_theta(eps | xt, coeffs, t)
+        """
+        t_embed = self.timestep_embed(t)
+        cond = torch.cat([xt, coeffs.view(coeffs.size(0), -1), t_embed], dim=-1)
+        eps_hat = self.denoise_net(cond)
+        return eps_hat
+
+    @torch.no_grad()
+    def sample(self, coeffs, shape):
+        """
+        Generate a prediction from noise, conditioned on coeffs
+        """
+        x = torch.randn(shape, device=self.device)
+        for t in reversed(range(self.timesteps)):
+            t_tensor = torch.full((shape[0],), t, device=self.device, dtype=torch.long)
+            eps_hat = self.predict_noise(x, coeffs, t_tensor)
+
+            beta_t = self.betas[t]
+            alpha_t = self.alphas[t]
+            alpha_cum = self.alphas_cumprod[t]
+
+            if t > 0:
+                noise = torch.randn_like(x)
+            else:
+                noise = torch.zeros_like(x)
+
+            x = (1 / torch.sqrt(alpha_t)) * (x - (beta_t / torch.sqrt(1 - alpha_cum)) * eps_hat) + torch.sqrt(beta_t) * noise
+        return x
+
+
 class RecurrentAttentionGNN_Attn_crossattn(nn.Module):
     """
     Time domain path: like original RecurrentAttentionGNN_Attn.
@@ -805,6 +878,7 @@ class RecurrentAttentionGNN_Attn_crossattn(nn.Module):
         self.pe_scale = pe_scale
         self.dynamic_gating = False
         self.combine_coeffs = "None"  # if False, just return time & freq coeffs separately
+        self.diffusion_for_pred = False 
 
         # Shared GNN per slice
         self.base_net = AttentionCoeffGNN_multihead_fixed(
@@ -844,6 +918,15 @@ class RecurrentAttentionGNN_Attn_crossattn(nn.Module):
                 nn.Conv2d(1, 1, kernel_size=3, padding=1),
                 nn.ReLU()
             )
+        if self.diffusion_for_pred:
+            # Use a 1d diffusion model to refine predictions with coeff as conditioning
+            self.diffusion_model = ConditionalDiffusion(
+                num_vars=num_vars,
+                hidden_dim=hidden_dim,
+                timesteps=1000,
+                device=device
+            )
+
 
     def _init_weights(self):
         """Initialize weights for linear layers and attention projections."""
@@ -920,6 +1003,17 @@ class RecurrentAttentionGNN_Attn_crossattn(nn.Module):
             coeffs_freq_collapsed = coeffs_freq_seq.mean(dim=1)     # (Bch, P, P)
 
             # --- prediction ---
+            #if self.diffusion_for_pred:
+            #    # Use time coeffs as condition
+            #    coeffs_flat = coeffs_time_seq.view(x_chunk.size(0), -1)  # (B, O*P*P)
+#
+            #    # Sample prediction from diffusion conditioned on coeffs
+            #    preds_time = self.diffusion_model.sample(coeffs_flat, (x_chunk.size(0), P))
+#
+            #    # Still keep freq prediction (linear)
+            #    preds_freq = (coeffs_freq_collapsed @ x_chunk[:, -1, :].unsqueeze(-1)).squeeze(-1)
+#
+            #else:
             preds_time = torch.zeros((x_chunk.size(0), P), device=x_chunk.device)
             for k in range(O):
                 preds_time += (coeffs_time_seq[:, k] @ x_chunk[:, k, :].unsqueeze(-1)).squeeze(-1)

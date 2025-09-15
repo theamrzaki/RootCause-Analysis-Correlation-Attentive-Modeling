@@ -204,6 +204,21 @@ class AERCA(nn.Module):
             batch_windows.append(windows)
         return np.stack(batch_windows)  
         # shape: (batch, T - window_size, window_size+1, num_vars)
+    def encoding_batch___(self, xs):  # xs: (B, num_vars)
+        """
+        Create sliding windows for a 2D input.
+        Returns tensor of shape: (B - window_size, window_size+1, num_vars)
+        """
+        B, F = xs.shape
+        if B < self.window_size + 1:
+            raise ValueError(f"Sequence too short: {B} < window_size+1={self.window_size+1}")
+        
+        # Use as_strided to create sliding windows
+        stride0, stride1 = xs.stride()
+        new_shape = (B - self.window_size, self.window_size + 1, F)
+        new_stride = (stride0, stride0, stride1)
+        windows = xs.as_strided(size=new_shape, stride=new_stride)
+        return windows  # (B - window_size, window_size+1, num_vars)
 
     def encoding(self, xs):
         #
@@ -211,6 +226,11 @@ class AERCA(nn.Module):
             windows = self.encoding_batch(xs.cpu().numpy())
             winds = windows[:, 0, :-1, :]   # (1000, 30, 10)
             nexts = windows[:, 0, -1, :]    # (1000, 10)
+            """
+            windows = self.encoding_batch(xs)
+            winds = windows[:, :-1, :]               # (B - window_size, window_size, F)
+            nexts = windows[:, -1, :]                # (B - window_size, F)
+            """
         except:
             #when testing
             windows = sliding_window_view(xs, (self.window_size + 1, self.num_vars))[:, 0, :, :]
@@ -673,7 +693,7 @@ class AERCA(nn.Module):
             p = C.softmax(dim=-1)
             loss_rca_sparsity = -(p * torch.log(p + 1e-8)).sum(dim=-1).mean()
         else:
-            loss_rca_sparsity = torch.tensor(0.0, device=x.device)
+            loss_rca_sparsity = torch.tensor(0.0, device=self.device)
 
         # === Causal Consistency Loss ===
         if self.options.get("causal_consistency_loss", False):
@@ -684,7 +704,7 @@ class AERCA(nn.Module):
             C = encoder_coeffs.squeeze(1)
             loss_causal_consistency = torch.norm(C - C.transpose(-1, -2), p=1) / C.numel()
         else:
-            loss_causal_consistency = torch.tensor(0.0, device=x.device)
+            loss_causal_consistency = torch.tensor(0.0, device=self.device)
 
         # === Per-variable reconstruction error (SWaT-friendly) ===
         # shape: (num_vars,)
@@ -709,7 +729,17 @@ class AERCA(nn.Module):
 
             logging.info('Poisson NLL loss: %s', poisson_nll.item())
         else:
-            poisson_nll = torch.tensor(0.0, device=x.device)
+            poisson_nll = torch.tensor(0.0, device=self.device)
+
+
+        if self.options.get("diffusion_for_pred", False):
+            coeffs_flat = encoder_coeffs.view(encoder_coeffs.size(0), -1)  # condition
+            t = torch.randint(0, self.diffusion_model.timesteps, (coeffs_flat.size(0),), device=self.device)
+            xt, noise = self.diffusion_model.forward_diffusion(nexts, t)
+            eps_hat = self.diffusion_model.predict_noise(xt, coeffs_flat, t)
+            diffusion_loss = F.mse_loss(eps_hat, noise)
+        else:
+            diffusion_loss = torch.tensor(0.0, device=self.device)
 
         # === Total loss ===
         loss = (loss_recon +
@@ -744,7 +774,7 @@ class AERCA(nn.Module):
 
         return loss, losses_dict
 
-    def _training_(self, xs):
+    def _training(self, xs):
         if len(xs) == 1:
             xs_train = xs[:, :int(0.8 * len(xs[0]))]
             xs_val = xs[:, int(0.8 * len(xs[0])):]
@@ -845,13 +875,18 @@ class AERCA(nn.Module):
 
 
 
-    def _training(self, xs,batch_size=1000):
+    def _training_batches(self, xs,batch_size=1000):
         """
         xs: list of windows, each of shape (window_size+1, num_vars)
         batch_size: number of windows per batch
         """
+
+        #if len(xs.shape) == 3:
+        #    xs = np.concatenate(xs, axis=0)
+        #    xs = torch.tensor(xs, dtype=torch.float32, device=self.device)
         # Split into train and validation
         split_idx = int(0.8 * len(xs))
+
         xs_train = xs[:split_idx]
         xs_val = xs[split_idx:]
 
