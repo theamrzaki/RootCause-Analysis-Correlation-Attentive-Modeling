@@ -121,9 +121,9 @@ run_experiment_deepmlp() {
 
 
 
-seeds=(1 2 3 4 5 6)
+seeds=(1 2 3)
 coeff_architecture=("rcd" "epsilon_diagnosis")
-dataset=("swat")
+dataset=("lotka_volterra")
 lrs=("1e-4")
 att_dim=256
 heads=2
@@ -148,9 +148,10 @@ run_experiment_baselines() {
                                     --seed=$seed \
                                     --dataset=$data \
                                     --coeff_architecture=$arch \
+                                    --preprocessing_data=0 \
                                     --window_size=$window_size_item \
                                     --training_aerca=0 \
-                                    --results_csv=results_fouriers_windows_OLDLOSS.csv"
+                                    --results_csv=results_lorenz.csv"
 
                                 eval $cmd
                             done
