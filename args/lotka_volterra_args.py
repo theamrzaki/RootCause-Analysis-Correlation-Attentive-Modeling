@@ -53,7 +53,7 @@ def create_arg_parser():
     parser.add_argument('--recon_threshold', type=float, default=0.95, help='Reconstruction threshold (default: 0.95)')
     parser.add_argument('--root_cause_threshold_encoder', type=float, default=0.99, help='Root cause threshold for encoder (default: 0.99)')
     parser.add_argument('--root_cause_threshold_decoder', type=float, default=0.99, help='Root cause threshold for decoder (default: 0.99)')
-    parser.add_argument('--training_aerca', type=int, default=1, help='Flag for training AERCA (default: 1)')
+    parser.add_argument('--training_aerca', type=int, default=0, help='Flag for training AERCA (default: 1)')
     parser.add_argument('--initial_z_score', type=float, default=3.0, help='Initial Z-score (default: 3.0)')
     parser.add_argument('--risk', type=float, default=1e-2, help='Risk (default: 1e-2)')
     parser.add_argument('--initial_level', type=float, default=0.98, help='Initial level (default: 0.98)')
