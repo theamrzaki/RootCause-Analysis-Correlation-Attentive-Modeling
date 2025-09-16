@@ -774,7 +774,7 @@ class AERCA(nn.Module):
 
         return loss, losses_dict
 
-    def _training(self, xs):
+    def _training_msds_lotka(self, xs):
         if len(xs) == 1:
             xs_train = xs[:, :int(0.8 * len(xs[0]))]
             xs_val = xs[:, int(0.8 * len(xs[0])):]
@@ -873,9 +873,15 @@ class AERCA(nn.Module):
                     for m in modalities]
         return modalities
 
+    def _training(self, xs):
+        if self.options["dataset"] in ["msds","lotka_volterra"]:
+            self._training_msds_lotka(xs)
+        elif self.options["dataset"] in ["swat"]:
+            self._training_batches_swat(xs)
+        else:
+            raise ValueError(f"Unknown dataset {self.options['dataset']} for training")
 
-
-    def _training_batches(self, xs,batch_size=1000):
+    def _training_batches_swat(self, xs,batch_size=1000):
         """
         xs: list of windows, each of shape (window_size+1, num_vars)
         batch_size: number of windows per batch
