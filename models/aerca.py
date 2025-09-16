@@ -1192,7 +1192,7 @@ class AERCA(nn.Module):
         np.save(os.path.join(self.save_dir, f'{self.model_name}_us_mean_decoder.npy'), self.us_mean_decoder)
         np.save(os.path.join(self.save_dir, f'{self.model_name}_us_std_decoder.npy'), self.us_std_decoder)
 
-    def _evaluate_rcd(self, xs, labels, bins=None, gamma=5):
+    def _evaluate_rcd_old(self, xs, labels, bins=None, gamma=5):
         """
         RCD baseline for root cause analysis.
         - xs: ndarray of shape [N, T, P]  (N windows, T timesteps, P variables)
@@ -1219,6 +1219,61 @@ class AERCA(nn.Module):
         anomalous_df = pd.DataFrame(anomalous_X, columns=cols)
 
         # Run RCD
+        result = rca_with_rcd(
+            normal_df,
+            anomalous_df,
+            bins=bins,
+            gamma=gamma,
+            localized=False,
+            verbose=False
+        )
+
+        return {
+            "root_cause": result['root_cause'],
+            "num_tests": result['tests'],
+            "time": result['time']
+        }
+
+    def _evaluate_rcd(self, xs, labels, bins=None, gamma=5, agg="mean"):
+        """
+        RCD baseline for root cause analysis with temporal windows preserved.
+        - xs: ndarray of shape [N, T, P]  (N windows, T timesteps, P variables)
+        - labels: ndarray of shape [N, T, P] (0=normal, 1=anomalous)
+        - agg: str, aggregation method across time ("mean", "median", "last")
+        """
+        import pandas as pd
+        from models.baselines.rcd import rca_with_rcd
+        import numpy as np
+
+        N, T, P = xs.shape
+
+        # --- Aggregate across the time dimension ---
+        if agg == "mean":
+            X_all = xs.mean(axis=1)       # (N, P)
+            y_all = labels.max(axis=1)    # (N, P), mark anomalous if anomaly in any timestep
+        elif agg == "median":
+            X_all = np.median(xs, axis=1) # (N, P)
+            y_all = labels.max(axis=1)
+        elif agg == "last":
+            X_all = xs[:, -1, :]          # take last timestep per window
+            y_all = labels[:, -1, :]
+        else:
+            raise ValueError(f"Unknown agg={agg}")
+
+        # --- Masks at window level ---
+        mask_normal = (y_all == 0).all(axis=-1)   # window normal if all vars=0
+        mask_anom   = (y_all == 1).any(axis=-1)   # window anomalous if any var=1
+
+        # --- Apply masks ---
+        normal_X = X_all[mask_normal, :]
+        anomalous_X = X_all[mask_anom, :]
+
+        # --- Convert to DataFrame ---
+        cols = [f"var{i}" for i in range(P)]
+        normal_df = pd.DataFrame(normal_X, columns=cols)
+        anomalous_df = pd.DataFrame(anomalous_X, columns=cols)
+
+        # --- Run RCD ---
         result = rca_with_rcd(
             normal_df,
             anomalous_df,

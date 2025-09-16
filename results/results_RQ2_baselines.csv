@@ -67,3 +67,9 @@ swatTemporalGNN_Attention_(no mean)_normal_KL09_155230_1_0.0001_6_window_1,swat,
 msdsTemporalGNN_Attention_(no mean)_normal_KL09_160143_1_0.0005_4_window_1,msds,4,normal_KL,TemporalGNN_Attention,128,4,0.0005,0.42574257425742573,0.8696369636963696,0.966996699669967,1.0,0.891914191419142,666835,1,0,1000,0,0,256,4
 msdsTemporalGNN_Attention_(no mean)_normal_KL09_160405_1_0.0005_5_window_1,msds,5,normal_KL,TemporalGNN_Attention,128,4,0.0005,0.7128712871287128,0.9521452145214522,0.9917491749174918,1.0,0.948019801980198,666835,1,0,1000,0,0,256,4
 msdsTemporalGNN_Attention_(no mean)_normal_KL09_160633_1_0.0005_6_window_1,msds,6,normal_KL,TemporalGNN_Attention,128,4,0.0005,0.06930693069306931,0.7640264026402641,0.9867986798679869,1.0,0.8150165016501651,666835,1,0,1000,0,0,256,4
+swatrcd_(no mean)_normal_KL16_103547_1_0.0001_1_window_1,swat,1,normal_KL,rcd,256,2,0.0001,0.0,0.0,0.0,0.3,0.1,0,1,0,100,0,0,128,2
+swatrcd_(no mean)_normal_KL16_103601_1_0.0001_2_window_1,swat,2,normal_KL,rcd,256,2,0.0001,0.0,0.0,0.0,0.3,0.1,0,1,0,100,0,0,128,2
+swatrcd_(no mean)_normal_KL16_103615_1_0.0001_3_window_1,swat,3,normal_KL,rcd,256,2,0.0001,0.0,0.0,0.0,0.3,0.1,0,1,0,100,0,0,128,2
+swatrcd_(no mean)_normal_KL16_103629_1_0.0001_4_window_1,swat,4,normal_KL,rcd,256,2,0.0001,0.0,0.0,0.0,0.3,0.1,0,1,0,100,0,0,128,2
+swatrcd_(no mean)_normal_KL16_103643_1_0.0001_5_window_1,swat,5,normal_KL,rcd,256,2,0.0001,0.0,0.0,0.0,0.3,0.1,0,1,0,100,0,0,128,2
+swatrcd_(no mean)_normal_KL16_103657_1_0.0001_6_window_1,swat,6,normal_KL,rcd,256,2,0.0001,0.0,0.0,0.0,0.3,0.1,0,1,0,100,0,0,128,2
