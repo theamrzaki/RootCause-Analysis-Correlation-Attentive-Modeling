@@ -6,6 +6,8 @@ from tqdm import tqdm
 import numpy as np
 from numpy.polynomial.legendre import legfit, legval
 
+from layers.TexFilter import TexFilter
+
 class SimpleCoeffGNN(nn.Module):
     def __init__(self, num_vars: int, rank: int, hidden_dim: int = 128, residual_scale: float = 0.1):
         """
@@ -642,7 +644,7 @@ class RecurrentAttentionGNN_Attn_fourier(nn.Module):
     Fusion: gated blend of (time coeffs) and (freq coeffs).
     """
     def __init__(self, num_vars, rank, order, hidden_dim=256, num_heads=2, device="cpu",
-                 attention_heads=4, attention_dim=64, pe_scale=0.01):
+                 attention_heads=4, attention_dim=64, pe_scale=0.01, options=None):
         super().__init__()
         self.num_vars = num_vars
         self.rank = rank
@@ -650,6 +652,8 @@ class RecurrentAttentionGNN_Attn_fourier(nn.Module):
         self.hidden_dim = hidden_dim
         self.device = device
         self.pe_scale = pe_scale
+        self.time_freq_representation = options.get("time_freq_representation", "") # normal, mag_phase, learnable_filter
+        self.combine_method = options.get("combine_method", "gated")  # gated, attention
 
         # Shared per-slice GNN (use your fixed variant; swap if needed)
         self.base_net = AttentionCoeffGNN_multihead_fixed(
@@ -669,17 +673,46 @@ class RecurrentAttentionGNN_Attn_fourier(nn.Module):
         self.coeff_proj_freq = nn.Linear(hidden_dim, num_vars * num_vars)
         self.pos_enc_freq = nn.Parameter(torch.randn(1, (order // 2) + 1, hidden_dim) * pe_scale)
 
-        # --- Gated fusion (global context → α in [0,1]) ---
-        # take simple stats from the window as context
-        ctx_dim = 2 * num_vars  # mean & std per variable, concatenated
-        self.fusion_gate = nn.Sequential(
-            nn.Linear(ctx_dim, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim // 2, 1),
-            nn.Sigmoid()
-        )
+        if self.combine_method not in ["gated", "attention"]:
+            raise ValueError("combine_method must be 'gated' or 'attention'")
+        if self.combine_method == "attention":
+            self.cross_attn_time_to_freq = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=num_heads, batch_first=True)
+            self.cross_attn_freq_to_time = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=num_heads, batch_first=True)
+        else:
+            # --- Gated fusion (global context → α in [0,1]) ---
+            # take simple stats from the window as context
+            ctx_dim = 2 * num_vars  # mean & std per variable, concatenated
+            self.fusion_gate = nn.Sequential(
+                nn.Linear(ctx_dim, hidden_dim // 2),
+                nn.ReLU(),
+                nn.Linear(hidden_dim // 2, 1),
+                nn.Sigmoid()
+            )
+        
+        if self.time_freq_representation == "mag_phase":
+            self.in_projector = nn.Linear(num_vars*2, num_vars)
+        elif self.time_freq_representation == "mag_phase_learnable_filter":
+            self.in_projector = nn.Linear(num_vars*2, num_vars)
+            self.texfilter = TexFilter(
+                embed_size=num_vars,
+                use_gelu=True,             # or use_swish=True for smoother nonlinearity
+                use_skip=True,             # ✅ Preserve original signal paths
+                use_layernorm=True,        # ✅ Stabilize across frequency bins
+                hard_threshold=False,      # ❌ Avoid hard cutting off weak signals
+                use_window=False,          # ❌ Avoid muting boundary info
+                sparsity_threshold=0.0     # ✅ Retain all weak signal components
+            )
+        elif self.time_freq_representation == "learnable_filter":
+            self.texfilter = TexFilter(
+                embed_size=num_vars,
+                use_gelu=True,             # or use_swish=True for smoother nonlinearity
+                use_skip=True,             # ✅ Preserve original signal paths
+                use_layernorm=True,        # ✅ Stabilize across frequency bins
+                hard_threshold=False,      # ❌ Avoid hard cutting off weak signals
+                use_window=False,          # ❌ Avoid muting boundary info
+                sparsity_threshold=0.0     # ✅ Retain all weak signal components
+            )
 
-    
     def _init_weights(self):
         """Initialize weights for linear layers and attention projections."""
         for m in self.modules():
@@ -719,7 +752,7 @@ class RecurrentAttentionGNN_Attn_fourier(nn.Module):
             preds += (coeffs_seq[:, k] @ x_chunk[:, k, :].unsqueeze(-1)).squeeze(-1)
         return preds, coeffs_seq
 
-    def _freq_path(self, x_chunk):  # x_chunk: (B_chunk, O, P)
+    def _freq_path_normal(self, x_chunk):  # x_chunk: (B_chunk, O, P)
         """
         rFFT over the lag axis (dim=1). We use magnitude per variable & bin: (B, F, P).
         Each frequency bin plays the role of a "lag slice" for base_net.
@@ -745,8 +778,105 @@ class RecurrentAttentionGNN_Attn_fourier(nn.Module):
         # one-step prediction proxy: apply collapsed coeffs to the *latest* lag input
         preds = (coeffs_collapsed @ x_chunk[:, -1, :].unsqueeze(-1)).squeeze(-1)  # (Bc, P)
         return preds, coeffs_seq, coeffs_collapsed
+    
+    def _freq_path_mag_phase(self, x_chunk):  # (B_chunk, O, P)
+        Bc, O, P = x_chunk.shape
 
-    def forward(self, inputs: torch.Tensor, batch_chunk_size: int = 1000):
+        # --- 1. rFFT ---
+        X = torch.fft.rfft(x_chunk, dim=1)           # (Bc, F, P) complex
+
+        # --- 2. Extract magnitude and phase ---
+        X_mag = X.abs()                              # (Bc, F, P)
+        X_phase = torch.angle(X)                     # (Bc, F, P)
+        X_phase_norm = X_phase / np.pi  # now in [-1, 1]
+
+        # --- 3. Concatenate to preserve full signal ---
+        X_full = torch.cat([X_mag, X_phase_norm], dim=-1)
+        # (Bc, F, 2*P)
+        Fbins = X_full.size(1)
+        # --- 4. GNN per frequency bin ---
+        feats = []
+        for f in range(Fbins):
+            coeff_f, _ = self.base_net(self.in_proj(X_full[:, f, :]))
+            feats.append(coeff_f.view(Bc, -1))           # flatten to (Bc, P*P)
+        seq = torch.stack(feats, dim=1)                  # (Bc, F, P*P)
+        # --- 5. Temporal attention over frequency bins ---
+        attn_in = self.in_proj_freq(seq) + self.pos_enc_freq[:, :Fbins, :]
+        attn_out, _ = self.temporal_attn_freq(attn_in, attn_in, attn_in)  # (Bc, F, H) 
+        return attn_out, seq, X_full
+
+    def _freq_path_mag_phase_learnable_filter(self, x_chunk):  # (B_chunk, O, P)
+        Bc, O, P = x_chunk.shape
+
+        # --- 1. rFFT ---
+        X = torch.fft.rfft(x_chunk, dim=1)           # (Bc, F, P) complex
+
+        # --- 2. Apply learnable frequency filter (TexFilter) ---
+        X = X * self.texfilter(X)                    # element-wise frequency attention
+
+        # --- 3. Extract real and imaginary channels ---
+        X_real = X.real                              # (Bc, F, P)
+        X_imag = X.imag                              # (Bc, F, P)
+
+        # --- 4. Concatenate to preserve full signal ---
+        X_full = torch.cat([X_real, X_imag], dim=-1)  # (Bc, F, 2*P)
+
+        Fbins = X_full.size(1)
+
+        # --- 5. GNN per frequency bin ---
+        feats = []
+        for f in range(Fbins):
+            coeff_f, _ = self.base_net(self.in_projector(X_full[:, f, :])) # (Bc, P, P)
+            feats.append(coeff_f.view(Bc, -1))           # flatten to (Bc, P*P)
+        seq = torch.stack(feats, dim=1)                  # (Bc, F, P*P)
+
+        # --- 6. Temporal attention over frequency bins ---
+        attn_in = self.in_proj_freq(seq) + self.pos_enc_freq[:, :Fbins, :]
+        attn_out, _ = self.temporal_attn_freq(attn_in, attn_in, attn_in)  # (Bc, F, H)
+
+        return attn_out, seq, X_full
+
+    def _freq_path_learnable_filter(self, x_chunk):  # (B_chunk, O, P)
+        Bc, O, P = x_chunk.shape
+
+        # --- 1. rFFT ---
+        X = torch.fft.rfft(x_chunk, dim=1)           # (Bc, F, P) complex
+
+        # --- 2. Apply learnable frequency filter (TexFilter) ---
+        X = X * self.texfilter(X)                    # element-wise frequency attention
+
+        # --- 3. Extract real and imaginary channels ---
+        X_real = X.abs()                             # (Bc, F, P)
+
+        Fbins = X_real.size(1)
+
+        # --- 5. GNN per frequency bin ---
+        feats = []
+        for f in range(Fbins):
+            coeff_f, _ = self.base_net(X_real[:, f, :]) # (Bc, P, P)
+            feats.append(coeff_f.view(Bc, -1))           # flatten to (Bc, P*P)
+        seq = torch.stack(feats, dim=1)                  # (Bc, F, P*P)
+
+        # --- 6. Temporal attention over frequency bins ---
+        attn_in = self.in_proj_freq(seq) + self.pos_enc_freq[:, :Fbins, :]
+        attn_out, _ = self.temporal_attn_freq(attn_in, attn_in, attn_in)  # (Bc, F, H)
+
+        return attn_out, seq, X_real
+    
+
+
+    def _freq_path(self, x_chunk):  # x_chunk: (B_chunk, O, P)
+        if self.time_freq_representation == "normal":
+            return self._freq_path_normal(x_chunk)
+        elif self.time_freq_representation == "mag_phase":
+            return self._freq_path_mag_phase(x_chunk)
+        elif self.time_freq_representation == "mag_phase_learnable_filter":
+            return self._freq_path_mag_phase_learnable_filter(x_chunk)
+        elif self.time_freq_representation == "learnable_filter":
+            # same as mag_phase_learnable_filter but without phase extraction step
+            return self._freq_path_learnable_filter(x_chunk)
+
+    def forward_gated(self, inputs: torch.Tensor, batch_chunk_size: int = 1000):
         B, O, P = inputs.shape
         device = inputs.device
 
@@ -787,6 +917,120 @@ class RecurrentAttentionGNN_Attn_fourier(nn.Module):
 
         return preds, coeffs_time_like, coeffs_freq_seq
 
+    def forward_attention_wrong(self, inputs: torch.Tensor, batch_chunk_size: int = 1000):
+        B, O, P = inputs.shape
+
+        preds_out, coeffs_time_out, coeffs_freq_out = [], [], []
+
+        for start in range(0, B, batch_chunk_size):
+            end = min(start + batch_chunk_size, B)
+            x_chunk = inputs[start:end]  # (B_chunk, O, P)
+
+            # --- encode time & freq ---
+            attn_time, _ = self._time_path(x_chunk)  # (Bch, O, H)
+            attn_freq, _, _ = self._freq_path(x_chunk)  # (Bch, F, H)
+
+            # --- cross-attention ---
+            attn_time_cross, _ = self.cross_attn_time_to_freq(attn_time, attn_freq, attn_freq)  # (Bch, O, H)
+            attn_freq_cross, _ = self.cross_attn_freq_to_time(attn_freq, attn_time, attn_time)  # (Bch, F, H)
+
+            # --- project to coeffs ---
+            coeffs_time_seq = self.coeff_proj_time(attn_time_cross)  # (Bch, O, P*P)
+            coeffs_time_seq = coeffs_time_seq.view(-1, O, P, P)
+
+            coeffs_freq_seq = self.coeff_proj_freq(attn_freq_cross)  # (Bch, F, P*P)
+            Fbins = coeffs_freq_seq.size(1)
+            coeffs_freq_seq = coeffs_freq_seq.view(-1, Fbins, P, P)
+            coeffs_freq_collapsed = coeffs_freq_seq.mean(dim=1)     # (Bch, P, P)
+
+            # --- prediction ---
+            preds_time = torch.zeros((x_chunk.size(0), P), device=x_chunk.device)
+            for k in range(O):
+                preds_time += (coeffs_time_seq[:, k] @ x_chunk[:, k, :].unsqueeze(-1)).squeeze(-1)
+            preds_freq = (coeffs_freq_collapsed @ x_chunk[:, -1, :].unsqueeze(-1)).squeeze(-1)
+
+            # --- final fused prediction ---
+            preds = 0.5 * preds_time + 0.5 * preds_freq
+            preds_out.append(preds)
+            coeffs_time_out.append(coeffs_time_seq)
+            coeffs_freq_out.append(coeffs_freq_seq)
+
+            alpha_time = torch.tensor(0.5, device=coeffs_time_seq.device)
+
+            alpha_freq = 1.0 - alpha_time  # same shape, broadcastable
+
+            # expand freq coefficients along lag dimension
+            coeffs_freq_exp = coeffs_freq_collapsed[:, None, :, :]  # (Bch, 1, P, P)
+
+            # fused coefficients
+            coeffs_fused = alpha_time * coeffs_time_seq + alpha_freq * coeffs_freq_exp
+
+            # store fused version
+            coeffs_time_out[-1] = coeffs_fused
+            coeffs_freq_out[-1] = coeffs_freq_collapsed  # keep collapsed for reference
+
+        preds = torch.cat(preds_out, dim=0)
+        coeffs_time_like = torch.cat(coeffs_time_out, dim=0)
+        coeffs_freq_seq = torch.cat(coeffs_freq_out, dim=0)
+
+        return preds, coeffs_time_like, coeffs_freq_seq
+
+    def forward_attention(self, inputs: torch.Tensor, batch_chunk_size: int = 1000):
+        B, O, P = inputs.shape
+        device = inputs.device
+
+        preds_out, coeffs_time_out, coeffs_freq_out = [], [], []
+
+        for start in range(0, B, batch_chunk_size):
+            end = min(start + batch_chunk_size, B)
+            x_chunk = inputs[start:end]  # (B_chunk, O, P)
+
+            # --- encode time & freq ---
+            attn_time, coeffs_t = self._time_path(x_chunk)                     # (Bch, O, H), (Bch, O, P, P)
+            attn_freq, coeffs_f_seq, coeffs_f_collapsed = self._freq_path(x_chunk)  # (Bch, F, H), (Bch, F, P, P), (Bch, P, P)
+
+            # --- cross-attention ---
+            attn_time_cross, _ = self.cross_attn_time_to_freq(attn_time, attn_freq, attn_freq)  # (Bch, O, H)
+            attn_freq_cross, _ = self.cross_attn_freq_to_time(attn_freq, attn_time, attn_time)  # (Bch, F, H)
+
+            # --- project back to coefficients ---
+            coeffs_time_seq = self.coeff_proj_time(attn_time_cross).view(-1, O, P, P)
+            Fbins = coeffs_f_seq.size(1)
+            coeffs_freq_seq = self.coeff_proj_freq(attn_freq_cross).view(-1, Fbins, P, P)
+            coeffs_freq_collapsed = coeffs_freq_seq.mean(dim=1)
+
+            # --- optional fusion gate ---
+            ctx = self._context_stats(x_chunk)            # (Bch, 2P)
+            alpha = self.fusion_gate(ctx)                 # (Bch, 1) in [0,1]
+
+            # fuse coefficients
+            alpha_time = alpha.view(-1, 1, 1, 1)
+            alpha_freq = (1 - alpha).view(-1, 1, 1, 1)
+            coeffs_fused = alpha_time * coeffs_time_seq + alpha_freq * coeffs_freq_collapsed[:, None, :, :]
+
+            # --- fuse predictions from already-computed time/freq preds ---
+            # just reuse the linear combination from the fused coefficients
+            preds_time = torch.zeros((x_chunk.size(0), P), device=device)
+            for k in range(O):
+                preds_time += (coeffs_time_seq[:, k] @ x_chunk[:, k, :].unsqueeze(-1)).squeeze(-1)
+            preds_freq = (coeffs_freq_collapsed @ x_chunk[:, -1, :].unsqueeze(-1)).squeeze(-1)
+            preds = alpha * preds_time + (1 - alpha) * preds_freq
+
+            preds_out.append(preds)
+            coeffs_time_out.append(coeffs_fused)
+            coeffs_freq_out.append(coeffs_f_seq)  # keep raw per-bin seq for diagnostics
+
+        preds = torch.cat(preds_out, dim=0)                     # (B, P)
+        coeffs_time_like = torch.cat(coeffs_time_out, dim=0)    # (B, O, P, P) (fused)
+        coeffs_freq_seq = torch.cat(coeffs_freq_out, dim=0)     # (B, F, P, P)
+
+        return preds, coeffs_time_like, coeffs_freq_seq
+
+    def forward(self, inputs: torch.Tensor, batch_chunk_size: int = 1000):
+        if self.combine_method == "gated":
+            return self.forward_gated(inputs, batch_chunk_size)
+        elif self.combine_method  == "attention":
+            return self.forward_attention(inputs, batch_chunk_size)
 
 import math
 
@@ -927,6 +1171,19 @@ class RecurrentAttentionGNN_Attn_crossattn(nn.Module):
                 device=device
             )
 
+            
+    def _augment_graph(self, coeffs, node_mask_prob=0.1, edge_drop_prob=0.1):
+        """On-the-fly augmentation for loss computation."""
+        B, O, P, _ = coeffs.shape
+        aug = coeffs.clone()
+
+        if node_mask_prob > 0:
+            node_mask = (torch.rand(B, 1, P, 1, device=coeffs.device) > node_mask_prob).float()
+            aug = aug * node_mask
+        if edge_drop_prob > 0:
+            edge_mask = (torch.rand(B, O, P, P, device=coeffs.device) > edge_drop_prob).float()
+            aug = aug * edge_mask
+        return aug
 
     def _init_weights(self):
         """Initialize weights for linear layers and attention projections."""
