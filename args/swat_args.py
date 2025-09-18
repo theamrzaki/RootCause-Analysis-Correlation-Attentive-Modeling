@@ -67,6 +67,10 @@ def create_arg_parser():
 
     # Results arguments
     parser.add_argument('--results_csv', type=str, default='results.csv', help='Path to the results CSV file (default: results.csv)')
+    
+    # cross attention arguments
+    parser.add_argument('--time_freq_representation', type=str, default='normal', help='Time-frequency representation options (normal, mag_phase, learnable_filter) (default: normal)')
+    parser.add_argument('--combine_method', type=str, default='gated', help='Method to combine time and frequency coefficients (gated, attention, average) (default: gated)')
 
     return parser
 

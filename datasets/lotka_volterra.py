@@ -32,7 +32,7 @@ class LotkaVolterra:
         self.options = options
         self.data_dict = {}
         self.p = options['num_vars'] // 2
-        self.d = options['d']
+        self.d = options['spec']
         self.dt = options['dt']
         self.n = options['training_size'] + options['testing_size']
         self.t = options['T']

@@ -12,7 +12,7 @@ def create_arg_parser():
 
     # Dataset arguments
     parser.add_argument('--T', type=int, default=20000, help='Length of the time series (default: 20000)')
-    parser.add_argument('--d', type=int, default=2, help='Number of species in the Lotka-Volterra system (default: 2)')
+    parser.add_argument('--spec', type=int, default=2, help='Number of species in the Lotka-Volterra system (default: 2)')
     parser.add_argument('--dt', type=float, default=0.01, help='Sampling time (default: 0.01)')
     parser.add_argument('--downsample_factor', type=int, default=10, help='Down-sampling factor (default: 10)')
     parser.add_argument('--alpha_lv', type=float, default=1.1, help='Parameter alpha in Lotka-Volterra equations (default: 1.1)')
@@ -82,6 +82,9 @@ def create_arg_parser():
     # Results arguments
     parser.add_argument('--results_csv', type=str, default='results.csv', help='Path to the results CSV file (default: results.csv)')
 
+    # cross attention arguments
+    parser.add_argument('--time_freq_representation', type=str, default='normal', help='Time-frequency representation options (normal, mag_phase, learnable_filter) (default: normal)')
+    parser.add_argument('--combine_method', type=str, default='gated', help='Method to combine time and frequency coefficients (gated, attention, average) (default: gated)')
     return parser
 
 if __name__ == "__main__":
