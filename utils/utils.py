@@ -411,6 +411,13 @@ def write_results(args, local_model_name, ac_at,k_at_step_all, total_params,file
         'mean_std_recon_loss': args['mean_std_recon_loss'],
         'outer_hidden_dim': args['outer_hidden_dim'],
         'outer_heads_num': args['outer_heads_num'],
+
+        #if "num_vars" in args, print it, else print 0 (num of species in lotka)
+        'num_vars': args['num_vars'] if 'num_vars' in args else 0,
+        'alpha_lv': args['alpha_lv'] if 'alpha_lv' in args else 0,
+
+        'time_freq_representation': args['time_freq_representation'],
+        'combine_method': args['combine_method'],
     }
     
 

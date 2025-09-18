@@ -685,6 +685,11 @@ class RecurrentAttentionGNN_Attn_fourier(nn.Module):
                 nn.Linear(hidden_dim // 2, 1),
                 nn.Sigmoid()
             )
+        elif self.combine_method == "concat":
+            # --- Concatenation fusion (project back to num_vars * num_vars) ---
+            self.fusion_proj = nn.Linear(num_vars * num_vars * 2, num_vars * num_vars)
+        elif self.combine_method == "sum":
+            pass  # no extra layers needed for sum
         
         if self.time_freq_representation == "mag_phase":
             self.in_projector = nn.Linear(num_vars*2, num_vars)
@@ -944,9 +949,83 @@ class RecurrentAttentionGNN_Attn_fourier(nn.Module):
 
         return preds, coeffs_time_like, coeffs_freq_seq
 
+    def forward_sum(self, inputs: torch.Tensor, batch_chunk_size: int = 1000):
+        B, O, P = inputs.shape
+        preds_out, coeffs_time_out, coeffs_freq_out = [], [], []
+
+        for start in range(0, B, batch_chunk_size):
+            end = min(start + batch_chunk_size, B)
+            x_chunk = inputs[start:end]  # (B_chunk, O, P)
+
+            # --- time path ---
+            preds_t, coeffs_t = self._time_path(x_chunk)  # (Bch, P), (Bch, O, P, P)
+
+            # --- freq path ---
+            preds_f, coeffs_f_seq, coeffs_f_collapsed = self._freq_path(x_chunk)  # (Bch,P), (Bch,F,P,P), (Bch,P,P)
+
+            # --- prediction fusion (simple sum) ---
+            preds = preds_t + preds_f
+
+            # --- coefficient fusion ---
+            # broadcast collapsed freq coeffs across lags
+            coeffs_f_broadcast = coeffs_f_collapsed[:, None, :, :].expand(-1, O, -1, -1)
+            coeffs_fused = coeffs_t + coeffs_f_broadcast  # (Bch, O, P, P)
+
+            preds_out.append(preds)
+            coeffs_time_out.append(coeffs_fused)
+            coeffs_freq_out.append(coeffs_f_seq)  # keep raw per-bin seq if needed
+
+        preds = torch.cat(preds_out, dim=0)              # (B, P)
+        coeffs_time_like = torch.cat(coeffs_time_out, dim=0)  # (B, O, P, P)
+        coeffs_freq_seq = torch.cat(coeffs_freq_out, dim=0)   # (B, F, P, P)
+
+        return preds, coeffs_time_like, coeffs_freq_seq
+
+    def forward_concat(self, inputs: torch.Tensor, batch_chunk_size: int = 1000):
+        B, O, P = inputs.shape
+        preds_out, coeffs_time_out, coeffs_freq_out = [], [], []
+
+        for start in range(0, B, batch_chunk_size):
+            end = min(start + batch_chunk_size, B)
+            x_chunk = inputs[start:end]  # (B_chunk, O, P)
+
+            # --- time path ---
+            preds_t, coeffs_t = self._time_path(x_chunk)  # (Bch, P), (Bch, O, P, P)
+
+            # --- freq path ---
+            preds_f, coeffs_f_seq, coeffs_f_collapsed = self._freq_path(x_chunk)  # (Bch,P), (Bch,F,P,P), (Bch,P,P)
+
+            # --- prediction fusion (optional: sum for training signal) ---
+            preds = preds_t + preds_f
+
+            # --- coefficient fusion by concatenation ---
+            # flatten coeffs
+            coeffs_t_flat = coeffs_t.view(-1, O, P*P)               # (Bch, O, P*P)
+            coeffs_f_flat = coeffs_f_collapsed.view(-1, 1, P*P)     # (Bch, 1, P*P)
+            coeffs_f_flat = coeffs_f_flat.expand(-1, O, -1)         # (Bch, O, P*P) broadcast across lags
+
+            # concatenate along last dim
+            coeffs_concat = torch.cat([coeffs_t_flat, coeffs_f_flat], dim=-1)  # (Bch, O, 2*P*P)
+            coeffs_fused = self.fusion_proj(coeffs_concat)                       # (Bch, O, P*P)
+            coeffs_fused = coeffs_fused.view(-1, O, P, P)                        # (Bch, O, P, P)
+
+            preds_out.append(preds)
+            coeffs_time_out.append(coeffs_fused)
+            coeffs_freq_out.append(coeffs_f_seq)  # keep raw per-bin seq if needed
+
+        preds = torch.cat(preds_out, dim=0)              # (B, P)
+        coeffs_time_like = torch.cat(coeffs_time_out, dim=0)  # (B, O, P, P)
+        coeffs_freq_seq = torch.cat(coeffs_freq_out, dim=0)   # (B, F, P, P)
+
+        return preds, coeffs_time_like, coeffs_freq_seq
+
     def forward(self, inputs: torch.Tensor, batch_chunk_size: int = 1000):
         if self.combine_method == "gated":
             return self.forward_gated(inputs, batch_chunk_size)
+        elif self.combine_method == "sum":
+            return self.forward_sum(inputs, batch_chunk_size)
+        elif self.combine_method == "concat":
+            return self.forward_concat(inputs, batch_chunk_size)
 
 import math
 

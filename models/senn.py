@@ -202,22 +202,6 @@ class SENNGC(nn.Module):
         elif args["coeff_architecture"] == "TemporalGNN_Attention_fourier":
             self.rank = 51
             
-            self.coeff_net = RecurrentAttentionGNN_Attn(
-                num_vars=num_vars,
-                rank=self.rank,
-                order=order,
-                device=device,
-                hidden_dim = args.get("outer_hidden_dim", 64),  # default to 64 if not specified
-                num_heads = args.get("outer_heads_num", 4),  # default to 4 heads if not specified
-                attention_heads = args.get("num_attention_heads", 4),  # default to 4 heads if not specified
-                attention_dim = args.get("attention_dim", 64)  # default to 64 if not specified
-            )
-            total_params = sum(p.numel() for p in self.coeff_net.parameters() if p.requires_grad)
-            print(f"Total parameters for temporal : {total_params}")
-
-        elif args["coeff_architecture"] == "TemporalGNN_Attention_fourier":
-            self.rank = 51
-            
             self.coeff_net = RecurrentAttentionGNN_Attn_fourier(
                 num_vars=num_vars,
                 rank=self.rank,
@@ -226,7 +210,8 @@ class SENNGC(nn.Module):
                 hidden_dim = args.get("outer_hidden_dim", 64),  # default to 64 if not specified
                 num_heads = args.get("outer_heads_num", 4),  # default to 4 heads if not specified
                 attention_heads = args.get("num_attention_heads", 4),  # default to 4 heads if not specified
-                attention_dim = args.get("attention_dim", 64)  # default to 64 if not specified
+                attention_dim = args.get("attention_dim", 64),  # default to 64 if not specified
+                options = args  # default to None if not specified
             )
             total_params = sum(p.numel() for p in self.coeff_net.parameters() if p.requires_grad)
             print(f"Total parameters for temporal : {total_params}")
@@ -275,7 +260,8 @@ class SENNGC(nn.Module):
                 hidden_dim = args.get("outer_hidden_dim", 64),  # default to 64 if not specified
                 num_heads = args.get("outer_heads_num", 4),  # default to 4 heads if not specified
                 attention_heads = args.get("num_attention_heads", 4),  # default to 4 heads if not specified
-                attention_dim = args.get("attention_dim", 64)  # default to 64 if not specified
+                attention_dim = args.get("attention_dim", 64),  # default to 64 if not specified
+                options = args  # default to None if not specified
             )
             total_params = sum(p.numel() for p in self.coeff_net.parameters() if p.requires_grad)
             print(f"Total parameters for temporal : {total_params}")

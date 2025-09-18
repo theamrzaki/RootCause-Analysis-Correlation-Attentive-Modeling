@@ -618,7 +618,7 @@ class AERCA(nn.Module):
 
     def _training_step(self, x,add_u=True):
         # Forward pass
-        nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us,_ = self.forward(x, add_u=add_u)
+        nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us, attns = self.forward(x, add_u=add_u)
 
         # === Full reconstruction loss ===
         loss_full_recon = self.mse_loss(nexts_hat, nexts)
@@ -741,6 +741,25 @@ class AERCA(nn.Module):
         else:
             diffusion_loss = torch.tensor(0.0, device=self.device)
 
+        if self.options.get("2graphs", False):
+            coeffs_time_seq = encoder_coeffs 
+            coeffs_freq_seq = attns
+
+            # Augment at loss time
+            aug_time_1 = self.encoder.coeff_net._augment_graph(coeffs_time_seq)
+            aug_time_2 = self.encoder.coeff_net._augment_graph(coeffs_time_seq)
+            aug_freq_1 = self.encoder.coeff_net._augment_graph(coeffs_freq_seq)  
+            aug_freq_2 = self.encoder.coeff_net._augment_graph(coeffs_freq_seq)  
+
+            # Compute MSE reconstruction losses
+            loss_time_aug = F.mse_loss(aug_time_1, aug_time_2)
+            loss_freq_aug = F.mse_loss(aug_freq_1, aug_freq_2)
+
+            # Total augmentation loss (weighted if needed)
+            loss_aug_total = 0.5 * loss_time_aug + 0.5 * loss_freq_aug
+        else:
+            loss_aug_total = torch.tensor(0.0, device=self.device)
+
         # === Total loss ===
         loss = (loss_recon +
                 self.encoder_lambda * loss_encoder_coeffs +
@@ -754,7 +773,8 @@ class AERCA(nn.Module):
                 0.1 * loss_rca_sparsity +
                 0.1 * loss_causal_consistency+
                 lambda_per_var * per_var_loss+
-                0.1 * poisson_nll) 
+                0.1 * poisson_nll+
+                loss_aug_total) 
         
         # === Logging all losses ===
         losses_dict = {
@@ -874,9 +894,9 @@ class AERCA(nn.Module):
         return modalities
 
     def _training(self, xs):
-        if self.options["dataset"] in ["msds","lotka_volterra"]:
+        if self.options["dataset_name"] in ["msds","lotka_volterra"]:
             self._training_msds_lotka(xs)
-        elif self.options["dataset"] in ["swat"]:
+        elif self.options["dataset_name"] in ["swat"]:
             self._training_batches_swat(xs)
         else:
             raise ValueError(f"Unknown dataset {self.options['dataset']} for training")
