@@ -15,8 +15,8 @@ outer_heads=2
 outer_hidden_dim=256
 
 # Ablation settings
-time_freq_representations=("normal" "mag_phase")
-combine_methods=("gated" "sum" "concat")
+time_freq_representations=("normal")
+combine_methods=("freq_only")
 
 # --- Helper function to run a single experiment ---
 run_single() {
