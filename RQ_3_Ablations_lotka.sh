@@ -15,8 +15,8 @@ outer_heads=2
 outer_hidden_dim=32
 
 # Ablation settings
-time_freq_representations=("normal" "mag_phase")
-combine_methods=("gated" "sum" "concat")
+time_freq_representations=("normal")
+combine_methods=("freq_only")
 
 # --- Helper function to run a single experiment ---
 run_single() {
@@ -29,18 +29,18 @@ run_single() {
     echo "Running: arch=$arch | dataset=$dataset | seed=$seed | ws=$ws | tf=$tf | combine=$combine"
 
     # Preprocessing only for first time TemporalGNN_Attention
-    if [ "$arch" == "TemporalGNN_Attention" ]; then
-        preprocessing_data=1
-    else
-        preprocessing_data=0
-    fi
+    #if [ "$arch" == "TemporalGNN_Attention" ]; then
+    #    preprocessing_data=1
+    #else
+    #    preprocessing_data=0
+    #fi
     
     python3 main.py \
         --correlated_KL=0 --mean_std_recon_loss=0 --AMOC_Loss=0 \
         --encoder_alpha=0.5 --decoder_alpha=0.5 --encoder_gamma=0.5 --decoder_gamma=0.5 \
         --encoder_lambda=0.5 --decoder_lambda=0.5 --beta=0.5 \
         --coeff_architecture="$arch" \
-        --preprocessing_data=$preprocessing_data \
+        --preprocessing_data=0 \
         ${tf:+--time_freq_representation="$tf"} \
         ${combine:+--combine_method="$combine"} \
         --lr="$lr" \
@@ -59,20 +59,20 @@ run_single() {
 }
 
 # --- Run experiments ---
-#for seed in "${seeds[@]}"; do
-#    for ws in "${window_sizes[@]}"; do
-#        
-#        # --- Baseline (no ablations, no tf/combine flags) ---
-#        run_single "$baseline_architecture" "$seed" "$ws"
-#
-#        # --- Main architecture with ablations ---
-#        for tf in "${time_freq_representations[@]}"; do
-#            for combine in "${combine_methods[@]}"; do
-#                run_single "$main_architecture" "$seed" "$ws" "$tf" "$combine"
-#            done
-#        done
-#    done
-#done
+for seed in "${seeds[@]}"; do
+    for ws in "${window_sizes[@]}"; do
+        
+        # --- Baseline (no ablations, no tf/combine flags) ---
+        #run_single "$baseline_architecture" "$seed" "$ws"
+
+        # --- Main architecture with ablations ---
+        for tf in "${time_freq_representations[@]}"; do
+            for combine in "${combine_methods[@]}"; do
+                run_single "$main_architecture" "$seed" "$ws" "$tf" "$combine"
+            done
+        done
+    done
+done
 
 
 
@@ -134,11 +134,11 @@ run_single() {
 }
 
 # --- Run experiments ---
-for seed in "${seeds[@]}"; do
-    for ws in "${window_sizes[@]}"; do
-        # --- Main architecture with ablations ---
-        for tf in "${time_freq_representations[@]}"; do
-            run_single "$main_architecture" "$seed" "$ws" "$tf"
-        done
-    done
-done
+#for seed in "${seeds[@]}"; do
+#    for ws in "${window_sizes[@]}"; do
+#        # --- Main architecture with ablations ---
+#        for tf in "${time_freq_representations[@]}"; do
+#            run_single "$main_architecture" "$seed" "$ws" "$tf"
+#        done
+#    done
+#done

@@ -673,7 +673,7 @@ class RecurrentAttentionGNN_Attn_fourier(nn.Module):
         self.coeff_proj_freq = nn.Linear(hidden_dim, num_vars * num_vars)
         self.pos_enc_freq = nn.Parameter(torch.randn(1, (order // 2) + 1, hidden_dim) * pe_scale)
 
-        if self.combine_method not in ["gated", "sum", "concat"]:
+        if self.combine_method not in ["freq_only", "gated", "sum", "concat"]:
             raise ValueError("combine_method must be 'gated' or 'attention'")
         elif self.combine_method == "gated":
             # --- Gated fusion (global context → α in [0,1]) ---
@@ -1019,6 +1019,36 @@ class RecurrentAttentionGNN_Attn_fourier(nn.Module):
 
         return preds, coeffs_time_like, coeffs_freq_seq
 
+    def forward_freq_only(self, inputs: torch.Tensor, batch_chunk_size: int = 1000):
+        """
+        Frequency-only forward path.
+        Uses only the rFFT-based path (normal, mag_phase, learnable_filter, etc.),
+        ignoring the time-domain branch.
+        """
+        B, O, P = inputs.shape
+        preds_out, coeffs_time_out, coeffs_freq_out = [], [], []
+
+        for start in range(0, B, batch_chunk_size):
+            end = min(start + batch_chunk_size, B)
+            x_chunk = inputs[start:end]  # (B_chunk, O, P)
+
+            # --- freq path only ---
+            preds_f, coeffs_f_seq, coeffs_f_collapsed = self._freq_path(x_chunk)  # (Bch,P), (Bch,F,P,P), (Bch,P,P)
+
+            # for consistency with other forwards: broadcast collapsed coeffs across lags
+            coeffs_f_broadcast = coeffs_f_collapsed[:, None, :, :].expand(-1, O, -1, -1)  # (Bch,O,P,P)
+
+            preds_out.append(preds_f)
+            coeffs_time_out.append(coeffs_f_broadcast)   # treat as "time-like"
+            coeffs_freq_out.append(coeffs_f_seq)
+
+        preds = torch.cat(preds_out, dim=0)                  # (B, P)
+        coeffs_time_like = torch.cat(coeffs_time_out, dim=0) # (B, O, P, P)
+        coeffs_freq_seq = torch.cat(coeffs_freq_out, dim=0)  # (B, F, P, P)
+
+        return preds, coeffs_time_like, coeffs_freq_seq
+
+
     def forward(self, inputs: torch.Tensor, batch_chunk_size: int = 1000):
         if self.combine_method == "gated":
             return self.forward_gated(inputs, batch_chunk_size)
@@ -1026,6 +1056,8 @@ class RecurrentAttentionGNN_Attn_fourier(nn.Module):
             return self.forward_sum(inputs, batch_chunk_size)
         elif self.combine_method == "concat":
             return self.forward_concat(inputs, batch_chunk_size)
+        elif self.combine_method == "freq_only":
+            return self.forward_freq_only(inputs, batch_chunk_size)
 
 import math
 
