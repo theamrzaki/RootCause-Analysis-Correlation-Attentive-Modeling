@@ -11,6 +11,7 @@
             "program": "main.py",
             "args": [
                 "--seed","1",
+                "--main_model","aerca_based",
                 "--dataset_name", "swat",
                 "--lr","1e-4",
                 "--window_size","7",
@@ -23,21 +24,27 @@
                 "--outer_heads_num","2",
                 "--outer_hidden_dim","32",
                 "--correlated_KL","0",
+                "--epochs","1000",
                 "--AMOC_Loss","0",
                 "--mean_std_recon_loss","0"
             ],
             "console": "integratedTerminal"
         },
         {
-            "name": "run Main",
-            "type": "python",
+            "name": "iTransformer",
+            "type": "debugpy",
             "request": "launch",
             "program": "main.py",
             "args": [
-                "--dataset_name", "msds"
+                "--seed","1",
+                "--dataset_name", "swat",
+                "--lr","1e-4",
+                "--window_size","7",
+                "--epochs","1000",
+                "--training_aerca","1",
+                "--main_model","iTransformer"
             ],
-            "console": "integratedTerminal",
-            "noDebug": true
+            "console": "integratedTerminal"
         },
         {
             "name": "Run Current File",

@@ -224,8 +224,8 @@ class AERCA(nn.Module):
         #
         try:
             windows = self.encoding_batch(xs.cpu().numpy())
-            winds = windows[:, 0, :-1, :]   # (1000, 30, 10)
-            nexts = windows[:, 0, -1, :]    # (1000, 10)
+            winds = windows[:, 0, :-1, :]  
+            nexts = windows[:, 0, -1, :]    
             """
             windows = self.encoding_batch(xs)
             winds = windows[:, :-1, :]               # (B - window_size, window_size, F)

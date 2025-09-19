@@ -6,7 +6,7 @@ import numpy as np
 
 from datasets import linear, lotka_volterra, lorenz96, swat, nonlinear, msds, sock
 from args import linear_args, lotka_volterra_args, lorenz96_args, swat_args, msds_args, nonlinear_args, sock_args
-from models import aerca
+from models import aerca, iTransformer
 from utils import utils
 import warnings
 warnings.filterwarnings("ignore")
@@ -122,31 +122,50 @@ def main(argv):
         print('Loading existing data...')
         data_class.load_data()
 
-    # Instantiate the AERCA model using the common set of parameters.
-    aerca_model = aerca.AERCA(
-        num_vars=options['num_vars'],
-        hidden_layer_size=options['hidden_layer_size'],
-        num_hidden_layers=options['num_hidden_layers'],
-        device=options['device'],
-        window_size=options['window_size'],
-        stride=options['stride'],
-        encoder_gamma=options['encoder_gamma'],
-        decoder_gamma=options['decoder_gamma'],
-        encoder_lambda=options['encoder_lambda'],
-        decoder_lambda=options['decoder_lambda'],
-        beta=options['beta'],
-        lr=options['lr'],
-        epochs=options['epochs'],
-        recon_threshold=options['recon_threshold'],
-        data_name=options['dataset_name'],
-        causal_quantile=options['causal_quantile'],
-        root_cause_threshold_encoder=options['root_cause_threshold_encoder'],
-        root_cause_threshold_decoder=options['root_cause_threshold_decoder'],
-        risk=options['risk'],
-        initial_level=options['initial_level'],
-        num_candidates=options['num_candidates'],
-        options=options
-    )
+    # Instantiate the iTransformer model using the common set of parameters.
+    if options["main_model"] == "iTransformer":
+        class Config: pass
+        config = Config()
+
+        config.win_size = options['window_size']  # Window size
+        config.DSR = 1  # Downsampling rate
+        config.cutfreq = 0  # Cut frequency for FITS, set to 0 for automatic calculation
+        if config.cutfreq == 0:
+            config.cutfreq = int((config.win_size / config.DSR)/2)
+        assert (config.win_size / config.DSR)/2 >= config.cutfreq, 'cutfreq should be smaller than half of the window size after downsampling'
+
+        config.seq_len = config.win_size//config.DSR
+        config.pred_len = config.win_size-config.win_size//config.DSR
+        config.individual	= False  
+        config.num_class = options['num_vars']
+        #include options dict in config
+        config.options = options
+        aerca_model = iTransformer.Model(configs=config, epochs=options['epochs'])
+    elif options["main_model"] == "aerca_based":
+        aerca_model = aerca.AERCA(
+            num_vars=options['num_vars'],
+            hidden_layer_size=options['hidden_layer_size'],
+            num_hidden_layers=options['num_hidden_layers'],
+            device=options['device'],
+            window_size=options['window_size'],
+            stride=options['stride'],
+            encoder_gamma=options['encoder_gamma'],
+            decoder_gamma=options['decoder_gamma'],
+            encoder_lambda=options['encoder_lambda'],
+            decoder_lambda=options['decoder_lambda'],
+            beta=options['beta'],
+            lr=options['lr'],
+            epochs=options['epochs'],
+            recon_threshold=options['recon_threshold'],
+            data_name=options['dataset_name'],
+            causal_quantile=options['causal_quantile'],
+            root_cause_threshold_encoder=options['root_cause_threshold_encoder'],
+            root_cause_threshold_decoder=options['root_cause_threshold_decoder'],
+            risk=options['risk'],
+            initial_level=options['initial_level'],
+            num_candidates=options['num_candidates'],
+            options=options
+        )
 
     # Training phase: train the model if enabled.
     if options['training_aerca']:
