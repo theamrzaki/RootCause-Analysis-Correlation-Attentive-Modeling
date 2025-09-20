@@ -241,7 +241,7 @@ class AERCA(nn.Module):
             nexts = windows[:, -1, :]                # (B - window_size, F)
             """
         except:
-            #when testing
+            #when testing & for lotka volterra training
             windows = sliding_window_view(xs, (self.window_size + 1, self.num_vars))[:, 0, :, :]
             winds = windows[:, :-1, :]
             nexts = windows[:, -1, :]

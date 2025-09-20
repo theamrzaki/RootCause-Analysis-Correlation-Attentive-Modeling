@@ -30,6 +30,7 @@ def create_arg_parser():
     parser.add_argument('--mul', type=int, default=2, help='Multiplier (default: 20)')
     parser.add_argument('--causal_quantile', type=float, default=0.9, help='Causal quantile (default: 0.9)')
     parser.add_argument('--dependent_features', type=int, default=0, help='Flag for dependent features (default: 0)')
+    parser.add_argument('--main_model', type=str, default='aerca', help='Main model to use (default: aerca)')
 
     # Meta arguments
     parser.add_argument('--seed', type=int, default=2, help='Random seed (default: 2)')

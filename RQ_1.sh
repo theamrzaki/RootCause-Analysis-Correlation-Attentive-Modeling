@@ -37,7 +37,7 @@ run_experiment_RoGSTA_SWAT() {
 }
 # --- Run experiments ---
 # 2. With AMOC
-run_experiment_RoGSTA_SWAT 1
+#run_experiment_RoGSTA_SWAT 1
 
 
 
@@ -81,8 +81,9 @@ run_experiment_deepmlp() {
 
 #run_experiment_deepmlp
 
-
-
+#-------------------------------------------------------------------
+#------------------------Lotka Volterra-----------------------------
+#-------------------------------------------------------------------
 
 
 seeds=(1 2 3)
@@ -114,7 +115,7 @@ run_experiment_baselines() {
                                     --coeff_architecture=$arch \
                                     --preprocessing_data=0 \
                                     --window_size=$window_size_item \
-                                    --training_aerca=0 \
+                                    --training_aerca=0 \                                    
                                     --results_csv=results_lorenz.csv"
 
                                 eval $cmd
@@ -127,3 +128,46 @@ run_experiment_baselines() {
     done
 }
 #run_experiment_baselines
+
+
+
+
+
+
+# --- Configurations ---
+seeds=(1 2 3 4 5 6)
+dataset=("lotka_volterra")
+lrs=("1e-4")
+window_size=(1 5 7 10 12 15)
+main_model=("FEDformer")
+attention_dim=32
+heads=2
+# --- Helper function to run experiments ---
+run_experiment_Lotka_Volterra_Fedformer() {
+    for seed in "${seeds[@]}"; do
+        for window_size_item in "${window_size[@]}"; do
+                        for main_model_item in "${main_model[@]}"; do
+                                echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model_item"
+
+                                cmd="python3 main.py \
+                                    --main_model=$main_model \
+                                    --seed=$seed \
+                                    --dataset=$dataset \
+                                    --preprocessing_data=0 \
+                                    --window_size=$window_size_item \
+                                    --attention_dim=$attention_dim \
+                                    --num_attention_heads=$heads \
+                                    --num_vars=40 \
+                                    --training_aerca=1 \
+                                    --epochs=100 \
+                                    --results_csv=RQ_1_lotka_volterra.csv"
+
+                                eval $cmd
+                        done
+            
+        done
+    done
+}
+# --- Run experiments ---
+# 2. With AMOC
+run_experiment_Lotka_Volterra_Fedformer 1
