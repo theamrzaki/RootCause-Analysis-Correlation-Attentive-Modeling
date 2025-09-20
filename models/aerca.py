@@ -224,8 +224,8 @@ class AERCA(nn.Module):
         #
         try:
             windows = self.encoding_batch(xs.cpu().numpy())
-            winds = windows[:, 0, :-1, :]  
-            nexts = windows[:, 0, -1, :]    
+            winds = windows[:, 0, :-1, :]  # only the first window as it is much faster and enough to be trained upon
+            nexts = windows[:, 0, -1, :]
             """
             windows = self.encoding_batch(xs)
             winds = windows[:, :-1, :]               # (B - window_size, window_size, F)
@@ -794,7 +794,7 @@ class AERCA(nn.Module):
 
         return loss, losses_dict
 
-    def _training_msds_lotka(self, xs):
+    def _training_msds_lotka_swat_original(self, xs):
         if len(xs) == 1:
             xs_train = xs[:, :int(0.8 * len(xs[0]))]
             xs_val = xs[:, int(0.8 * len(xs[0])):]
@@ -895,9 +895,12 @@ class AERCA(nn.Module):
 
     def _training(self, xs):
         if self.options["dataset_name"] in ["msds","lotka_volterra"]:
-            self._training_msds_lotka(xs)
+            self._training_msds_lotka_swat_original(xs)
         elif self.options["dataset_name"] in ["swat"]:
-            self._training_batches_swat(xs)
+            if self.options["coeff_architecture"] == "deep_mlp":
+                self._training_msds_lotka_swat_original(xs)
+            else:
+                self._training_batches_swat(xs)
         else:
             raise ValueError(f"Unknown dataset {self.options['dataset']} for training")
 
