@@ -63,9 +63,9 @@ class Model(nn.Module):
         configs.freq = 'h'                             # Frequency encoding granularity: 'h' (hour), 'd' (day), etc.
         configs.dropout = 0.1                          # Dropout rate
 
-        configs.d_model = 24                          # Hidden dimension size
-        configs.d_ff = 24                             # Feed-forward dimension size
-        configs.n_heads = 8                            # Number of attention heads
+        configs.d_model = configs.options["attention_dim"]        # Hidden dimension size
+        configs.d_ff = configs.options["attention_dim"]           # Feed-forward dimension size
+        configs.n_heads = configs.options["num_attention_heads"]  # Number of attention heads
 
         configs.moving_avg = 25                        # Moving average window size for time series decomposition
         configs.activation = 'gelu'                    # Activation function: 'relu', 'gelu', etc.

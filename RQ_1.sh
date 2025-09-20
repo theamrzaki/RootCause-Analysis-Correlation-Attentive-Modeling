@@ -2,43 +2,42 @@
 seeds=(1 2 3 4 5 6)
 dataset=("swat")
 lrs=("1e-4")
-window_size=(1 5 10 12 15)
-main_model=("FEDformer" "iTransformer")
-
+window_size=(5 1 7 10 12 15)
+main_model=("FEDformer")
+attention_dim=256
+heads=2
 # --- Helper function to run experiments ---
 run_experiment_RoGSTA_SWAT() {
-    local use_amoc=$1  # 0 = no AMOC, 1 = AMOC
     for seed in "${seeds[@]}"; do
         for window_size_item in "${window_size[@]}"; do
-            for data in "${dataset[@]}"; do
-                    for lr in "${lrs[@]}"; do
                         for main_model_item in "${main_model[@]}"; do
-                                echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lr"
+                                echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model_item"
 
                                 cmd="python3 main.py \
                                                 --correlated_KL=0 --mean_std_recon_loss=0 --AMOC_Loss=0 \
                                     --encoder_alpha=0.5 --decoder_alpha=0.5 --encoder_gamma=0.5 --decoder_gamma=0.5 \
                                     --encoder_lambda=0.5 --decoder_lambda=0.5 --beta=0.5 \
-                                    --lr=$lr \
+                                    --lr=$lrs \
                                     --main_model=$main_model_item \
+                                    --attention_dim=$attention_dim \
+                                    --num_attention_heads=$heads \
                                     --seed=$seed \
-                                    --dataset=$data \
+                                    --dataset=$dataset \
                                     --window_size=$window_size_item \
                                     --training_aerca=1 \
                                     --epochs=1000 \
                                     --early_stopping=0 \
-                                    --results_csv=results_fouriers_windows_OLDLOSS.csv"
+                                    --results_csv=RQ_1_swat.csv"
 
                                 eval $cmd
                         done
-                    done
-            done
+            
         done
     done
 }
 # --- Run experiments ---
 # 2. With AMOC
-#run_experiment_RoGSTA_SWAT 1
+run_experiment_RoGSTA_SWAT 1
 
 
 
@@ -80,7 +79,7 @@ run_experiment_deepmlp() {
     done
 }
 
-run_experiment_deepmlp
+#run_experiment_deepmlp
 
 
 

@@ -30,10 +30,10 @@ class Model(nn.Module):
         configs.embed = "timeF" #'time features encoding, options: [timeF, fixed, learned]'
         configs.freq = "h" #hourly
         configs.dropout = 0.1
-        configs.d_model = 128
+        configs.d_model = configs.options['attention_dim']
         configs.factor = 1
-        configs.n_heads = 8
-        configs.d_ff = 128
+        configs.n_heads = configs.options['num_attention_heads']
+        configs.d_ff = configs.options['attention_dim']
         configs.activation = "gelu"
         configs.e_layers = 2
         configs.output_attention = 'store_true'
