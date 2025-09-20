@@ -47,8 +47,8 @@ run_experiment_RoGSTA_SWAT() {
 
 
 
-seeds=(1 2 3 4 5 6)
-window_size=(1)
+seeds=(1)
+window_size=(5 7 10 12 15)
 coeff_architecture="deep_mlp"
 dataset="swat"
 main_model="aerca_based"

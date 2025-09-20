@@ -1,75 +1,174 @@
-import logging
-import numpy as np
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import os
+import logging
+import numpy as np
 from collections import defaultdict
 from tqdm import tqdm
+
+from layers.inner_models.layers.Embed import DataEmbedding
 from numpy.lib.stride_tricks import sliding_window_view
 from torch.utils.tensorboard import SummaryWriter
 from utils.utils import (topk, topk_at_step,write_results)
-from layers.inner_models.layers.Embed import DataEmbedding_inverted
-from layers.inner_models.layers.SelfAttention_Family import AttentionLayer, FullAttention
-from layers.inner_models.layers.Transformer_EncDec import Encoder, EncoderLayer
+from layers.inner_models.layers.AutoCorrelation import AutoCorrelationLayer
+from layers.inner_models.layers.FourierCorrelation import FourierBlock, FourierCrossAttention
+from layers.inner_models.layers.MultiWaveletCorrelation import MultiWaveletCross, MultiWaveletTransform
+from layers.inner_models.layers.Autoformer_EncDec import Encoder, Decoder, EncoderLayer, DecoderLayer, my_Layernorm, series_decomp
 
 
 class Model(nn.Module):
     """
-    Paper link: https://arxiv.org/abs/2310.06625
+    FEDformer performs the attention mechanism on frequency domain and achieved O(N) complexity
+    Paper link: https://proceedings.mlr.press/v162/zhou22g.html
     """
 
-    def __init__(self, configs, epochs=1000):
+    """
+    python -u run.py \
+    --task_name anomaly_detection \
+    --is_training 1 \
+    --root_path ./dataset/MSL \
+    --model_id MSL \
+    --model FEDformer \
+    --data MSL \
+    --features M \
+    --seq_len 100 \
+    --pred_len 0 \
+    --d_model 128 \
+    --d_ff 128 \
+    --e_layers 3 \
+    --enc_in 55 \
+    --c_out 55 \
+    --anomaly_ratio 1 \
+    --batch_size 128 \
+    --train_epochs 10
+    """
+    def __init__(self, configs, version='fourier', mode_select='random', modes=32,epochs=1000):
+        """
+        version: str, for FEDformer, there are two versions to choose, options: [Fourier, Wavelets].
+        mode_select: str, for FEDformer, there are two mode selection method, options: [random, low].
+        modes: int, modes to be selected.
+        """
         super(Model, self).__init__()
-        self.task_name = "anomaly_detection"  
+        self.task_name = "anomaly_detection"
         self.seq_len = configs.seq_len
-        self.pred_len = 0  # No prediction length for anomaly detection
-        
+        self.label_len = 48
+        self.pred_len = configs.pred_len
 
-        # from FreDF run.py (defaults values) or from scripts\anomaly_detection\MSL\iTransformer.sh
-        configs.embed = "timeF" #'time features encoding, options: [timeF, fixed, learned]'
-        configs.freq = "h" #hourly
-        configs.dropout = 0.1
-        configs.d_model = 128
-        configs.factor = 1
-        configs.n_heads = 8
-        configs.d_ff = 128
-        configs.activation = "gelu"
-        configs.e_layers = 2
-        configs.output_attention = 'store_true'
+        configs.enc_in = configs.num_class                             # Number of input features
+        configs.dec_in = configs.enc_in                # Number of decoder input features
+        configs.c_out = configs.num_class                             # Number of output features
+
+        configs.embed = 'timeF'                        # Embedding type: 'fixed', 'learned', 'timeF', etc.
+        configs.freq = 'h'                             # Frequency encoding granularity: 'h' (hour), 'd' (day), etc.
+        configs.dropout = 0.1                          # Dropout rate
+
+        configs.d_model = 24                          # Hidden dimension size
+        configs.d_ff = 24                             # Feed-forward dimension size
+        configs.n_heads = 8                            # Number of attention heads
+
+        configs.moving_avg = 25                        # Moving average window size for time series decomposition
+        configs.activation = 'gelu'                    # Activation function: 'relu', 'gelu', etc.
+
+        configs.e_layers = 2                           # Number of encoder layers
+        configs.d_layers = 1                           # Number of decoder layers
+
+        configs.num_class = configs.num_class          # Used only when task_name == 'classification'
+
         self.epochs = epochs
         self.device = configs.options['device']
-        
         self.configs = configs
-        # Embedding
-        self.enc_embedding = DataEmbedding_inverted(configs.seq_len, configs.d_model, configs.embed, configs.freq,
-                                                    configs.dropout).to(self.device)
+        self.version = version
+        self.mode_select = mode_select
+        self.modes = modes
+        self.device = configs.options['device']
+
+        # Decomp
+        self.decomp = series_decomp(configs.moving_avg)
+        self.enc_embedding = DataEmbedding(configs.enc_in, configs.d_model, configs.embed, configs.freq,
+                                           configs.dropout)
+        self.dec_embedding = DataEmbedding(configs.dec_in, configs.d_model, configs.embed, configs.freq,
+                                           configs.dropout)
+
+        if self.version == 'Wavelets':
+            encoder_self_att = MultiWaveletTransform(ich=configs.d_model, L=1, base='legendre')
+            decoder_self_att = MultiWaveletTransform(ich=configs.d_model, L=1, base='legendre')
+            decoder_cross_att = MultiWaveletCross(in_channels=configs.d_model,
+                                                  out_channels=configs.d_model,
+                                                  seq_len_q=self.seq_len // 2 + self.pred_len,
+                                                  seq_len_kv=self.seq_len,
+                                                  modes=self.modes,
+                                                  ich=configs.d_model,
+                                                  base='legendre',
+                                                  activation='tanh')
+        else:
+            encoder_self_att = FourierBlock(in_channels=configs.d_model,
+                                            out_channels=configs.d_model,
+                                            seq_len=self.seq_len,
+                                            modes=self.modes,
+                                            mode_select_method=self.mode_select)
+            decoder_self_att = FourierBlock(in_channels=configs.d_model,
+                                            out_channels=configs.d_model,
+                                            seq_len=self.seq_len // 2 + self.pred_len,
+                                            modes=self.modes,
+                                            mode_select_method=self.mode_select)
+            decoder_cross_att = FourierCrossAttention(in_channels=configs.d_model,
+                                                      out_channels=configs.d_model,
+                                                      seq_len_q=self.seq_len // 2 + self.pred_len,
+                                                      seq_len_kv=self.seq_len,
+                                                      modes=self.modes,
+                                                      mode_select_method=self.mode_select,
+                                                      num_heads=configs.n_heads)
         # Encoder
         self.encoder = Encoder(
             [
                 EncoderLayer(
-                    AttentionLayer(
-                        FullAttention(False, configs.factor, attention_dropout=configs.dropout,
-                                      output_attention=configs.output_attention), configs.d_model, configs.n_heads),
+                    AutoCorrelationLayer(
+                        encoder_self_att,  # instead of multi-head attention in transformer
+                        configs.d_model, configs.n_heads),
                     configs.d_model,
                     configs.d_ff,
+                    moving_avg=configs.moving_avg,
                     dropout=configs.dropout,
                     activation=configs.activation
                 ) for l in range(configs.e_layers)
             ],
-            norm_layer=torch.nn.LayerNorm(configs.d_model)
-        ).to(self.device)
+            norm_layer=my_Layernorm(configs.d_model)
+        )
         # Decoder
-        if self.task_name == 'long_term_forecast' or self.task_name == 'short_term_forecast':
-            self.projection = nn.Linear(configs.d_model, configs.pred_len, bias=True).to(self.device)
+        self.decoder = Decoder(
+            [
+                DecoderLayer(
+                    AutoCorrelationLayer(
+                        decoder_self_att,
+                        configs.d_model, configs.n_heads),
+                    AutoCorrelationLayer(
+                        decoder_cross_att,
+                        configs.d_model, configs.n_heads),
+                    configs.d_model,
+                    configs.c_out,
+                    configs.d_ff,
+                    moving_avg=configs.moving_avg,
+                    dropout=configs.dropout,
+                    activation=configs.activation,
+                )
+                for l in range(configs.d_layers)
+            ],
+            norm_layer=my_Layernorm(configs.d_model),
+            projection=nn.Linear(configs.d_model, configs.c_out, bias=True)
+        )
+
         if self.task_name == 'imputation':
-            self.projection = nn.Linear(configs.d_model, configs.seq_len, bias=True).to(self.device)
+            self.projection = nn.Linear(configs.d_model, configs.c_out, bias=True)
         if self.task_name == 'anomaly_detection':
-            self.projection = nn.Linear(configs.d_model, configs.seq_len, bias=True).to(self.device)
+            self.projection = nn.Linear(configs.d_model, configs.c_out, bias=True)
         if self.task_name == 'classification':
             self.act = F.gelu
             self.dropout = nn.Dropout(configs.dropout)
-            self.projection = nn.Linear(configs.d_model * configs.enc_in, configs.num_class).to(self.device)
+            self.projection = nn.Linear(configs.d_model * configs.seq_len, configs.num_class)
+        # move all classes to device
+        self.to(self.device)
+
         self.mse_loss = nn.MSELoss()
         self.optimizer = torch.optim.Adam(self.parameters(), lr=configs.options['lr'])
 
@@ -89,74 +188,50 @@ class Model(nn.Module):
         # count all trainable parameters
         self.total_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
 
-
     def forecast(self, x_enc, x_mark_enc, x_dec, x_mark_dec):
-        # Normalization from Non-stationary Transformer
-        means = x_enc.mean(1, keepdim=True).detach()
-        x_enc = x_enc - means
-        stdev = torch.sqrt(torch.var(x_enc, dim=1, keepdim=True, unbiased=False) + 1e-5)
-        x_enc /= stdev
-
-        _, _, N = x_enc.shape
-
-        # Embedding
+        # decomp init
+        mean = torch.mean(x_enc, dim=1).unsqueeze(1).repeat(1, self.pred_len, 1)
+        seasonal_init, trend_init = self.decomp(x_enc)  # x - moving_avg, moving_avg
+        # decoder input
+        trend_init = torch.cat([trend_init[:, -self.label_len:, :], mean], dim=1)
+        seasonal_init = F.pad(seasonal_init[:, -self.label_len:, :], (0, 0, 0, self.pred_len))
+        # enc
         enc_out = self.enc_embedding(x_enc, x_mark_enc)
+        dec_out = self.dec_embedding(seasonal_init, x_mark_dec)
         enc_out, attns = self.encoder(enc_out, attn_mask=None)
-
-        dec_out = self.projection(enc_out).permute(0, 2, 1)[:, :, :N]
-        # De-Normalization from Non-stationary Transformer
-        dec_out = dec_out * (stdev[:, 0, :].unsqueeze(1).repeat(1, self.pred_len, 1))
-        dec_out = dec_out + (means[:, 0, :].unsqueeze(1).repeat(1, self.pred_len, 1))
+        # dec
+        seasonal_part, trend_part = self.decoder(dec_out, enc_out, x_mask=None, cross_mask=None, trend=trend_init)
+        # final
+        dec_out = trend_part + seasonal_part
         return dec_out
 
     def imputation(self, x_enc, x_mark_enc, x_dec, x_mark_dec, mask):
-        # Normalization from Non-stationary Transformer
-        means = x_enc.mean(1, keepdim=True).detach()
-        x_enc = x_enc - means
-        stdev = torch.sqrt(torch.var(x_enc, dim=1, keepdim=True, unbiased=False) + 1e-5)
-        x_enc /= stdev
-
-        _, L, N = x_enc.shape
-
-        # Embedding
+        # enc
         enc_out = self.enc_embedding(x_enc, x_mark_enc)
         enc_out, attns = self.encoder(enc_out, attn_mask=None)
-
-        dec_out = self.projection(enc_out).permute(0, 2, 1)[:, :, :N]
-        # De-Normalization from Non-stationary Transformer
-        dec_out = dec_out * (stdev[:, 0, :].unsqueeze(1).repeat(1, L, 1))
-        dec_out = dec_out + (means[:, 0, :].unsqueeze(1).repeat(1, L, 1))
+        # final
+        dec_out = self.projection(enc_out)
         return dec_out
 
     def anomaly_detection(self, x_enc):
-        # Normalization from Non-stationary Transformer
-        means = x_enc.mean(1, keepdim=True).detach()
-        x_enc = x_enc - means
-        stdev = torch.sqrt(torch.var(x_enc, dim=1, keepdim=True, unbiased=False) + 1e-5)
-        #x_enc /= stdev
-        x_enc = x_enc / (stdev)
-        _, L, N = x_enc.shape
-
-        # Embedding
+        # enc
         enc_out = self.enc_embedding(x_enc, None)
         enc_out, attns = self.encoder(enc_out, attn_mask=None)
-
-        dec_out = self.projection(enc_out).permute(0, 2, 1)[:, :, :N]
-        # De-Normalization from Non-stationary Transformer
-        dec_out = dec_out * (stdev[:, 0, :].unsqueeze(1).repeat(1, L, 1))
-        dec_out = dec_out + (means[:, 0, :].unsqueeze(1).repeat(1, L, 1))
+        # final
+        dec_out = self.projection(enc_out)
         return dec_out
 
     def classification(self, x_enc, x_mark_enc):
-        # Embedding
+        # enc
         enc_out = self.enc_embedding(x_enc, None)
         enc_out, attns = self.encoder(enc_out, attn_mask=None)
 
         # Output
-        output = self.act(enc_out)  # the output transformer encoder/decoder embeddings don't include non-linearity
+        output = self.act(enc_out)
         output = self.dropout(output)
-        output = output.reshape(output.shape[0], -1)  # (batch_size, c_in * d_model)
-        output = self.projection(output)  # (batch_size, num_classes)
+        output = output * x_mark_enc.unsqueeze(-1)
+        output = output.reshape(output.shape[0], -1)
+        output = self.projection(output)
         return output
 
     def forward(self, x_enc, x_mark_enc=None, x_dec=None, x_mark_dec=None, mask=None):
@@ -343,10 +418,11 @@ class Model(nn.Module):
             batch_windows.append(windows)
         return np.stack(batch_windows)  
     
+    
     def _training_step(self, x,add_u=True):
         # Forward pass
         windows = self.encoding_batch(x.cpu().numpy()) # (131, 993, 8, 51)
-        winds = windows[:, 0, :-1, :]   # (131, 7, 51)
+        winds = windows[:, 0, :-1, :]   # (131, 7, 51) #take the first time step only for faster training
         nexts = windows[:, 0, 1:, :]    #(131, 8, 51)
 
         winds = torch.tensor(winds, dtype=torch.float32, device=self.device)
@@ -367,7 +443,36 @@ class Model(nn.Module):
         }
 
         return loss, losses_dict
+    """
+    def _training_step(self, x, add_u=True):#go ober all time steps 
+        windows = self.encoding_batch(x.cpu().numpy())  # (B, T, L, D) = (131, 993, 8, 51)
 
+        total_loss = 0.0
+        losses_dict = {"loss_full_recon": 0.0}
+        count = 0
+
+        for t in tqdm(range(windows.shape[1])):  # loop over 993 time steps
+            winds = windows[:, t, :-1, :]   # (B, 7, 51)
+            nexts = windows[:, t, 1:, :]    # (B, 8, 51)
+
+            winds = torch.tensor(winds, dtype=torch.float32, device=self.device)
+            nexts = torch.tensor(nexts, dtype=torch.float32, device=self.device)
+
+            # Forward pass
+            nexts_hat = self.forward(winds)  # (B, 7, 51)
+
+            # Loss
+            loss_full_recon = self.mse_loss(nexts_hat, nexts)  
+            total_loss += loss_full_recon
+            losses_dict["loss_full_recon"] += loss_full_recon.item()
+            count += 1
+
+        # Average across all time slices
+        total_loss /= count
+        losses_dict["loss_full_recon"] /= count
+
+        return total_loss, losses_dict
+    """
     # place holders for threshold computations
     def _get_recon_threshold(self, xs):
         pass

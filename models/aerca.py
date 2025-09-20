@@ -177,7 +177,16 @@ class AERCA(nn.Module):
 
         self.local_model_name =family_of_exp + datetime_str+ f"{str(window_size)}_{str(lr)}_{str(self.options['seed'])}_window_{str(self.window_size)}" 
         self.writer = SummaryWriter(log_dir=os.path.join(self.save_dir, "runs", self.local_model_name))
-
+        
+        # if total_params > 100 million stop training and go to write_results function
+        if self.total_params > 100_000_000:
+            self._log_and_print('Total parameters exceed 100 million, stopping training.')
+            ac_at = [0, 0, 0, 0]
+            k_at_step_all = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            write_results(self.options, self.local_model_name, ac_at, k_at_step_all, self.total_params, self.options.get("results_csv", 'RQ_swat_windows.csv'))
+            #stop the whole python program
+            os._exit(1)
+        
     def _count_parameters(self, model):
         num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
         # view it with commas

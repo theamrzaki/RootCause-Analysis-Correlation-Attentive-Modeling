@@ -418,6 +418,7 @@ def write_results(args, local_model_name, ac_at,k_at_step_all, total_params,file
 
         'time_freq_representation': args['time_freq_representation'],
         'combine_method': args['combine_method'],
+        'main_model': args['main_model'],
     }
     
 

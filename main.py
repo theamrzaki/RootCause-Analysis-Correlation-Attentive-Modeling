@@ -6,7 +6,7 @@ import numpy as np
 
 from datasets import linear, lotka_volterra, lorenz96, swat, nonlinear, msds, sock
 from args import linear_args, lotka_volterra_args, lorenz96_args, swat_args, msds_args, nonlinear_args, sock_args
-from models import aerca, iTransformer
+from models import aerca, iTransformer, FEDformer
 from utils import utils
 import warnings
 warnings.filterwarnings("ignore")
@@ -123,7 +123,7 @@ def main(argv):
         data_class.load_data()
 
     # Instantiate the iTransformer model using the common set of parameters.
-    if options["main_model"] == "iTransformer":
+    if options["main_model"] in ["iTransformer","FEDformer"]:
         class Config: pass
         config = Config()
 
@@ -140,7 +140,10 @@ def main(argv):
         config.num_class = options['num_vars']
         #include options dict in config
         config.options = options
-        aerca_model = iTransformer.Model(configs=config, epochs=options['epochs'])
+        if options["main_model"] == "iTransformer":
+            aerca_model = iTransformer.Model(configs=config, epochs=options['epochs'])
+        elif options["main_model"] == "FEDformer":
+            aerca_model = FEDformer.Model(configs=config, epochs=options['epochs'])
     elif options["main_model"] == "aerca_based":
         aerca_model = aerca.AERCA(
             num_vars=options['num_vars'],

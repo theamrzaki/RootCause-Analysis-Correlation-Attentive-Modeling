@@ -5,7 +5,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "debug Main",
+            "name": "SWAT - AERCA-based",
             "type": "debugpy",
             "request": "launch",
             "program": "main.py",
@@ -20,9 +20,9 @@
                 "--coeff_architecture","TemporalGNN_Attention_fourier",
                 "--time_freq_representation","mag_phase",
                 "--num_attention_heads","2",
-                "--attention_dim","32",
+                "--attention_dim","256",
                 "--outer_heads_num","2",
-                "--outer_hidden_dim","32",
+                "--outer_hidden_dim","256",
                 "--correlated_KL","0",
                 "--epochs","1000",
                 "--AMOC_Loss","0",
@@ -43,6 +43,23 @@
                 "--epochs","1000",
                 "--training_aerca","1",
                 "--main_model","iTransformer"
+            ],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "FEDformer",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "main.py",
+            "args": [
+                "--seed","1",
+                "--dataset_name", "swat",
+                "--lr","1e-4",
+                "--window_size","7",
+                "--epochs","10",
+                "--training_aerca","1",
+                "--main_model","FEDformer",
+                "--results_csv","results_fedformer.csv"
             ],
             "console": "integratedTerminal"
         },
