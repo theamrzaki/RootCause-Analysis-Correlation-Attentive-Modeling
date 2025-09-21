@@ -1,5 +1,40 @@
-# --- Configurations ---
-seeds=(1 2 3)
+seeds=(1)
+dataset=("lotka_volterra")
+main_model=("aerca_based")
+num_vars=(60 20 30 40 50)
+
+run_deep_mlp() {
+    for var in "${num_vars[@]}"; do
+        for seed in "${seeds[@]}"; do
+                echo "Running: dataset=$dataset | seed=$seed | arch=$arch | window_size=7 | lr=1e-4"
+                if [ "$seed" == "1" ]; then
+                    preprocessing_data=1
+                else
+                    preprocessing_data=0
+                fi
+                echo "preprocessing_data=$preprocessing_data"      
+
+                cmd="python3 main.py \
+                        --main_model=$main_model \
+                        --seed=$seed \
+                        --coeff_architecture="deep_mlp" \
+                        --dataset="lotka_volterra" \
+                        --preprocessing_data=$preprocessing_data \
+                        --window_size=7 \
+                        --num_vars="$var" \
+                        --training_aerca=1 \
+                        --early_stopping=1 \
+                        --results_csv=RQ_2_spatial.csv"
+
+                eval $cmd
+        done
+    done
+}
+run_deep_mlp
+
+
+
+seeds=(1)
 coeff_architecture=("TemporalGNN_Attention_crossattn")
 dataset=("lotka_volterra")
 main_model=("aerca_based")
@@ -12,12 +47,10 @@ outer_heads=(2)
 outer_hidden_dim=(64)
 num_vars=(60 20 30 40 50 )
 
-# --- Helper function to run experiments --- (still mag phase)
-run_experiment_CrGSTA_spatial() {
+run_CrGSTA() {
     for var in "${num_vars[@]}"; do
         for seed in "${seeds[@]}"; do
-                                    echo "Running: dataset=$dataset | seed=$seed | arch=$arch | window_size=$window_size_item | lr=$lr"
-                                    # only first time make preprocessing = 1 seed=1 and coeff_architecture="deep_mlp" and window_size=1
+                                    echo "Running: dataset=$dataset | seed=$seed | arch=$arch | window_size=$window_size | lr=$lrs"
                                     if [ "$seed" == "1" ]; then
                                         preprocessing_data=1
                                     else
@@ -45,7 +78,7 @@ run_experiment_CrGSTA_spatial() {
                                         --outer_heads_num=$outer_heads \
                                         --outer_hidden_dim=$outer_hidden_dim \
                                         --num_vars="$var" \
-                                        --results_csv=RQ_2_results_lorenz_spatial_correct.csv"
+                                        --results_csv=RQ_2_spatial.csv"
 
                                     eval $cmd
                                 
@@ -58,14 +91,13 @@ run_experiment_CrGSTA_spatial() {
     done
 }
 # --- Run experiments ---
-# 2. With AMOC
-run_experiment_CrGSTA_spatial
+run_CrGSTA
 
 
 
 
 
-seeds=(1 2 3)
+seeds=(1)
 dataset=("lotka_volterra")
 main_model=("FEDformer" "iTransformer")
 lrs=("1e-4")
@@ -78,12 +110,11 @@ outer_hidden_dim=(64)
 num_vars=(60 20 30 40 50)
 
 # --- Helper function to run experiments ---
-run_experiment_CrGSTA_spatial_lotka() {
+run_baselines() {
     for var in "${num_vars[@]}"; do
         for seed in "${seeds[@]}"; do
             for arch in "${main_model[@]}"; do
                     echo "Running: dataset=$dataset | seed=$seed | arch=$arch | window_size=$window_size | lr=$lrs"
-                    # only first time make preprocessing = 1 seed=1 and coeff_architecture="deep_mlp" and window_size=1
                     if [ "$seed" == "1" ]; then
                         preprocessing_data=1
                     else
@@ -95,6 +126,7 @@ run_experiment_CrGSTA_spatial_lotka() {
                             --correlated_KL=0 --mean_std_recon_loss=0 --AMOC_Loss=0 \
                             --encoder_alpha=0.5 --decoder_alpha=0.5 --encoder_gamma=0.5 --decoder_gamma=0.5 \
                             --encoder_lambda=0.5 --decoder_lambda=0.5 --beta=0.5 \
+                            --preprocessing_data=$preprocessing_data \
                             --lr=$lrs \
                             --main_model=$arch \
                             --attention_dim=$outer_hidden_dim \
@@ -106,7 +138,7 @@ run_experiment_CrGSTA_spatial_lotka() {
                             --epochs=100 \
                             --early_stopping=0 \
                             --num_vars="$var" \
-                            --results_csv=RQ_2_results_lorenz_spatial_correct.csv"
+                            --results_csv=RQ_2_spatial.csv"
 
                         eval $cmd
             done
@@ -114,8 +146,12 @@ run_experiment_CrGSTA_spatial_lotka() {
     done
 }
 # --- Run experiments ---
-# 2. With AMOC
-run_experiment_CrGSTA_spatial_lotka
+run_baselines
+
+
+
+
+
 
 
 
