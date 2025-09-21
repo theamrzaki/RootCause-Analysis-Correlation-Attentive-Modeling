@@ -337,14 +337,23 @@ class Model(nn.Module):
         #self._get_root_cause_threshold_decoder(xs_val)
 
     def encoding_batch(self, xs):  # xs shape: (batch, T, num_vars)
-        batch_windows = []
-        for x in xs:  # each x: (T, num_vars)
-            windows = sliding_window_view(x, (self.configs.options["window_size"]+ 1, self.configs.options["num_vars"]))[:, 0, :, :]
-            batch_windows.append(windows)
-        return np.stack(batch_windows)  
+        if self.configs.options["dataset_name"]=="lotka_volterra":
+            #when testing & for lotka volterra training
+            windows = sliding_window_view(xs, (self.configs.options["window_size"] + 1, self.configs.options["num_vars"]))[:, 0, :, :]
+            winds = windows[:, :-1, :]
+            nexts = windows[:, -1, :]
+            return np.stack([windows])
+        else:#for swat training
+            batch_windows = []
+            for x in xs:  # each x: (T, num_vars)
+                windows = sliding_window_view(x, (self.configs.options["window_size"]+ 1, self.configs.options["num_vars"]))[:, 0, :, :]
+                batch_windows.append(windows)
+            return np.stack(batch_windows)
     
     def _training_step(self, x,add_u=True):
         # Forward pass
+        if type(x) != torch.Tensor:
+            x = torch.tensor(x, dtype=torch.float32, device=self.device)
         windows = self.encoding_batch(x.cpu().numpy()) # (131, 993, 8, 51)
         winds = windows[:, 0, :-1, :]   # (131, 7, 51)
         nexts = windows[:, 0, 1:, :]    #(131, 8, 51)
