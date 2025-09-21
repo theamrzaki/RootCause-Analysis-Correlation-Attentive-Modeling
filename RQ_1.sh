@@ -211,4 +211,47 @@ run_experiment_Lotka_Volterra_Fedformer() {
 }
 # --- Run experiments ---
 # 2. With AMOC
-run_experiment_Lotka_Volterra_Fedformer 1
+#run_experiment_Lotka_Volterra_Fedformer 1
+
+
+
+
+
+
+# --- Configurations ---
+seeds=(3 4 5 6 2 1)
+dataset=("lotka_volterra")
+coeff_architecture="deep_mlp"
+window_size=(1 5 7 10 12 15)
+main_model=("aerca_based")
+
+# --- Helper function to run experiments ---
+run_experiment_Lotka_Volterra_deep_mlp() {
+    for seed in "${seeds[@]}"; do
+        for window_size_item in "${window_size[@]}"; do
+                        for main_model_item in "${main_model[@]}"; do
+                                echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model_item"
+
+                                cmd="python3 main.py \
+                                    --main_model=$main_model \
+                                    --seed=$seed \
+                                    --dataset=$dataset \
+                                    --preprocessing_data=0 \
+                                    --window_size=$window_size_item \
+                                    --attention_dim=$attention_dim \
+                                    --num_attention_heads=$heads \
+                                    --num_vars=40 \
+                                    --training_aerca=1 \
+
+                                    --early_stopping=1 \
+                                    --results_csv=RQ_1_lotka_volterra.csv"
+
+                                eval $cmd
+                        done
+            
+        done
+    done
+}
+# --- Run experiments ---
+# 2. With AMOC
+run_experiment_Lotka_Volterra_deep_mlp 1

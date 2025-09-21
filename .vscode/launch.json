@@ -64,6 +64,24 @@
             "console": "integratedTerminal"
         },
         {
+            "name": "Lotka-FEDformer ",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "main.py",
+            "args": [
+                "--seed","1",
+                "--dataset_name", "lotka_volterra",
+                "--lr","1e-4",
+                "--preprocessing_data","0",
+                "--window_size","7",
+                "--epochs","10",
+                "--training_aerca","1",
+                "--main_model","FEDformer",
+                "--results_csv","results_fedformer.csv"
+            ],
+            "console": "integratedTerminal"
+        },
+        {
             "name": "Run Current File",
             "type": "python",
             "request": "launch",
