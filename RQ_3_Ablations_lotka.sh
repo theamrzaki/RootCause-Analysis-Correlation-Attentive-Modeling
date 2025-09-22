@@ -1,5 +1,5 @@
 # --- Configurations ---
-seeds=(1 2)
+seeds=(3 4 5 6)
 
 # Architectures
 main_architecture="TemporalGNN_Attention_fourier"
@@ -9,11 +9,11 @@ main_model=("aerca_based")
 # Common settings
 dataset="lotka_volterra"
 lr="1e-4"
-att_dim=64
+att_dim=32
 heads=2
 window_sizes=(7)
 outer_heads=2
-outer_hidden_dim=64
+outer_hidden_dim=32
 
 # Ablation settings
 time_freq_representations=("normal" "mag_phase")
@@ -57,13 +57,13 @@ run_single() {
         --outer_heads_num="$outer_heads" \
         --outer_hidden_dim="$outer_hidden_dim" \
         --num_vars=40 \
-        --results_csv=RQ_3_lotka.csv
+        --results_csv=RQ_3_lotka_32.csv
 }
 
 # --- Run experiments ---
 for seed in "${seeds[@]}"; do
     for ws in "${window_sizes[@]}"; do
-        
+
         # --- Baseline (no ablations, no tf/combine flags) ---
         run_single "$baseline_architecture" "$seed" "$ws"
 
@@ -85,7 +85,7 @@ done
 
 
 # --- Configurations ---
-seeds=(1 2 3 4 5 6)
+seeds=(3 4 5 6)
 
 # Architectures
 main_architecture="TemporalGNN_Attention_crossattn"
@@ -93,11 +93,12 @@ main_architecture="TemporalGNN_Attention_crossattn"
 # Common settings
 dataset="lotka_volterra"
 lr="1e-4"
-att_dim=32
+att_dim=64
 heads=2
 window_sizes=(7)
 outer_heads=2
-outer_hidden_dim=32
+outer_hidden_dim=64
+main_model=("aerca_based")
 
 # Ablation settings
 time_freq_representations=("normal" "mag_phase")
@@ -119,6 +120,7 @@ run_single() {
         --encoder_lambda=0.5 --decoder_lambda=0.5 --beta=0.5 \
         --coeff_architecture="$arch" \
         --preprocessing_data=0 \
+        --main_model=$main_model \
         ${tf:+--time_freq_representation="$tf"} \
         --lr="$lr" \
         --seed="$seed" \
@@ -132,15 +134,15 @@ run_single() {
         --outer_heads_num="$outer_heads" \
         --outer_hidden_dim="$outer_hidden_dim" \
         --num_vars=40 \
-        --results_csv=RQ_3_results_all_attention_lotka.csv
+        --results_csv=RQ_3_lotka_32.csv
 }
 
 # --- Run experiments ---
-#for seed in "${seeds[@]}"; do
-#    for ws in "${window_sizes[@]}"; do
-#        # --- Main architecture with ablations ---
-#        for tf in "${time_freq_representations[@]}"; do
-#            run_single "$main_architecture" "$seed" "$ws" "$tf"
-#        done
-#    done
-#done
+for seed in "${seeds[@]}"; do
+    for ws in "${window_sizes[@]}"; do
+        # --- Main architecture with ablations ---
+        for tf in "${time_freq_representations[@]}"; do
+            run_single "$main_architecture" "$seed" "$ws" "$tf"
+        done
+    done
+done
