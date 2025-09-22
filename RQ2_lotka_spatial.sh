@@ -1,4 +1,4 @@
-seeds=(1)
+seeds=(2 3)
 dataset=("lotka_volterra")
 main_model=("aerca_based")
 num_vars=(60 20 30 40 50)
@@ -34,7 +34,7 @@ run_deep_mlp
 
 
 
-seeds=(1)
+seeds=(2 3)
 coeff_architecture=("TemporalGNN_Attention_crossattn")
 dataset=("lotka_volterra")
 main_model=("aerca_based")
@@ -97,7 +97,7 @@ run_CrGSTA
 
 
 
-seeds=(1)
+seeds=(2 3)
 dataset=("lotka_volterra")
 main_model=("FEDformer" "iTransformer")
 lrs=("1e-4")
