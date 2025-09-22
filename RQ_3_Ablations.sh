@@ -4,6 +4,7 @@ seeds=(1 2 3 4 5 6)
 # Architectures
 main_architecture="TemporalGNN_Attention_fourier"
 baseline_architecture="TemporalGNN_Attention"
+main_model=("aerca_based")
 
 # Common settings
 dataset="swat"
@@ -15,8 +16,8 @@ outer_heads=2
 outer_hidden_dim=256
 
 # Ablation settings
-time_freq_representations=("normal")
-combine_methods=("freq_only")
+time_freq_representations=("normal" "mag_phase")
+combine_methods=("freq_only" "gated" "sum" "concat")
 
 # --- Helper function to run a single experiment ---
 run_single() {
@@ -41,12 +42,13 @@ run_single() {
         --window_size="$ws" \
         --training_aerca=1 \
         --epochs=1000 \
+        --main_model=$main_model \
         --early_stopping=0 \
         --attention_dim="$att_dim" \
         --num_attention_heads="$heads" \
         --outer_heads_num="$outer_heads" \
         --outer_hidden_dim="$outer_hidden_dim" \
-        --results_csv=RQ_3_results_all_attention.csv
+        --results_csv=RQ_3_swat.csv
 }
 
 # --- Run experiments ---
@@ -54,7 +56,7 @@ for seed in "${seeds[@]}"; do
     for ws in "${window_sizes[@]}"; do
         
         # --- Baseline (no ablations, no tf/combine flags) ---
-        #run_single "$baseline_architecture" "$seed" "$ws"
+        run_single "$baseline_architecture" "$seed" "$ws"
 
         # --- Main architecture with ablations ---
         for tf in "${time_freq_representations[@]}"; do

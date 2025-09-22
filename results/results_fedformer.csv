@@ -1,3 +1,0 @@
-scheme,dataset_name,seed,correlated_KL,architecture,attention_dim,num_attention_heads,lr,AC@1,AC@3,AC@5,AC@10,Avg@10,total_params,window_size,early_stopping,num_epochs,AMOC_Loss,mean_std_recon_loss,outer_hidden_dim,outer_heads_num,num_vars,alpha_lv,time_freq_representation,combine_method
-deep_mlp_(no mean)_normal_KL19_184254_7_0.0001_1_window_7,swat,1,normal_KL,deep_mlp,256,2,0.0001,0.06428571428571428,0.07499999999999998,0.12499999999999997,0.24642857142857144,0.13285714285714284,0,7,0,10,0,0,128,2,51,0,normal,gated
-deep_mlp_(no mean)_normal_KL20_185840_7_0.0001_1_window_7,lotka_volterra,1,normal_KL,deep_mlp,128,2,0.0001,0.05,0.07999999999999997,0.11299999999999999,0.26733333333333326,0.14379999999999996,502352,7,0,10,0,0,128,2,40,1.1,normal,gated,FEDformer
