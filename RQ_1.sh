@@ -7,7 +7,7 @@ main_model=("FEDformer")
 attention_dim=256
 heads=2
 # --- Helper function to run experiments ---
-run_experiment_RoGSTA_SWAT() {
+run_experiment_SWAT_Fedformer() {
     for seed in "${seeds[@]}"; do
         for window_size_item in "${window_size[@]}"; do
                         for main_model_item in "${main_model[@]}"; do
@@ -37,7 +37,7 @@ run_experiment_RoGSTA_SWAT() {
 }
 # --- Run experiments ---
 # 2. With AMOC
-#run_experiment_RoGSTA_SWAT 1
+#run_experiment_SWAT_Fedformer 1
 
 
 
@@ -50,7 +50,7 @@ main_model=("iTransformer")
 attention_dim=256
 heads=2
 # --- Helper function to run experiments ---
-run_experiment_RoGSTA_SWAT_iTransformer() {
+run_experiment_SWAT_iTransformer() {
     for seed in "${seeds[@]}"; do
         for window_size_item in "${window_size[@]}"; do
                         for main_model_item in "${main_model[@]}"; do
@@ -80,9 +80,61 @@ run_experiment_RoGSTA_SWAT_iTransformer() {
 }
 # --- Run experiments ---
 # 2. With AMOC
-run_experiment_RoGSTA_SWAT_iTransformer 1
+#run_experiment_SWAT_iTransformer 1
 
 
+
+# --- Configurations ---
+seeds=(1 2 3 4 5 6)
+dataset=("swat")
+lrs=("1e-4")
+window_size=(5 1 7 10 12)
+arch="TemporalGNN_Attention_crossattn"
+main_model=("aerca_based")
+attention_dim=256
+heads=2
+outer_att_dim_val=256
+outer_heads_val=2
+# --- Helper function to run experiments ---
+run_experiment_SWAT_CrGSTA() {
+    for seed in "${seeds[@]}"; do
+        for window_size_item in "${window_size[@]}"; do
+                                echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model_item"
+
+                                cmd="python3 main.py \
+                                        --correlated_KL=0 --mean_std_recon_loss=0 --AMOC_Loss=0 \
+                                        --encoder_alpha=0.5 --decoder_alpha=0.5 --encoder_gamma=0.5 --decoder_gamma=0.5 \
+                                        --encoder_lambda=0.5 --decoder_lambda=0.5 --beta=0.5 \
+
+                                    --main_model=$main_model \
+                                    --coeff_architecture="$arch" \
+                                    --time_freq_representation="mag_phase" \
+
+                                    --lr="$lrs" \
+                                    --seed="$seed" \
+                                    --dataset="$dataset" \
+                                    --window_size="$window_size_item" \
+
+                                    --training_aerca=1 \
+                                    --epochs=1000 \
+                                    --early_stopping=0 \
+
+                                    --attention_dim="$attention_dim" \
+                                    --num_attention_heads="$heads" \
+                                    --outer_heads_num="$outer_heads_val" \
+                                    --outer_hidden_dim="$outer_att_dim_val" \
+
+                                    --results_csv=RQ_1_swat.csv"
+
+                                eval $cmd
+                        
+            
+        done
+    done
+}
+# --- Run experiments ---
+# 2. With AMOC
+run_experiment_SWAT_CrGSTA 1
 
 
 seeds=(1)
