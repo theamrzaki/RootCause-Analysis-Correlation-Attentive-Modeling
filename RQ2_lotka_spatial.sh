@@ -30,11 +30,11 @@ run_deep_mlp() {
         done
     done
 }
-run_deep_mlp
+#run_deep_mlp
 
 
 
-seeds=(2 3)
+seeds=(1 2 3)
 coeff_architecture=("TemporalGNN_Attention_crossattn")
 dataset=("lotka_volterra")
 main_model=("aerca_based")
@@ -45,7 +45,7 @@ corelated_list=(0)
 window_size=(7)
 outer_heads=(2)
 outer_hidden_dim=(64)
-num_vars=(60 20 30 40 50 )
+num_vars=(40 50 60 20 30)
 
 run_CrGSTA() {
     for var in "${num_vars[@]}"; do
@@ -97,7 +97,7 @@ run_CrGSTA
 
 
 
-seeds=(2 3)
+seeds=(1 2 3)
 dataset=("lotka_volterra")
 main_model=("FEDformer" "iTransformer")
 lrs=("1e-4")
