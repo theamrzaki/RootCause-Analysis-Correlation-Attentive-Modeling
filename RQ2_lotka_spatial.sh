@@ -1,4 +1,4 @@
-seeds=(2 3)
+seeds=(1 2)
 dataset=("lotka_volterra")
 main_model=("aerca_based")
 num_vars=(60 20 30 40 50)
@@ -30,7 +30,7 @@ run_deep_mlp() {
         done
     done
 }
-#run_deep_mlp
+run_deep_mlp
 
 
 
@@ -91,7 +91,7 @@ run_CrGSTA() {
     done
 }
 # --- Run experiments ---
-run_CrGSTA
+#run_CrGSTA
 
 
 
@@ -146,7 +146,7 @@ run_baselines() {
     done
 }
 # --- Run experiments ---
-run_baselines
+#run_baselines
 
 
 
