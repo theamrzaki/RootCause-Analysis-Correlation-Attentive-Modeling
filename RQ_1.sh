@@ -215,7 +215,7 @@ run_experiment_baselines() {
         done
     done
 }
-run_experiment_baselines
+#run_experiment_baselines
 
 
 
@@ -230,7 +230,7 @@ run_experiment_baselines
 seeds=(1 2 3)
 dataset=("lotka_volterra")
 coeff_architecture="deep_mlp"
-window_size=(1 5 7 10 12 15)
+window_size=(1 5 7 10 12)
 main_model=("aerca_based")
 
 # --- Helper function to run experiments ---
@@ -239,12 +239,16 @@ run_experiment_Lotka_Volterra_deep_mlp() {
         for window_size_item in "${window_size[@]}"; do
                         for main_model_item in "${main_model[@]}"; do
                                 echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model_item"
-
+                                if [ "$seed" == "1" ]; then
+                                    preprocessing_data=1
+                                else
+                                    preprocessing_data=0
+                                fi
                                 cmd="python3 main.py \
                                     --main_model=$main_model \
                                     --seed=$seed \
                                     --dataset=$dataset \
-                                    --preprocessing_data=0 \
+                                    --preprocessing_data=$preprocessing_data \
                                     --window_size=$window_size_item \
                                     --attention_dim=$attention_dim \
                                     --num_attention_heads=$heads \
@@ -252,7 +256,7 @@ run_experiment_Lotka_Volterra_deep_mlp() {
                                     --training_aerca=1 \
 
                                     --early_stopping=1 \
-                                    --results_csv=RQ_1_lotka_volterra.csv"
+                                    --results_csv=RQ_1_lotka_volterra_new.csv"
 
                                 eval $cmd
                         done
@@ -262,7 +266,7 @@ run_experiment_Lotka_Volterra_deep_mlp() {
 }
 # --- Run experiments ---
 # 2. With AMOC
-#run_experiment_Lotka_Volterra_deep_mlp 1
+run_experiment_Lotka_Volterra_deep_mlp 1
 
 
 
