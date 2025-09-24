@@ -187,7 +187,7 @@ corelated_list=(0)
 window_size=(1 5 7 10 12)
 outer_heads=(4)
 outer_hidden_dim=(256)
-
+main_model=("aerca_based")
 # --- Helper function to run experiments ---
 run_experiment_baselines() {
     local use_amoc=$1  # 0 = no AMOC, 1 = AMOC
@@ -207,6 +207,7 @@ run_experiment_baselines() {
                                     --coeff_architecture=$arch \
                                     --preprocessing_data=$preprocessing_data \
                                     --window_size=$window_size_item \
+                                    --main_model=$main_model \
                                     --training_aerca=0 \                                    
                                     --results_csv=RQ_1_lotka_volterra_new.csv"
 
@@ -215,7 +216,7 @@ run_experiment_baselines() {
         done
     done
 }
-#run_experiment_baselines
+run_experiment_baselines
 
 
 
@@ -266,7 +267,7 @@ run_experiment_Lotka_Volterra_deep_mlp() {
 }
 # --- Run experiments ---
 # 2. With AMOC
-run_experiment_Lotka_Volterra_deep_mlp 1
+#run_experiment_Lotka_Volterra_deep_mlp 1
 
 
 
