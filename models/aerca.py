@@ -1750,7 +1750,7 @@ class AERCA(nn.Module):
                 self._log_and_print('Root cause analysis Avg*@500: {:.5f}', np.mean(k_all))
 
                 write_results(self.options, self.local_model_name, ac_at, k_at_step_all, self.total_params,
-                            self.options.get("results_csv", 'RQ_swat_windows.csv'))
+                            self.options.get("results_csv"))
 
             except ImportError:
                 self._log_and_print("PyRCA not installed. Run: pip install sfr-pyrca", "")

@@ -4,8 +4,8 @@ import logging
 import argparse
 import numpy as np
 
-from datasets import linear, lotka_volterra, lorenz96, swat, nonlinear, msds, sock
-from args import linear_args, lotka_volterra_args, lorenz96_args, swat_args, msds_args, nonlinear_args, sock_args
+from datasets import linear, lotka_volterra, lorenz96, swat, nonlinear, msds, sock, smap#, wadi
+from args import linear_args, lotka_volterra_args, lorenz96_args, swat_args, msds_args, nonlinear_args, sock_args, smap_args#, wadi_args
 from models import aerca, iTransformer, FEDformer
 from utils import utils
 import warnings
@@ -80,7 +80,20 @@ def main(argv):
             "dataset_class": nonlinear.Nonlinear,
             "log_file": "nonlinear.log",
             "use_slice": True
+        },
+        "smap": {
+            "args": smap_args.create_arg_parser,
+            "dataset_class": smap.SMAP_RCA,
+            "log_file": "smap.log",
+            "use_slice": False
         }
+        #,
+        #"wadi": {
+        #    "args": wadi_args.create_arg_parser,
+        #    "dataset_class": wadi.WADI,
+        #    "log_file": "wadi.log",
+        #    "use_slice": False
+        #},
     }
 
     # Ensure the specified dataset is recognized.
@@ -217,7 +230,12 @@ def main(argv):
         test_x_ab = data_class.data_dict['x_ab_list']
         test_label = data_class.data_dict['label_list']
     print('Start testing AERCA model for root cause analysis...')
-    aerca_model._testing_root_cause(test_x_ab, test_label)
+    # if coeff rcd or epsilon diagnosis -> _testing_root_cause_old
+    # else -> _testing_root_cause
+    if options['coeff_architecture'] in ['rcd', 'epsilon_diagnosis']:
+        aerca_model._testing_root_cause_old(test_x_ab, test_label)
+    else:
+        aerca_model._testing_root_cause(test_x_ab, test_label)
     print('Done testing for root cause analysis')
 
 
