@@ -905,7 +905,7 @@ class AERCA(nn.Module):
     def _training(self, xs):
         if self.options["dataset_name"] in ["msds","lotka_volterra"]:
             self._training_msds_lotka_swat_original(xs)
-        elif self.options["dataset_name"] in ["swat"]:
+        elif self.options["dataset_name"] in ["swat","smap"]:
             if self.options["coeff_architecture"] == "deep_mlp":
                 self._training_msds_lotka_swat_original(xs)
             else:
@@ -1349,7 +1349,7 @@ class AERCA(nn.Module):
 
         plt.bar(x - width, mean_z, width, label='Summary Causal Graph')
         if attn_importance is not None:
-            attn_per_var = attn_importance.mean(axis=0).mean(axis=1).ravel() # mean over first 2 axes → shape (10,)
+            attn_per_var = attn_importance.mean(axis=0).mean(axis=0).mean(axis=-1) # mean over first 2 axes → shape (10,)
             plt.bar(x, attn_per_var, width, label='Attention')
         if mlp_scores is not None:
             plt.bar(x + width, mlp_scores, width, label='MLP per lag')
@@ -1357,17 +1357,20 @@ class AERCA(nn.Module):
         # Highlight true root causes
         if labels is not None:
             # aggregate labels over time
+            mean_labels = labels.mean(axis=0)   # shape (40,)
             attn_arr = attn_per_var if attn_importance is not None else np.zeros_like(mean_z)
             mlp_arr = mlp_scores if mlp_scores is not None else np.zeros_like(mean_z)
 
             max_vals = np.maximum.reduce([mean_z, attn_arr, mlp_arr])
-            root_causes = labels.ravel() > threshold  # flatten to 1D
-            plt.scatter(x[root_causes], max_vals[root_causes] + 0.05, color='red', label='Ground truth')
+            root_causes = mean_labels > threshold
+
+            plt.scatter(x[root_causes], max_vals[root_causes] + 0.05,
+                        color='red', label='Ground truth')
+
             root_df = pd.DataFrame({
                 "RootCauseX": x[root_causes],
                 "RootCauseY": max_vals[root_causes] + 0.05
-            })
-            
+            })           
 
         plt.xlabel('Variable')
         plt.ylabel('Importance / Score')
@@ -1422,7 +1425,7 @@ class AERCA(nn.Module):
         plt.show()
 
 
-    def _testing_root_cause_(self, xs, labels,alpha: float = 0.5, use_attention_fusion: bool = False):
+    def _testing_root_cause(self, xs, labels,alpha: float = 0.5, use_attention_fusion: bool = False):
         coeff_architecture = self.options["coeff_architecture"]
         if coeff_architecture == "rcd":
             # Run RCD baseline
@@ -1480,9 +1483,25 @@ class AERCA(nn.Module):
         us_all_z_score = (-(us_all - self.us_mean_encoder) / self.us_std_encoder)
         us_all_z_score_pot = []
         for i in range(self.num_vars):
-            pot_val, _ = pot(us_all_z_score[:, i], self.risk, self.initial_level, self.num_candidates)
+            col_data = us_all_z_score[:, i]
+            col_data = col_data[~np.isnan(col_data)]           # remove NaNs
+            col_data = col_data[np.isfinite(col_data)]        # remove infs
+
+            if col_data.size == 0:
+                # no valid data in this column
+                self._log_and_print("POT skipped for variable {}: no valid data", i)
+                pot_val = 0.0
+            else:
+                try:
+                    pot_val, _ = pot(col_data, self.risk, self.initial_level, self.num_candidates)
+                except Exception as e:
+                    self._log_and_print("POT failed for variable {}: {}", i, str(e))
+                    pot_val = np.percentile(col_data, 99.9)  # fallback
+
             us_all_z_score_pot.append(pot_val)
+
         us_all_z_score_pot = np.array(us_all_z_score_pot)
+
 
         # Compute top-k statistics for each sample using the computed POT thresholds.
         k_all = []
@@ -1638,7 +1657,7 @@ class AERCA(nn.Module):
         plt.legend()
         plt.show()
 
-    def _testing_root_cause(self, xs, labels, alpha: float = 0.5, use_attention_fusion: bool = False):
+    def _testing_root_cause_old(self, xs, labels, alpha: float = 0.5, use_attention_fusion: bool = False):
         coeff_architecture = self.options.get("coeff_architecture", "default").lower()
 
         # -------------------------------
