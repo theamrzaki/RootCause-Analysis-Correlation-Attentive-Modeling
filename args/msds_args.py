@@ -16,6 +16,7 @@ def create_arg_parser():
     parser.add_argument('--num_vars', type=int, default=10, help='Number of variables (default: 10)')
     parser.add_argument('--causal_quantile', type=float, default=0.70, help='Causal quantile (default: 0.70)')
     parser.add_argument('--shuffle', type=int, default=1, help='Flag for shuffling data (default: 1)')
+    parser.add_argument('--main_model', type=str, default='aerca', help='Main model to use (default: aerca)')
 
     # Meta arguments
     parser.add_argument('--seed', type=int, default=7, help='Random seed (default: 1)')
@@ -67,6 +68,11 @@ def create_arg_parser():
 
     # Results arguments
     parser.add_argument('--results_csv', type=str, default='results.csv', help='Path to the results CSV file (default: results.csv)')
+    
+    # cross attention arguments
+    parser.add_argument('--time_freq_representation', type=str, default='normal', help='Time-frequency representation options (normal, mag_phase, learnable_filter) (default: normal)')
+    parser.add_argument('--combine_method', type=str, default='gated', help='Method to combine time and frequency coefficients (gated, attention, average) (default: gated)')
+
     return parser
 
 if __name__ == "__main__":
