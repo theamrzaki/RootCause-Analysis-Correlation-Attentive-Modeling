@@ -13,17 +13,19 @@ def create_arg_parser():
     # Dataset arguments
     parser.add_argument('--T', type=int, default=500, help='Length of the time series (default: 500)')
     parser.add_argument('--training_size', type=int, default=10, help='Size of the training set (default: 10)')
+    parser.add_argument('--downsample_factor', type=int, default=10, help='Down-sampling factor (default: 10)')
     parser.add_argument('--testing_size', type=int, default=100, help='Size of the testing set (default: 100)')
-    parser.add_argument('--num_vars', type=int, default=15, help='Number of variables (default: 6)')
+    parser.add_argument('--num_vars', type=int, default=10, help='Number of variables (default: 6)')
     parser.add_argument('--preprocessing_data', type=int, default=1, help='Flag for preprocessing data (default: 1)')
     parser.add_argument('--adlength', type=int, default=1, help='Ad length (default: 1)')
-    parser.add_argument('--adtype', type=str, default='non_causal', help='Ad type (default: non_causal)')
+    parser.add_argument('--adtype', type=str, default='causal', help='Ad type (default: non_causal)')
     parser.add_argument('--mul', type=int, default=2, help='Multiplier (default: 10)')
     parser.add_argument('--data_dir', type=str, default=os.path.join(os.getcwd(), 'datasets', 'nonlinear'), help='Data directory (default: ./datasets/nonlinear)')
     parser.add_argument('--causal_quantile', type=float, default=0.80, help='Causal quantile (default: 0.80)')
     parser.add_argument('--m', type=int, default=7, help='Parameter m (default: 7)')
-    parser.add_argument('--noise_scale', type=float, default=1.0, help='Noise scale (default: 1.0)')
+    parser.add_argument('--noise_scale', type=float, default=3.0, help='Noise scale (default: 1.0)')
     parser.add_argument('--dependent_features', type=int, default=0, help='Flag for dependent features (default: 0)')
+    parser.add_argument('--main_model', type=str, default='aerca', help='Main model to use (default: aerca)')
 
     # Meta arguments
     parser.add_argument('--seed', type=int, default=36, help='Random seed (default: 36)')
@@ -76,6 +78,9 @@ def create_arg_parser():
     # Results arguments
     parser.add_argument('--results_csv', type=str, default='results.csv', help='Path to the results CSV file (default: results.csv)')
 
+  # cross attention arguments
+    parser.add_argument('--time_freq_representation', type=str, default='mag_phase', help='Time-frequency representation options (normal, mag_phase, learnable_filter) (default: normal)')
+    parser.add_argument('--combine_method', type=str, default='attention', help='Method to combine time and frequency coefficients (gated, attention, average) (default: gated)')
     return parser
 
 if __name__ == "__main__":
