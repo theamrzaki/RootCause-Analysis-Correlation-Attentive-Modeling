@@ -120,6 +120,16 @@ class AERCA(nn.Module):
                                 self._count_parameters(self.decoding_norm)+
                                 self._count_parameters(self.temporal_attn_decoder) +
                                 self._count_parameters(self.coeff_proj_decoder))
+        
+        
+        elif(self.options["coeff_architecture"] == "causalrca"):
+            from models.causalrca import MLPDecoder
+            self.mlp_decoder = MLPDecoder(num_vars, window_size, hidden_layer_size, num_hidden_layers, args=options, device=device).to(device)
+            self._log_and_print('Number of parameters in encoder: {}', self._count_parameters(self.encoder))
+            self._log_and_print('Number of parameters in decoder: {}', self._count_parameters(self.decoder))
+            self.total_params = (self._count_parameters(self.encoder) +
+                                 self._count_parameters(self.decoder)  )
+            
         print('----------------------------------')
         print(f'Total number of parameters in AERCA: {self.total_params}')
         print('----------------------------------')
@@ -427,6 +437,40 @@ class AERCA(nn.Module):
 
         return nexts_hat, coeffs, prev_coeffs
     
+    def decoding_causalrca(self, us, winds, add_u=True):
+        """
+        MLP-based causal RCA decoding.
+        us: latent states (B, T, p)
+        winds: original windows (B, T, p)
+        add_u: whether to add the next-step latent state residual
+        """
+        B, T, p = us.shape
+
+        # --- Previous latent projections ---
+        u_next = us[:, -1, :]  # (B, p)
+        
+        # For simplicity, assume winds is (B, T, p) and we flatten time for MLP
+        winds_flat = winds.reshape(B, -1)  # (B, T*p)
+        
+        # Forward through MLPDecoder
+        # Here we reuse the MLPDecoder already instantiated as self.mlp_decoder
+        # Assume input_z = winds_flat, inputs=None (not used in this MLP)
+        mat_z, preds, _ = self.mlp_decoder(
+            inputs=None, 
+            input_z=winds_flat, 
+            n_in_node=p, 
+            origin_A=self.origin_A, 
+            adj_A_tilt=self.adj_A_tilt, 
+            Wa=self.Wa
+        )  # preds: (B, p)
+
+        # --- Final next-step prediction ---
+        nexts_hat = preds + u_next if add_u else preds
+
+        # --- For causal RCA, return the adjusted input matrix and output ---
+        return nexts_hat, mat_z
+
+    
     def decoding_2decoders(self, us, winds, add_u=True):
         u_windows = sliding_window_view_torch(us, self.window_size + 1)
         u_winds = u_windows[:, :-1, :]
@@ -507,6 +551,8 @@ class AERCA(nn.Module):
             return self.decoding_2decoders(us, winds, add_u=add_u)
         elif self.options["coeff_architecture"] in ["TemporalGNN_Attention", "TemporalGNN_Attention_fourier", "TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced"]:
             return self.decoding_1decoder(us, winds, add_u=add_u)
+        elif self.options["coeff_architecture"] == "causalrca":
+            return self.decoding_causalrca(us, winds, add_u=add_u)
 
     def decoding_batch(self, us, winds, add_u=True):
         # us: (B, P)
@@ -903,7 +949,7 @@ class AERCA(nn.Module):
         return modalities
 
     def _training(self, xs):
-        if self.options["dataset_name"] in ["msds","lotka_volterra"]:
+        if self.options["dataset_name"] in ["msds","lotka_volterra","lorenz96","nonlinear"]:
             self._training_msds_lotka_swat_original(xs)
         elif self.options["dataset_name"] in ["swat","smap"]:
             if self.options["coeff_architecture"] == "deep_mlp":
@@ -1355,6 +1401,8 @@ class AERCA(nn.Module):
             plt.bar(x + width, mlp_scores, width, label='MLP per lag')
 
         # Highlight true root causes
+        # print if label is not None
+        print("Plotting case study with ground truth labels:", labels)
         if labels is not None:
             # aggregate labels over time
             mean_labels = labels.mean(axis=0)   # shape (40,)
@@ -1461,6 +1509,7 @@ class AERCA(nn.Module):
                 if self.options.get("plot_case_study", False) and i == 0:  # only plot first sample
                     z_scores_sample = (-(us[self.window_size:].cpu().numpy() - self.us_mean_encoder) / self.us_std_encoder)
                     try:
+                        
                         self.plot_case_study(
                             z_scores=(-(us[self.window_size:].cpu().numpy() - self.us_mean_encoder) / self.us_std_encoder),
                             labels=labels[i][self.window_size*2:],  # ground truth for this sample
@@ -1561,7 +1610,87 @@ class AERCA(nn.Module):
         self._log_and_print('Root cause analysis AC*@100: {:.5f}', ac_star_at[2])
         self._log_and_print('Root cause analysis AC*@500: {:.5f}', ac_star_at[3])
         self._log_and_print('Root cause analysis Avg*@500: {:.5f}', np.mean(k_all))
-        write_results(self.options,self.local_model_name,ac_at,k_at_step_all,self.total_params,'RQ_swat_windows.csv')
+
+        if self.options.get("plot_case_study", False):
+            # Find any sample with at least one true root cause
+            sample_idx_for_plot = None
+            for i in range(len(labels)):
+                shifted = labels[i][self.window_size * 2:]
+                if shifted.sum() > 0:   # at least one true anomaly
+                    sample_idx_for_plot = i
+                    break
+            us_sample = us_sample_list[sample_idx_for_plot]
+            z_scores_sample = (-(us_sample - self.us_mean_encoder) / self.us_std_encoder)
+            labels_shifted = labels[sample_idx_for_plot][self.window_size * 2:]
+            print("labels_shifted shape:", labels_shifted.shape)
+
+            if len(labels_shifted.shape) == 1:
+                print("⚠ No variable-level root cause info. Cannot draw red box.")
+            else:
+                # pick a timestep with root cause
+                candidate = np.where(labels_shifted.sum(axis=1) > 0)[0]
+                if len(candidate) == 0:
+                    print("⚠ Sample has no variable-level root cause after shifting.")
+                else:
+                    t_idx = candidate[0]
+                    print("Selected timestep:", t_idx)
+                    self.plot_case(z_scores_sample, labels_shifted, t_idx=t_idx)
+
+        write_results(self.options, self.local_model_name, ac_at, k_at_step_all, self.total_params,
+                            self.options.get("results_csv"))
+        
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    def plot_case(self,z_scores, labels, t_idx=None):
+        """
+        z_scores: shape (T, P)
+        labels: shape (T, P)
+        t_idx: time index to visualize (default: the most anomalous)
+        """
+
+        # Pick the time with max anomaly if none specified
+        if t_idx is None:
+            t_idx = np.argmax(z_scores.max(axis=1))
+
+        scores = z_scores[t_idx]
+        true_causes = np.where(labels[t_idx] == 1)[0]
+
+        plt.figure(figsize=(14, 4))
+        plt.bar(np.arange(len(scores)), scores)
+
+        # draw red rectangles on true causes
+        for c in true_causes:
+            plt.gca().add_patch(
+                plt.Rectangle(
+                    (c - 0.4, 0), 0.8, scores[c],
+                    fill=False, edgecolor='red', linewidth=2.5
+                )
+            )
+
+        plt.xlabel("Variable Index")
+        plt.ylabel("Fused z-score")
+        plt.title("Case Study: Variable-level Root Cause Signal")
+        os.makedirs("results/case_csv", exist_ok=True)
+        plt.savefig(f"results/case_csv/case_study_{self.model_name}.pdf")
+        
+        #plt.show()
+
+        # ----- SAVE TO JSON -----
+        import json
+
+        data_to_save = {
+            "variable_idx": np.arange(len(scores)).tolist(),       # convert to Python list
+            "z_score": scores.astype(float).tolist(),             # convert np.float to float
+            "is_root_cause": labels[t_idx].astype(int).tolist()   # convert np.int64 to int
+        }
+
+        os.makedirs("results/case_json", exist_ok=True)
+        json_file = f"results/case_json/case_study_{self.model_name}_t{t_idx}.json"
+        with open(json_file, "w") as f:
+            json.dump(data_to_save, f, indent=2)
+
+        print(f"Case-study data saved to: {json_file}")
 
     def _testing_root_cause_new(self, xs, labels, alphas=np.arange(0, 1.1, 0.1), use_attention_fusion=True, sample_idx_for_plot=0):
         # Load model and encoder stats
@@ -1643,6 +1772,9 @@ class AERCA(nn.Module):
             fused_sample = latent_sample
             attn_sample = np.zeros_like(latent_sample[0])
 
+        def normalize(x):
+            x = np.array(x)
+            return (x - x.min()) / (x.max() - x.min() + 1e-8)
         # Plot per-variable scores
         plt.figure(figsize=(12,4))
         plt.plot(normalize(latent_sample.mean(axis=0)), label='Latent z-score')

@@ -29,6 +29,7 @@ run_experiment_msds_casestudy() {
                                     --seed="$seed" \
                                     --dataset="$dataset" \
                                     --window_size="$window_size_item" \
+                                    --plot_case_study=1 \
 
                                     --training_aerca=1 \
                                     --epochs=1000 \
@@ -79,6 +80,7 @@ run_experiment_deepmlp() {
                         --lr=$lrs \
                         --seed=$seed \
                         --dataset=$dataset \
+                        --plot_case_study=1 \
                         --coeff_architecture=$coeff_architecture \
                         --window_size=$window_size_item \
                         --results_csv="RQ_1_msds_casestudy.csv" \
