@@ -250,7 +250,7 @@ class Model(nn.Module):
         return None
 
     def _training(self, xs):
-        if self.configs.options["dataset_name"] in ["msds","lotka_volterra"]:
+        if self.configs.options["dataset_name"] in ["msds","lotka_volterra","nonlinear"]:
             self._training_msds_lotka(xs)
         elif self.configs.options["dataset_name"] in ["swat"]:
             self._training_batches_swat(xs)
@@ -412,7 +412,7 @@ class Model(nn.Module):
         #self._get_root_cause_threshold_decoder(xs_val)
 
     def encoding_batch(self, xs):  # xs shape: (batch, T, num_vars)
-        if self.configs.options["dataset_name"]in ["lotka_volterra","msds"]:
+        if self.configs.options["dataset_name"]in ["lotka_volterra","msds","nonlinear"]:
             #when testing & for lotka volterra training
             windows = sliding_window_view(xs, (self.configs.options["window_size"] + 1, self.configs.options["num_vars"]))[:, 0, :, :]
             winds = windows[:, :-1, :]
