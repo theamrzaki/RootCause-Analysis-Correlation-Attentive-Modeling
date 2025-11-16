@@ -3,7 +3,7 @@
 seeds=(7)
 dataset=("msds")
 lrs=("1e-4")
-window_size=(1)
+window_size=(3)
 arch="TemporalGNN_Attention_crossattn"
 main_model="aerca_based"
 attention_dim=16
@@ -29,7 +29,8 @@ run_experiment_msds_casestudy() {
                                     --seed="$seed" \
                                     --dataset="$dataset" \
                                     --window_size="$window_size_item" \
-                                    --plot_case_study=1 \
+                                    --plot_case_study=0 \
+                                    --plot_case_study_heatmap=1 \
 
                                     --training_aerca=1 \
                                     --epochs=1000 \
@@ -53,14 +54,14 @@ run_experiment_msds_casestudy() {
 }
 # --- Run experiments ---
 # 2. With AMOC
-run_experiment_msds_casestudy
+#run_experiment_msds_casestudy
 
 
 
 
 
 seeds=(7)
-window_size=(1)
+window_size=(3)
 coeff_architecture="deep_mlp"
 dataset="msds"
 main_model="aerca_based"
@@ -84,6 +85,10 @@ run_experiment_deepmlp() {
                         --coeff_architecture=$coeff_architecture \
                         --window_size=$window_size_item \
                         --results_csv="RQ_1_msds_casestudy.csv" \
+
+                        --plot_case_study=0 \
+                        --plot_case_study_heatmap=1 \
+
                         --preprocessing_data=0 \
                         --training_aerca=1 \
                         --epochs=5000 \
