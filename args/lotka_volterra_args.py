@@ -24,7 +24,7 @@ def create_arg_parser():
     parser.add_argument('--testing_size', type=int, default=100, help='Size of the testing set (default: 100)')
     parser.add_argument('--preprocessing_data', type=int, default=1, help='Flag for preprocessing data (default: 1)')
     parser.add_argument('--adlength', type=int, default=5, help='Ad length (default: 1)')
-    parser.add_argument('--adtype', type=str, default='causal', help='Ad type (default: non_causal)')
+    parser.add_argument('--adtype', type=str, default='non_causal', help='Ad type (default: non_causal)')
     parser.add_argument('--data_dir', type=str, default=os.path.join(os.getcwd(), 'datasets', 'lv'), help='Data directory (default: ./datasets/lv)')
     parser.add_argument('--num_vars', type=int, default=40, help='Number of variables (default: 40)')
     parser.add_argument('--mul', type=int, default=2, help='Multiplier (default: 20)')

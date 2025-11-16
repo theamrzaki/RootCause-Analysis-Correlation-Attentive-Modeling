@@ -49,7 +49,7 @@ run_experiment_Fedformer() {
 }
 # --- Run experiments ---
 # 2. With AMOC
-run_experiment_Fedformer 1
+#run_experiment_Fedformer 1
 
 
 
@@ -105,7 +105,7 @@ run_experiment_Baselines() {
     }
 # --- Run experiments ---
 # 2. With AMOC
-run_experiment_Baselines 1
+#run_experiment_Baselines 1
 
 
 
@@ -161,11 +161,11 @@ run_experiment_SWAT_iTransformer() {
 }
 # --- Run experiments ---
 # 2. With AMOC
-run_experiment_SWAT_iTransformer 1
+#run_experiment_SWAT_iTransformer 1
 
 # --- Configurations ---
 # stopeed 17 window 5
-seeds=(13 14 15 16 17 18)
+seeds=(18)
 dataset=("msds")
 lrs=("1e-4")
 window_size=(1 2 3 4 5)
@@ -220,8 +220,8 @@ run_experiment_SWAT_CrGSTA() {
 run_experiment_SWAT_CrGSTA 1
 
 
-seeds=(13 14 15 16 17 18)
-window_size=(1 2 3 4 5)
+seeds=(7 8 9 10 11 12)
+window_size=(3 4 5)
 coeff_architecture="deep_mlp"
 dataset="msds"
 main_model="aerca_based"
