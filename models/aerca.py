@@ -1636,11 +1636,40 @@ class AERCA(nn.Module):
                     print("Selected timestep:", t_idx)
                     self.plot_case(z_scores_sample, labels_shifted, t_idx=t_idx)
 
+        if self.options.get("plot_case_study_heatmap", False):
+
+            sample_idx = None
+            for i in range(len(labels)):
+                shifted = labels[i][self.window_size * 2:]
+                if shifted.sum() > 0:
+                    sample_idx = i
+                    break
+
+            us_sample = us_sample_list[sample_idx]
+            z_scores_sample = (-(us_sample - self.us_mean_encoder) / self.us_std_encoder)
+            labels_shifted = labels[sample_idx][self.window_size * 2:]
+
+            # Find the first timestep with a root cause
+            rc_times = np.where(labels_shifted.sum(axis=1) > 0)[0]
+            if len(rc_times) == 0:
+                print("⚠ No root cause found after shifting.")
+            else:
+                t_start = rc_times[0] - 2  # put window BEFORE the anomaly
+                t_start = max(t_start, 0)
+
+                window = self.options.get("case_window", 3)
+
+                self.plot_case_heatmap(
+                    z_scores=z_scores_sample,
+                    labels=labels_shifted,
+                    t_start=t_start,
+                    window=window
+                )
+
         write_results(self.options, self.local_model_name, ac_at, k_at_step_all, self.total_params,
                             self.options.get("results_csv"))
         
-    import matplotlib.pyplot as plt
-    import numpy as np
+
 
     def plot_case(self,z_scores, labels, t_idx=None):
         """
@@ -1691,6 +1720,78 @@ class AERCA(nn.Module):
             json.dump(data_to_save, f, indent=2)
 
         print(f"Case-study data saved to: {json_file}")
+
+
+    def plot_case_heatmap(self, z_scores, labels, t_start, window=3):
+        """
+        z_scores: (T, P) array of all z-scores
+        labels: (T, P) variable-level ground truth
+        t_start: starting timestep of the window
+        window: number of timesteps plotted
+        """
+        import matplotlib.pyplot as plt
+        import numpy as np
+        import json, os
+
+        T, P = z_scores.shape
+
+        # Bound the window
+        t_end = min(t_start + window, T)
+
+        # Extract (window, P)
+        z_win = z_scores[t_start:t_end]      # shape (W, P)
+        labels_win = labels[t_start:t_end]   # shape (W, P)
+        
+        W = z_win.shape[0]
+
+        # Normalize for better color visibility
+        z_norm = (z_win - z_win.min()) / (z_win.max() - z_win.min() + 1e-8)
+
+        plt.figure(figsize=(12, 6))
+
+        # Note: transpose so:
+        #   rows = vars (P)
+        #   columns = window steps (W)
+        plt.imshow(z_norm.T, aspect='auto', cmap='viridis_r', origin='upper')
+
+        plt.colorbar(label="Normalized z-score")
+        plt.xlabel("Window step (0 → W-1)")
+        plt.ylabel("Variable index")
+
+        # Overlay ground-truth anomalies
+        anom = np.where(labels_win > 0)
+        # anom: (time_idx, var_idx)
+        # BUT heatmap is transposed → need to invert coordinates
+        if len(anom[0]) > 0:
+            t_coords = anom[0]      # x-axis (window steps)
+            v_coords = anom[1]      # y-axis (variables)
+            plt.scatter(t_coords, v_coords, color='red', s=15, label="Root cause")
+
+        plt.title(f"RCA Heatmap Window={window}, t_start={t_start}")
+        plt.legend(loc='upper right')
+
+        os.makedirs("results/case_heatmap", exist_ok=True)
+        fname = f"results/case_heatmap/{self.model_name}_t{t_start}_win{window}.pdf"
+        plt.savefig(fname, bbox_inches='tight')
+        plt.close()
+
+        # -------- SAVE JSON FOR REPRODUCTION ----------
+        data_json = {
+            "window_start": int(t_start),
+            "window_end": int(t_end),
+            "z_score_window": z_win.astype(float).tolist(),     # W×P values
+            "root_cause_window": labels_win.astype(int).tolist() # W×P labels
+        }
+
+        os.makedirs("results/case_json", exist_ok=True)
+        json_file = f"results/case_json/{self.model_name}_t{t_start}_win{window}.json"
+        with open(json_file, "w") as f:
+            json.dump(data_json, f, indent=2)
+
+        print(f"[✓] Heatmap + JSON saved for window {t_start}:{t_end}")
+
+
+
 
     def _testing_root_cause_new(self, xs, labels, alphas=np.arange(0, 1.1, 0.1), use_attention_fusion=True, sample_idx_for_plot=0):
         # Load model and encoder stats

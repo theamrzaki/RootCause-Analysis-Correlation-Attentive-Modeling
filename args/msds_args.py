@@ -50,7 +50,8 @@ def create_arg_parser():
     parser.add_argument('--mean_std_recon_loss', type=int, default=0, help='Patience for early stopping (default: 50)')
     #plot_case_study
     parser.add_argument('--plot_case_study', type=int, default=0, help='Flag for plotting case study (default: 0)')
-    
+    parser.add_argument('--plot_case_study_heatmap', type=int, default=0, help='Flag for plotting case study heatmap (default: 0)')
+
     # Dual KL arguments
     parser.add_argument('--correlated_KL', type=int, default=0, help='Flag for correlated KL (default: 1)')
     parser.add_argument('--lambda_indep', type=float, default=1.0, help='Lambda for independence (default: 1.0)')
