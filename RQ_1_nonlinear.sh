@@ -1,10 +1,10 @@
 
 
 # --- Configurations ---
-seeds=(4 5 6)
+seeds=(7 8 9 10 11 12)
 dataset=("nonlinear")
 coeff_architecture="TemporalGNN_Attention_crossattn"
-window_size=(1 5 7 10)
+window_size=(1 3 5 7 10)
 main_model=("aerca_based")
 att_dim=64
 heads=2
@@ -56,7 +56,7 @@ run_experiment_nonlinear_CrGSTA() {
     done
 }
 # --- Run experiments ---
-#run_experiment_nonlinear_CrGSTA
+run_experiment_nonlinear_CrGSTA
 
 
 
@@ -66,10 +66,10 @@ run_experiment_nonlinear_CrGSTA() {
 
 
 # --- Configurations ---
-seeds=(4 5 6)
+seeds=(7 8 9 10 11 12)
 dataset=("nonlinear")
 coeff_architecture="deep_mlp"
-window_size=(1 5 7 10)
+window_size=(1 3 5 7 10)
 main_model=("aerca_based")
 att_dim=64
 heads=2
@@ -121,17 +121,17 @@ run_experiment_nonlinear_CrGSTA_deep() {
     done
 }
 # --- Run experiments ---
-#run_experiment_nonlinear_CrGSTA_deep
+run_experiment_nonlinear_CrGSTA_deep
 
 
 
 
 
 # --- Configurations ---
-seeds=(1 2 3 4 5 6)
+seeds=(7 8 9 10 11 12)
 dataset=("nonlinear")
 coeff_architecture="deep_mlp"
-window_size=(1 5 7 10)
+window_size=(1 3 5 7 10)
 main_model=("FEDformer")
 att_dim=64
 heads=2
@@ -183,7 +183,7 @@ run_experiment_nonlinear_CrGSTA_fedformer() {
     done
 }
 # --- Run experiments ---
-#run_experiment_nonlinear_CrGSTA_fedformer
+run_experiment_nonlinear_CrGSTA_fedformer
 
 
 
@@ -191,10 +191,10 @@ run_experiment_nonlinear_CrGSTA_fedformer() {
 
 
 # --- Configurations ---
-seeds=(1 2 3 4 5 6)
+seeds=(7 8 9 10 11 12)
 dataset=("nonlinear")
 coeff_architecture="deep_mlp"
-window_size=(1 5 7 10)
+window_size=(1 3 5 7 10)
 main_model=("iTransformer")
 att_dim=64
 heads=2
@@ -246,17 +246,17 @@ run_experiment_nonlinear_CrGSTA_iTransformer() {
     done
 }
 # --- Run experiments ---
-#run_experiment_nonlinear_CrGSTA_iTransformer
+run_experiment_nonlinear_CrGSTA_iTransformer
 
 
 
 
 
 # --- Configurations ---
-seeds=(1 2 3 4 5 6)
+seeds=(7 8 9 10 11 12)
 dataset=("nonlinear")
 coeff_architecture=("rcd" "epsilon_diagnosis")
-window_size=(1 5 7 10)
+window_size=(1 3 5 7 10)
 main_model=("aerca_based")
 att_dim=64
 heads=2

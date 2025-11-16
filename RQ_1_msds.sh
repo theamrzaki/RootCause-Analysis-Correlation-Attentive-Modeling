@@ -1,6 +1,6 @@
 
 # --- Configurations ---
-seeds=(7 8 9 10 11 12)
+seeds=(13 14 15 16 17 18)
 dataset=("msds")
 lrs=("1e-4")
 window_size=(1 2 3 4 5)
@@ -49,12 +49,12 @@ run_experiment_Fedformer() {
 }
 # --- Run experiments ---
 # 2. With AMOC
-#run_experiment_Fedformer 1
+run_experiment_Fedformer 1
 
 
 
 # --- Configurations ---
-seeds=(7 8 9 10 11 12)
+seeds=(13 14 15 16 17 18)
 dataset=("msds")
 lrs=("1e-4")
 window_size=(1 2 3 4 5)
@@ -111,7 +111,7 @@ run_experiment_Baselines 1
 
 
 # --- Configurations ---
-seeds=(7 8 9 10 11 12)
+seeds=(13 14 15 16 17 18)
 dataset=("msds")
 lrs=("1e-4")
 window_size=(1 2 3 4 5)
@@ -161,10 +161,11 @@ run_experiment_SWAT_iTransformer() {
 }
 # --- Run experiments ---
 # 2. With AMOC
-#run_experiment_SWAT_iTransformer 1
+run_experiment_SWAT_iTransformer 1
 
 # --- Configurations ---
-seeds=(7 8 9 10 11 12)
+# stopeed 17 window 5
+seeds=(13 14 15 16 17 18)
 dataset=("msds")
 lrs=("1e-4")
 window_size=(1 2 3 4 5)
@@ -216,10 +217,10 @@ run_experiment_SWAT_CrGSTA() {
 }
 # --- Run experiments ---
 # 2. With AMOC
-#run_experiment_SWAT_CrGSTA 1
+run_experiment_SWAT_CrGSTA 1
 
 
-seeds=(7 8 9 10 11 12)
+seeds=(13 14 15 16 17 18)
 window_size=(1 2 3 4 5)
 coeff_architecture="deep_mlp"
 dataset="msds"
@@ -253,4 +254,4 @@ run_experiment_deepmlp() {
     done
 }
 
-#run_experiment_deepmlp
+run_experiment_deepmlp
