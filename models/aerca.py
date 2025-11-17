@@ -124,7 +124,14 @@ class AERCA(nn.Module):
         
         elif(self.options["coeff_architecture"] == "causalrca"):
             from models.causalrca import MLPDecoder
-            self.mlp_decoder = MLPDecoder(num_vars, window_size, hidden_layer_size, num_hidden_layers, args=options, device=device).to(device)
+            self.decoder = MLPDecoder(
+                n_in_node=None,
+                n_in_z=1,
+                n_out=1,
+                data_variable_size=options.get("num_vars"),
+                n_hid=options.get("outer_hidden_dim", 64),
+            ).to(device)
+            
             self._log_and_print('Number of parameters in encoder: {}', self._count_parameters(self.encoder))
             self._log_and_print('Number of parameters in decoder: {}', self._count_parameters(self.decoder))
             self.total_params = (self._count_parameters(self.encoder) +
@@ -437,38 +444,144 @@ class AERCA(nn.Module):
 
         return nexts_hat, coeffs, prev_coeffs
     
-    def decoding_causalrca(self, us, winds, add_u=True):
+    def decoding_causalrca__(self, us, winds, add_u=True, aux_vars=None):
         """
-        MLP-based causal RCA decoding.
-        us: latent states (B, T, p)
-        winds: original windows (B, T, p)
-        add_u: whether to add the next-step latent state residual
+        MLP-based CausalRCA decoding.
+        us:    latent states from encoder (B, T, p)
+        winds: original sliding windows (B, T, p)
+        add_u: residual addition flag
+        aux_vars: dict containing encoder graph outputs:
+                {
+                    "adj_A1",
+                    "adj_A",
+                    "adj_A_tilt",
+                    "logits",
+                    "enc_x",
+                    "Wa",
+                    "z",
+                    "z_positive"
+                }
+        Returns:
+            nexts_hat:   (B, p)
+            decoder_coeffs:  mat_z from causal RCA  (B, p)
+            prev_coeffs:     zeros placeholder to match 1decoder signature
         """
-        B, T, p = us.shape
 
-        # --- Previous latent projections ---
-        u_next = us[:, -1, :]  # (B, p)
-        
-        # For simplicity, assume winds is (B, T, p) and we flatten time for MLP
-        winds_flat = winds.reshape(B, -1)  # (B, T*p)
-        
-        # Forward through MLPDecoder
-        # Here we reuse the MLPDecoder already instantiated as self.mlp_decoder
-        # Assume input_z = winds_flat, inputs=None (not used in this MLP)
-        mat_z, preds, _ = self.mlp_decoder(
-            inputs=None, 
-            input_z=winds_flat, 
-            n_in_node=p, 
-            origin_A=self.origin_A, 
-            adj_A_tilt=self.adj_A_tilt, 
-            Wa=self.Wa
-        )  # preds: (B, p)
+        if aux_vars is None:
+            raise ValueError("decoding_causalrca requires aux_vars from causalrca encoder.")
 
-        # --- Final next-step prediction ---
+        B, p = us.shape
+
+        # ----------------------
+        # Extract encoder aux vars
+        # ----------------------
+        origin_A   = aux_vars["adj_A1"]       # sinh(3A)
+        adj_A_tilt = aux_vars["adj_A_tilt"]   # I - A^T
+        Wa         = aux_vars["Wa"]           # learnable param
+        input_z    = aux_vars["logits"]       # graph-weighted latent (B, n_out)
+
+        # ----------------------
+        # Next-step latent for residual
+        # ----------------------
+        u_next = us    # (B, p)
+
+        # ----------------------
+        # Run the MLPDecoder
+        # ----------------------
+        # inputs=None, since your MLPDecoder doesn't use it
+        mat_z, preds, _ = self.decoder(
+            inputs=None,
+            input_z=input_z,      # NOTE: logits from encoder
+            n_in_node=p,
+            origin_A=origin_A,
+            adj_A_tilt=adj_A_tilt,
+            Wa=Wa
+        )
+
+        # ----------------------
+        # Final prediction
+        # ----------------------
+        nexts_hat = preds.squeeze(-1) + u_next if add_u else preds
+
+        # ----------------------
+        # For compatibility with decoding_1decoder():
+        # return a placeholder for prev_coeffs
+        # ----------------------
+        decoder_coeffs = mat_z                # (B, p)
+        prev_coeffs = torch.zeros(B, 1, p, p, device=us.device)
+
+        return nexts_hat, decoder_coeffs, prev_coeffs
+
+    def decoding_causalrca(self, us, winds, add_u=True, aux_vars=None):
+        """
+        MLP-based CausalRCA decoding.
+
+        Args:
+            us:    latent states from encoder (B, T, p)
+            winds: original sliding windows (B, T, p) — not used here
+            add_u: residual addition flag
+            aux_vars: dict containing encoder graph outputs:
+                    {
+                        "adj_A1",
+                        "adj_A",
+                        "adj_A_tilt",
+                        "logits",
+                        "enc_x",
+                        "Wa",
+                        "z",
+                        "z_positive"
+                    }
+
+        Returns:
+            nexts_hat:      (B_windowed, p)
+            decoder_coeffs: mat_z from causal RCA (B_windowed, p)
+            prev_coeffs:    zeros placeholder to match 1decoder signature (B_windowed, 1, p, p)
+        """
+        if aux_vars is None:
+            raise ValueError("decoding_causalrca requires aux_vars from causalrca encoder.")
+
+        B, p = us.shape  # latent includes temporal dimension
+
+        # ----------------------
+        # Extract encoder auxiliary variables
+        # ----------------------
+        origin_A   = aux_vars["adj_A1"]       # sinh(3A)
+        adj_A_tilt = aux_vars["adj_A_tilt"]   # I - A^T
+        Wa         = aux_vars["Wa"]           # learnable param
+        input_z    = aux_vars["logits"]       # graph-weighted latent (B, T, p)
+
+        # In decoding_causalrca
+        # u_next comes from us (after sliding windows)
+        B_windowed = us.shape[0] - self.window_size  # number of valid windows
+        u_next = us[-B_windowed:, :]                 # (B_windowed, p)
+        input_z_windows = input_z[-B_windowed:, :]   # (B_windowed, p)
+
+        # Call MLPDecoder with aligned batch
+        mat_z, preds, _ = self.decoder(
+            inputs=None,
+            input_z=input_z_windows,
+            n_in_node=p,
+            origin_A=origin_A,
+            adj_A_tilt=adj_A_tilt,
+            Wa=Wa
+        )
+
+        # Ensure preds has shape (B_windowed, p)
+        if preds.dim() == 3:
+            preds = preds.squeeze(-1)
+
+        # Final prediction
         nexts_hat = preds + u_next if add_u else preds
 
-        # --- For causal RCA, return the adjusted input matrix and output ---
-        return nexts_hat, mat_z
+        # prev_coeffs placeholder
+        # Outer product to get full p x p matrix per batch
+        mat_z_flat = mat_z.squeeze(-1) if mat_z.dim() == 3 else mat_z  # (B, p)
+        decoder_coeffs = torch.einsum('bi,bj->bij', mat_z_flat, mat_z_flat)  # (B,p,p)
+        decoder_coeffs = decoder_coeffs.unsqueeze(1)  # (B,1,p,p)
+        prev_coeffs = torch.zeros(B_windowed, 1, p, p, device=us.device)
+
+
+        return nexts_hat, decoder_coeffs, prev_coeffs
 
     
     def decoding_2decoders(self, us, winds, add_u=True):
@@ -546,13 +659,13 @@ class AERCA(nn.Module):
 
         return nexts_hat, coeffs, prev_coeffs
 
-    def decoding(self, us, winds, add_u=True):
+    def decoding(self, us, winds, add_u=True,aux_vars=None):
         if self.options["coeff_architecture"] == "deep_mlp":
             return self.decoding_2decoders(us, winds, add_u=add_u)
         elif self.options["coeff_architecture"] in ["TemporalGNN_Attention", "TemporalGNN_Attention_fourier", "TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced"]:
             return self.decoding_1decoder(us, winds, add_u=add_u)
         elif self.options["coeff_architecture"] == "causalrca":
-            return self.decoding_causalrca(us, winds, add_u=add_u)
+            return self.decoding_causalrca(us, winds, add_u=add_u, aux_vars=aux_vars)
 
     def decoding_batch(self, us, winds, add_u=True):
         # us: (B, P)
@@ -612,7 +725,13 @@ class AERCA(nn.Module):
                 # sometimes happens when lr is high (0.0005 for SWAT) instead of 0.0001
                 print(f"Error computing KL divergence: {e}")
                 kl_div = torch.tensor(0.0, device=self.device)
-        nexts_hat, decoder_coeffs, prev_coeffs = self.decoding(us, winds, add_u=add_u)
+
+        if self.options["coeff_architecture"] == "causalrca":
+            # as attnn_weights contains both the attn_weights and aux vars used by the decoder
+            nexts_hat, decoder_coeffs, prev_coeffs = self.decoding(us, winds, add_u=add_u,aux_vars=attn_weights[1])
+            attn_weights = attn_weights[0]
+        else:
+            nexts_hat, decoder_coeffs, prev_coeffs = self.decoding(us, winds, add_u=add_u)
         return nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us, attn_weights
     
     
@@ -1666,6 +1785,14 @@ class AERCA(nn.Module):
                     window=window
                 )
 
+        if self.options.get("plot_latent_clusters", False):
+            print("Plotting latent space clustering...")
+            self.plot_latent_clusters_3d(
+                latent_list=us_sample_list,
+                labels_list=labels,
+                method=self.options.get("latent_reduction", "PCA")
+            )
+
         write_results(self.options, self.local_model_name, ac_at, k_at_step_all, self.total_params,
                             self.options.get("results_csv"))
         
@@ -1790,7 +1917,67 @@ class AERCA(nn.Module):
 
         print(f"[✓] Heatmap + JSON saved for window {t_start}:{t_end}")
 
+    def plot_latent_clusters_3d(self, latent_list, labels_list, method="TSNE"):
+        """
+        Cluster latent space in 3D and visualize anomalies.
 
+        latent_list: list of np.arrays, each (T, latent_dim) per sample
+        labels_list: list of np.arrays, each (T, num_vars) per sample
+        method: "PCA" or "TSNE"
+        """
+        import numpy as np
+        import matplotlib.pyplot as plt
+        from sklearn.decomposition import PCA
+        from sklearn.manifold import TSNE
+        from mpl_toolkits.mplot3d import Axes3D  # needed for 3D projection
+        import json
+        import os
+
+        # Flatten all timesteps across samples
+        latent_all = np.concatenate(latent_list, axis=0)  # (total_timesteps, latent_dim)
+        labels_all = np.concatenate([l[self.window_size*2:] for l in labels_list], axis=0)
+        anomaly_mask = labels_all.sum(axis=1) > 0  # True if any variable is anomalous
+
+        # Dimensionality reduction
+        if method.upper() == "PCA":
+            reducer = PCA(n_components=3)
+        elif method.upper() == "TSNE":
+            reducer = TSNE(n_components=3, perplexity=30, random_state=42)
+        else:
+            raise ValueError("Unknown method: choose 'PCA' or 'TSNE'")
+
+        latent_3d = reducer.fit_transform(latent_all)
+
+        # 3D Plot
+        fig = plt.figure(figsize=(10,8))
+        ax = fig.add_subplot(111, projection='3d')
+
+        ax.scatter(latent_3d[~anomaly_mask, 0], latent_3d[~anomaly_mask, 1], latent_3d[~anomaly_mask, 2], 
+                s=10, alpha=0.5, label="Normal")
+        ax.scatter(latent_3d[anomaly_mask, 0], latent_3d[anomaly_mask, 1], latent_3d[anomaly_mask, 2], 
+                s=20, alpha=0.8, color='red', label="Anomalous")
+
+        ax.set_xlabel("Latent dim 1")
+        ax.set_ylabel("Latent dim 2")
+        ax.set_zlabel("Latent dim 3")
+        ax.set_title(f"3D Latent Space Clustering ({method})")
+        ax.legend()
+
+        os.makedirs("results/latent_clusters", exist_ok=True)
+        pdf_file = f"results/latent_clusters/latent_clusters_3d_{self.model_name}_{method}.pdf"
+        plt.savefig(pdf_file)
+        plt.close()
+        print(f"Saved 3D latent clusters plot → {pdf_file}")
+
+        # Save JSON for later inspection
+        data = {
+            "latent_3d": latent_3d.tolist(),
+            "anomaly_mask": anomaly_mask.astype(int).tolist()
+        }
+        json_file = f"results/latent_clusters/latent_clusters_3d_{self.model_name}_{method}.json"
+        with open(json_file, "w") as f:
+            json.dump(data, f, indent=2)
+        print(f"Saved 3D latent clusters JSON → {json_file}")
 
 
     def _testing_root_cause_new(self, xs, labels, alphas=np.arange(0, 1.1, 0.1), use_attention_fusion=True, sample_idx_for_plot=0):

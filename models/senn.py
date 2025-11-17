@@ -2,8 +2,9 @@ import torch.nn as nn
 import torch
 
 from layers.SimpleGNN import AttentionCoeffGNN, AttentionCoeffGNN_multihead, AttentionCoeffGNN_multihead_fixed, RecurrentAttentionGNN_Attn_Enhanced, RecurrentAttentionGNN_Attn_crossattn_Legendre, TemporalGNN, RecurrentAttentionCoeffGNN, RecurrentAttentionGNN_Attn,RecurrentAttentionCoeffGNN_chunks
-from layers.SimpleGNN import RecurrentAttentionGNN_Attn_fourier, RecurrentAttentionGNN_Attn_crossattn
+from layers.SimpleGNN import RecurrentAttentionGNN_Attn_fourier, RecurrentAttentionGNN_Attn_crossattn, causalrca
 from layers.trend_seasonal import TS_Model
+from models.causalrca import CONFIG
 
 class SENNGC(nn.Module):
     def __init__(self, num_vars: int, order: int, hidden_layer_size: int, num_hidden_layers: int,
@@ -232,6 +233,25 @@ class SENNGC(nn.Module):
             total_params = sum(p.numel() for p in self.coeff_net.parameters() if p.requires_grad)
             print(f"Total parameters for temporal : {total_params}")
 
+        elif args["coeff_architecture"] == "causalrca":
+            import numpy as np
+            num_nodes = args.get("num_vars")
+            adj_A = np.zeros((num_nodes, num_nodes))
+
+            self.coeff_net = causalrca(
+                num_vars=num_nodes,                       # SAME as encoder
+                order=order,                              # same as original order
+                adj_A=adj_A,                              # SAME adjacency input
+                hidden_dim=args.get("outer_hidden_dim", 64),  # SAME hidden dimension
+                n_hid=args.get("outer_hidden_dim", 64),   # same as input embedding dim
+                n_out=1,   # SAME latent dimensionality
+                tol=args.get("lr", 64),                   # keep default
+                device=device,                            # same device
+            )
+
+            total_params = sum(p.numel() for p in self.coeff_net.parameters() if p.requires_grad)
+            print(f"Total parameters for temporal : {total_params}")
+        
         elif args["coeff_architecture"] == "TemporalGNN_Attention_crossattn_enhanced":
             self.rank = 51
 
@@ -272,7 +292,7 @@ class SENNGC(nn.Module):
             print(f"Total parameters for temporal : {total_params}")
 
 
-        if args["coeff_architecture"] not in  ["ht","epsilon_diagnosis","rcd","TemporalGNN","cross_time_freq","cross_attention_single_coeff_network","TemporalGNN_Attention","trend_seasonal","rcd","TemporalGNN_Attention_fourier","TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced"]:
+        if args["coeff_architecture"] not in  ["ht","epsilon_diagnosis","rcd","TemporalGNN","cross_time_freq","cross_attention_single_coeff_network","TemporalGNN_Attention","trend_seasonal","rcd","TemporalGNN_Attention_fourier","TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced","causalrca"]:
             total_params = sum(p.numel() for net in self.coeff_nets for p in net.parameters())
             print(f"Total parameters for {order} lags: {total_params}")
         
@@ -495,6 +515,14 @@ class SENNGC(nn.Module):
         preds, coeffs, attn_weights = self.coeff_net(inputs)  # let TemporalGNN return preds + coeffs
         return preds, coeffs, attn_weights
     
+    def forward_temporal_causalrca(self, inputs: torch.Tensor):
+        """
+        inputs: (B, order, num_vars)
+        TemporalGNN processes the entire lag sequence recurrently.
+        """
+        preds, coeffs, attn_weights, aux_vars = self.coeff_net(inputs)  # let TemporalGNN return preds + coeffs
+        return preds, coeffs, (attn_weights, aux_vars)
+    
     def forward(self, inputs: torch.Tensor):
         if self.args["coeff_architecture"] == "deep_mlp":
             return self.forward_normal(inputs)
@@ -502,6 +530,8 @@ class SENNGC(nn.Module):
             return self.forward_gnn(inputs)
         elif self.args["coeff_architecture"] in ["TemporalGNN", "TemporalGNN_Attention","trend_seasonal","TemporalGNN_Attention_fourier","TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced"]:
             return self.forward_temporal(inputs)
+        elif self.args["coeff_architecture"] == "causalrca":
+            return self.forward_temporal_causalrca(inputs)
         elif self.args["coeff_architecture"] == "cross_time_freq":
             return self.forward_cross_time_freq(inputs)
         elif self.args["coeff_architecture"] == "cross_attention_single_coeff_network":

@@ -1470,6 +1470,195 @@ class RecurrentAttentionGNN_Attn_crossattn(nn.Module):
 
         return preds, coeffs_time_like, coeffs_freq_seq
 
+class causalrcaaaa(nn.Module):
+    def __init__(
+        self,
+        num_vars,
+        order,
+        adj_A,
+        hidden_dim=256,
+        n_hid=12,
+        n_out=None,
+        do_prob=0.0,
+        batch_size=32,
+        tol=1e-6,
+        device="cpu",
+    ):
+        super().__init__()
+
+        self.num_vars = num_vars
+        self.order = order
+        self.hidden_dim = hidden_dim
+        self.device = torch.device(device)
+
+        if n_out is None:
+            n_out = num_vars * num_vars
+        self.n_out = n_out
+
+        adj_A = torch.as_tensor(adj_A, dtype=torch.float32, device=self.device)
+        self.adj_A = nn.Parameter(adj_A, requires_grad=True)
+
+        self.Wa = nn.Parameter(torch.zeros(self.n_out, dtype=torch.float32, device=self.device), requires_grad=True)
+
+        self.fc1 = nn.Linear(1, self.hidden_dim, bias=True)
+        self.fc2 = nn.Linear(self.hidden_dim, self.n_out, bias=True)
+
+        self.dropout_prob = do_prob
+        self.batch_size = batch_size
+
+        self.z = nn.Parameter(torch.tensor(float(tol), dtype=torch.float32, device=self.device))
+        self.z_positive = nn.Parameter(torch.ones_like(self.adj_A), requires_grad=True)
+
+        self._initialize_weights()
+
+    def _initialize_weights(self):
+        nn.init.xavier_uniform_(self.fc1.weight)
+        nn.init.zeros_(self.fc1.bias)
+        nn.init.xavier_uniform_(self.fc2.weight)
+        nn.init.zeros_(self.fc2.bias)
+
+    def forward(self, inputs: torch.Tensor):
+        inputs = inputs.to(torch.float32)
+
+        B, O, P = inputs.shape
+
+        # placeholder coefficients
+        coeffs_time_like = torch.zeros(B, O, P, P, device=self.device)
+        coeffs_freq_seq = torch.zeros(B, 1, P, P, device=self.device)
+
+        # prediction head
+        x_last = inputs[:, -1, :]#.double()
+        hidden = torch.relu(self.fc1(x_last.unsqueeze(-1)))
+        enc_x = self.fc2(hidden)  # THIS is "x" in original encoder
+
+        # if output is flattened adjacency predictions:
+        if enc_x.shape[1] == P * P:
+            preds = (enc_x.view(B, P, P) @ x_last.unsqueeze(-1)).squeeze(-1)
+        else:
+            preds = enc_x[:, :P]
+
+        # ===============================
+        # Graph math (matching original)
+        # ===============================
+
+        # adj_A1 = sinh(3A)
+        adj_A1 = torch.sinh(3.0 * self.adj_A)  # already float32 from __init__
+
+        # adj_A_tilt = I - A^T
+        adj_A_tilt = torch.eye(P, device=self.device, dtype=torch.float32) - adj_A1.T
+
+        
+        # logits = graph-weighted latent (same as encoder)
+        logits = enc_x
+
+        aux_vars = {
+            "adj_A1": adj_A1,                   # origin_A
+            "adj_A": self.adj_A,                # raw adjacency
+            "adj_A_tilt": adj_A_tilt,           # (I - A^T)
+            "logits": logits,                   # decoder input
+            "enc_x": enc_x,                     # latent rep
+            "z": self.z,
+            "z_positive": self.z_positive,
+            "Wa": self.Wa
+        }
+
+        return preds.squeeze(-1), coeffs_time_like, coeffs_freq_seq, aux_vars
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class causalrca(nn.Module):
+    def __init__(
+        self,
+        num_vars,
+        order,
+        adj_A,
+        hidden_dim=256,
+        n_hid=12,
+        n_out=None,
+        do_prob=0.0,
+        batch_size=32,
+        tol=1e-6,
+        device="cpu",
+    ):
+        super().__init__()
+
+        self.num_vars = num_vars
+        self.order = order
+        self.hidden_dim = hidden_dim
+        self.device = torch.device(device)
+
+        if n_out is None:
+            n_out = num_vars * num_vars
+        self.n_out = n_out
+
+        # adjacency matrix
+        adj_A = torch.as_tensor(adj_A,  device=self.device)
+        self.adj_A = nn.Parameter(adj_A, requires_grad=True)
+
+        # learnable Wa parameter
+        self.Wa = nn.Parameter(torch.zeros(self.n_out,  device=self.device), requires_grad=True)
+
+        # prediction head
+        self.fc1 = nn.Linear(1, self.hidden_dim, bias=True)
+        self.fc2 = nn.Linear(self.hidden_dim, self.n_out, bias=True)
+
+
+        self.dropout_prob = do_prob
+        self.batch_size = batch_size
+
+        self.z = nn.Parameter(torch.tensor(float(tol),device=self.device))
+        self.z_positive = nn.Parameter(torch.ones_like(self.adj_A), requires_grad=True)
+
+        self._initialize_weights()
+
+    def _initialize_weights(self):
+        nn.init.xavier_uniform_(self.fc1.weight)
+        nn.init.zeros_(self.fc1.bias)
+        nn.init.xavier_uniform_(self.fc2.weight)
+        nn.init.zeros_(self.fc2.bias)
+
+    def forward(self, inputs: torch.Tensor):
+        # force float32 to avoid dtype mismatch
+
+        B, O, P = inputs.shape
+
+        # placeholder coefficients
+        coeffs_time_like = torch.zeros(B, O, P, P, device=self.device)
+        coeffs_freq_seq = torch.zeros(B, 1, P, P, device=self.device)
+
+        # prediction head
+        x_last = inputs[:, -1, :]       # (B, P)
+        hidden = torch.relu(self.fc1(x_last.unsqueeze(-1)))  # (B, hidden_dim)
+        enc_x = self.fc2(hidden)                              # (B, n_out)
+
+        # if output is flattened adjacency predictions
+        if enc_x.shape[1] == P * P:
+            preds = (enc_x.view(B, P, P) @ x_last.unsqueeze(-1)).squeeze(-1)  # (B, P)
+        else:
+            preds = enc_x[:, :P]  # (B, P)
+
+        # Graph math
+        adj_A1 = torch.sinh(3.0 * self.adj_A)  # (P, P)
+        adj_A_tilt = torch.eye(P, device=self.device, dtype=torch.float32) - adj_A1.T  # (P, P)
+
+        logits = enc_x  # graph-weighted latent (B, n_out)
+
+        aux_vars = {
+            "adj_A1": adj_A1,
+            "adj_A": self.adj_A,
+            "adj_A_tilt": adj_A_tilt,
+            "logits": logits,
+            "enc_x": enc_x,
+            "z": self.z,
+            "z_positive": self.z_positive,
+            "Wa": self.Wa
+        }
+
+        return preds.squeeze(-1), coeffs_time_like, coeffs_freq_seq, aux_vars
+
+
 
 class RecurrentAttentionGNN_Attn_crossattn_enhanced(nn.Module):
     """
