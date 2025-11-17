@@ -1,7 +1,7 @@
 
 
 # --- Configurations ---
-seeds=(7 8 9 10 11 12)
+seeds=(1 2 3 4 5 6 10 11 12)
 dataset=("nonlinear")
 coeff_architecture="TemporalGNN_Attention_crossattn"
 window_size=(1 3 5 7 10)
@@ -19,8 +19,9 @@ run_experiment_nonlinear_CrGSTA() {
                                 echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model_item"
 
                                 #seed 1 and window size 12 for preprocessing
-                                if [ "$seed" == "1" ] && [ "$window_size_item" == "1" ]; then
+                                if [ "$seed" == "7" ] && [ "$window_size_item" == "1" ]; then
                                     preprocessing_data=1
+                                    echo "###----Preprocessing data enabled for the first time----###"
                                 else
                                     preprocessing_data=0
                                 fi
@@ -36,9 +37,9 @@ run_experiment_nonlinear_CrGSTA() {
                                     --seed=$seed \
                                     --dataset=$dataset \
                                     --window_size=$window_size_item \
-                                    --num_vars=15 \
+                                    --num_vars=20 \
                                     --training_aerca=1 \
-                                    --results_csv=RQ_1_lorenz96_new.csv \
+                                    --results_csv=RQ_1_nonlinear.csv \
                                     
                                     --epochs=100 \
                                     --time_freq_representation=mag_phase \
@@ -66,7 +67,7 @@ run_experiment_nonlinear_CrGSTA
 
 
 # --- Configurations ---
-seeds=(7 8 9 10 11 12)
+seeds=(1 2 3 4 5 6 10 11 12)
 dataset=("nonlinear")
 coeff_architecture="deep_mlp"
 window_size=(1 3 5 7 10)
@@ -101,9 +102,9 @@ run_experiment_nonlinear_CrGSTA_deep() {
                                     --seed=$seed \
                                     --dataset=$dataset \
                                     --window_size=$window_size_item \
-                                    --num_vars=15 \
+                                    --num_vars=20 \
                                     --training_aerca=1 \
-                                    --results_csv=RQ_1_lorenz96_new.csv \
+                                    --results_csv=RQ_1_nonlinear.csv \
                                     
                                     --epochs=100 \
                                     --time_freq_representation=mag_phase \
@@ -128,7 +129,7 @@ run_experiment_nonlinear_CrGSTA_deep
 
 
 # --- Configurations ---
-seeds=(7 8 9 10 11 12)
+seeds=(1 2 3 4 5 6 10 11 12)
 dataset=("nonlinear")
 coeff_architecture="deep_mlp"
 window_size=(1 3 5 7 10)
@@ -163,9 +164,9 @@ run_experiment_nonlinear_CrGSTA_fedformer() {
                                     --seed=$seed \
                                     --dataset=$dataset \
                                     --window_size=$window_size_item \
-                                    --num_vars=15 \
+                                    --num_vars=20 \
                                     --training_aerca=1 \
-                                    --results_csv=RQ_1_lorenz96_new.csv \
+                                    --results_csv=RQ_1_nonlinear.csv \
                                     
                                     --epochs=100 \
                                     --time_freq_representation=mag_phase \
@@ -191,7 +192,7 @@ run_experiment_nonlinear_CrGSTA_fedformer
 
 
 # --- Configurations ---
-seeds=(7 8 9 10 11 12)
+seeds=(1 2 3 4 5 6 10 11 12)
 dataset=("nonlinear")
 coeff_architecture="deep_mlp"
 window_size=(1 3 5 7 10)
@@ -226,9 +227,9 @@ run_experiment_nonlinear_CrGSTA_iTransformer() {
                                     --seed=$seed \
                                     --dataset=$dataset \
                                     --window_size=$window_size_item \
-                                    --num_vars=15 \
+                                    --num_vars=20 \
                                     --training_aerca=1 \
-                                    --results_csv=RQ_1_lorenz96_new.csv \
+                                    --results_csv=RQ_1_nonlinear.csv \
                                     
                                     --epochs=100 \
                                     --time_freq_representation=mag_phase \
@@ -253,7 +254,7 @@ run_experiment_nonlinear_CrGSTA_iTransformer
 
 
 # --- Configurations ---
-seeds=(7 8 9 10 11 12)
+seeds=(1 2 3 4 5 6 10 11 12)
 dataset=("nonlinear")
 coeff_architecture=("rcd" "epsilon_diagnosis")
 window_size=(1 3 5 7 10)
@@ -289,9 +290,9 @@ run_experiment_nonlinear_CrGSTA_baselines() {
                                     --seed=$seed \
                                     --dataset=$dataset \
                                     --window_size=$window_size_item \
-                                    --num_vars=15 \
+                                    --num_vars=20 \
                                     --training_aerca=0 \
-                                    --results_csv=RQ_1_lorenz96_new.csv \
+                                    --results_csv=RQ_1_nonlinear.csv \
                                     
                                     --epochs=100 \
                                     --time_freq_representation=mag_phase \
