@@ -77,7 +77,7 @@ class AERCA(nn.Module):
                                  self._count_parameters(self.decoder) +
                                  self._count_parameters(self.decoder_prev)  )
             
-        elif(self.options["coeff_architecture"] in ["TemporalGNN_Attention", "TemporalGNN_Attention_fourier", "TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced"]):
+        elif(self.options["coeff_architecture"] in ["TemporalGNN_Attention", "TemporalGNN_Attention_fourier", "TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced","cuts_mlp","cuts_lstm"]):
             # --- Efficient attention-based decoder layers ---
             hidden_dim_small = min(hidden_layer_size, 64)  # smaller hidden dim to reduce parameters
             rank = 1                 # low-rank for coefficient matrices
@@ -662,7 +662,7 @@ class AERCA(nn.Module):
     def decoding(self, us, winds, add_u=True,aux_vars=None):
         if self.options["coeff_architecture"] == "deep_mlp":
             return self.decoding_2decoders(us, winds, add_u=add_u)
-        elif self.options["coeff_architecture"] in ["TemporalGNN_Attention", "TemporalGNN_Attention_fourier", "TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced"]:
+        elif self.options["coeff_architecture"] in ["TemporalGNN_Attention", "TemporalGNN_Attention_fourier", "TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced","cuts_mlp","cuts_lstm"]:
             return self.decoding_1decoder(us, winds, add_u=add_u)
         elif self.options["coeff_architecture"] == "causalrca":
             return self.decoding_causalrca(us, winds, add_u=add_u, aux_vars=aux_vars)

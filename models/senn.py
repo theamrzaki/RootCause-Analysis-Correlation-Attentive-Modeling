@@ -3,6 +3,7 @@ import torch
 
 from layers.SimpleGNN import AttentionCoeffGNN, AttentionCoeffGNN_multihead, AttentionCoeffGNN_multihead_fixed, RecurrentAttentionGNN_Attn_Enhanced, RecurrentAttentionGNN_Attn_crossattn_Legendre, TemporalGNN, RecurrentAttentionCoeffGNN, RecurrentAttentionGNN_Attn,RecurrentAttentionCoeffGNN_chunks
 from layers.SimpleGNN import RecurrentAttentionGNN_Attn_fourier, RecurrentAttentionGNN_Attn_crossattn, causalrca
+from layers.CUTS import CUTSEncoder
 from layers.trend_seasonal import TS_Model
 from models.causalrca import CONFIG
 
@@ -291,8 +292,29 @@ class SENNGC(nn.Module):
             total_params = sum(p.numel() for p in self.coeff_net.parameters() if p.requires_grad)
             print(f"Total parameters for temporal : {total_params}")
 
+        elif args["coeff_architecture"] == "cuts_mlp":
+            self.coeff_net = CUTSEncoder(
+                num_vars=num_vars,
+                model_type="multi_mlp",
+                hidden_dim=args.get("outer_hidden_dim", 64),
+                mlp_layers=2,
+                device=device
+            )
+            total_params = sum(p.numel() for p in self.coeff_net.parameters() if p.requires_grad)
+            print(f"Total parameters for CUTS encoder : {total_params}")
 
-        if args["coeff_architecture"] not in  ["ht","epsilon_diagnosis","rcd","TemporalGNN","cross_time_freq","cross_attention_single_coeff_network","TemporalGNN_Attention","trend_seasonal","rcd","TemporalGNN_Attention_fourier","TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced","causalrca"]:
+        elif args["coeff_architecture"] == "cuts_lstm":
+            self.coeff_net = CUTSEncoder(
+                num_vars=num_vars,
+                model_type="multi_lstm",
+                hidden_dim=args.get("outer_hidden_dim", 64),
+                mlp_layers=2,
+                device=device
+            )
+            total_params = sum(p.numel() for p in self.coeff_net.parameters() if p.requires_grad)
+            print(f"Total parameters for CUTS encoder : {total_params}")
+
+        if args["coeff_architecture"] not in  ["ht","epsilon_diagnosis","rcd","TemporalGNN","cross_time_freq","cross_attention_single_coeff_network","TemporalGNN_Attention","trend_seasonal","rcd","TemporalGNN_Attention_fourier","TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced","causalrca","cuts_mlp","cuts_lstm"]:
             total_params = sum(p.numel() for net in self.coeff_nets for p in net.parameters())
             print(f"Total parameters for {order} lags: {total_params}")
         
@@ -528,7 +550,7 @@ class SENNGC(nn.Module):
             return self.forward_normal(inputs)
         elif self.args["coeff_architecture"] == "gnn_attention" or self.args["coeff_architecture"] == "AttentionCoeffGNN_multihead" or self.args["coeff_architecture"] == "AttentionCoeffGNN_multihead_fixed":                                                                                                                                                    
             return self.forward_gnn(inputs)
-        elif self.args["coeff_architecture"] in ["TemporalGNN", "TemporalGNN_Attention","trend_seasonal","TemporalGNN_Attention_fourier","TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced"]:
+        elif self.args["coeff_architecture"] in ["TemporalGNN", "TemporalGNN_Attention","trend_seasonal","TemporalGNN_Attention_fourier","TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced","cuts_mlp","cuts_lstm"]:
             return self.forward_temporal(inputs)
         elif self.args["coeff_architecture"] == "causalrca":
             return self.forward_temporal_causalrca(inputs)
