@@ -21,7 +21,7 @@ class SENNGC(nn.Module):
         super(SENNGC, self).__init__()
         self.args = args
 
-        if args["coeff_architecture"] == "deep_mlp":
+        if args["coeff_architecture"] == "deep_mlp" or args["coeff_architecture"] == "GVAR":
             # Networks for amortising generalised coefficient matrices.
             self.coeff_nets = nn.ModuleList()
 
@@ -314,7 +314,7 @@ class SENNGC(nn.Module):
             total_params = sum(p.numel() for p in self.coeff_net.parameters() if p.requires_grad)
             print(f"Total parameters for CUTS encoder : {total_params}")
 
-        if args["coeff_architecture"] not in  ["ht","epsilon_diagnosis","rcd","TemporalGNN","cross_time_freq","cross_attention_single_coeff_network","TemporalGNN_Attention","trend_seasonal","rcd","TemporalGNN_Attention_fourier","TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced","causalrca","cuts_mlp","cuts_lstm"]:
+        if args["coeff_architecture"] not in  ["ht","epsilon_diagnosis","rcd","TemporalGNN","cross_time_freq","cross_attention_single_coeff_network","TemporalGNN_Attention","trend_seasonal","rcd","TemporalGNN_Attention_fourier","TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced","causalrca","cuts_mlp","cuts_lstm","GVAR"]:
             total_params = sum(p.numel() for net in self.coeff_nets for p in net.parameters())
             print(f"Total parameters for {order} lags: {total_params}")
         
@@ -546,7 +546,7 @@ class SENNGC(nn.Module):
         return preds, coeffs, (attn_weights, aux_vars)
     
     def forward(self, inputs: torch.Tensor):
-        if self.args["coeff_architecture"] == "deep_mlp":
+        if self.args["coeff_architecture"] == "deep_mlp" or self.args["coeff_architecture"] == "GVAR":
             return self.forward_normal(inputs)
         elif self.args["coeff_architecture"] == "gnn_attention" or self.args["coeff_architecture"] == "AttentionCoeffGNN_multihead" or self.args["coeff_architecture"] == "AttentionCoeffGNN_multihead_fixed":                                                                                                                                                    
             return self.forward_gnn(inputs)

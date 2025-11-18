@@ -65,7 +65,9 @@ class AERCA(nn.Module):
         self.nexts_proj = nn.Linear(self.num_modalities * self.num_vars_mod, self.num_vars).to(device)
 
 
-
+        if(self.options["coeff_architecture"] == "GVAR"):
+            self._log_and_print('Number of parameters in encoder: {}', self._count_parameters(self.encoder))
+            self.total_params = (self._count_parameters(self.encoder)  )
 
         if(self.options["coeff_architecture"] == "deep_mlp"):
             self.decoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, args=options, device=device).to(device)
@@ -280,7 +282,10 @@ class AERCA(nn.Module):
         winds[:-self.window_size].shape
             torch.Size([998, 1, 51])
         """
-        return us, coeffs, nexts[self.window_size:], winds[:-self.window_size], attn_weights
+        if self.options["coeff_architecture"] == "GVAR":
+            return us, coeffs, nexts, winds[:-self.window_size], attn_weights, preds
+        else:
+            return us, coeffs, nexts[self.window_size:], winds[:-self.window_size], attn_weights, preds
 
     def encoding_new(self, xs):
         # Split features into modalities
@@ -682,7 +687,7 @@ class AERCA(nn.Module):
         return nexts_hat, coeffs, prev_coeffs
 
     def forward(self, x,add_u=True):
-        us, encoder_coeffs, nexts, winds, attn_weights = self.encoding(x)
+        us, encoder_coeffs, nexts, winds, attn_weights, preds = self.encoding(x)
         #if(self.options["correlated_KL"] == 1):
         #    kl_indep = compute_kl_divergence(us,self.device)  
         #    latent_dim = us.shape[1]
@@ -730,6 +735,11 @@ class AERCA(nn.Module):
             # as attnn_weights contains both the attn_weights and aux vars used by the decoder
             nexts_hat, decoder_coeffs, prev_coeffs = self.decoding(us, winds, add_u=add_u,aux_vars=attn_weights[1])
             attn_weights = attn_weights[0]
+        elif self.options["coeff_architecture"] == "GVAR":
+            #no decoder, so return empty tensors
+            nexts_hat = preds 
+            decoder_coeffs = torch.tensor([])
+            prev_coeffs = torch.tensor([])
         else:
             nexts_hat, decoder_coeffs, prev_coeffs = self.decoding(us, winds, add_u=add_u)
         return nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us, attn_weights
@@ -818,16 +828,16 @@ class AERCA(nn.Module):
 
         # === Sparsity losses ===
         loss_encoder_coeffs = self._sparsity_loss(encoder_coeffs, self.encoder_alpha)
-        loss_decoder_coeffs = self._sparsity_loss(decoder_coeffs, self.decoder_alpha)
-        loss_prev_coeffs    = self._sparsity_loss(prev_coeffs, self.decoder_alpha)
+        loss_decoder_coeffs = self._sparsity_loss(decoder_coeffs, self.decoder_alpha) if self.options["coeff_architecture"] != "GVAR" else torch.tensor(0.0)
+        loss_prev_coeffs    = self._sparsity_loss(prev_coeffs, self.decoder_alpha) if self.options["coeff_architecture"] != "GVAR" else torch.tensor(0.0)   
 
         # === Smoothness losses ===
         loss_encoder_smooth = self._smoothness_loss(encoder_coeffs)
-        loss_decoder_smooth = self._smoothness_loss(decoder_coeffs)
-        loss_prev_smooth    = self._smoothness_loss(prev_coeffs)
+        loss_decoder_smooth = self._smoothness_loss(decoder_coeffs) if self.options["coeff_architecture"] != "GVAR" else torch.tensor(0.0)
+        loss_prev_smooth    = self._smoothness_loss(prev_coeffs) if self.options["coeff_architecture"] != "GVAR" else torch.tensor(0.0) 
 
         # === KL divergence loss ===
-        loss_kl = kl_div
+        loss_kl = kl_div if self.options["coeff_architecture"] != "GVAR" else torch.tensor(0.0)
 
         # === Regularization ===
         reg_lambda = 0.01 * (self.log_lambda_indep ** 2 + self.log_lambda_corr ** 2)

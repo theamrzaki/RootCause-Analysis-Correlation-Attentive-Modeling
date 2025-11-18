@@ -19,7 +19,7 @@ run_experiment_nonlinear_CrGSTA() {
                                 echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model_item"
 
                                 #seed 1 and window size 12 for preprocessing
-                                if [ "$seed" == "7" ] && [ "$window_size_item" == "1" ]; then
+                                if [ "$seed" == "1" ] && [ "$window_size_item" == "1" ]; then
                                     preprocessing_data=1
                                     echo "###----Preprocessing data enabled for the first time----###"
                                 else
@@ -39,7 +39,7 @@ run_experiment_nonlinear_CrGSTA() {
                                     --window_size=$window_size_item \
                                     --num_vars=20 \
                                     --training_aerca=1 \
-                                    --results_csv=RQ_1_nonlinear.csv \
+                                    --results_csv=RQ_1_nonlinear_2.csv \
                                     
                                     --epochs=100 \
                                     --time_freq_representation=mag_phase \
@@ -122,7 +122,7 @@ run_experiment_nonlinear_CrGSTA_deep() {
     done
 }
 # --- Run experiments ---
-run_experiment_nonlinear_CrGSTA_deep
+#run_experiment_nonlinear_CrGSTA_deep
 
 
 
@@ -184,7 +184,7 @@ run_experiment_nonlinear_CrGSTA_fedformer() {
     done
 }
 # --- Run experiments ---
-run_experiment_nonlinear_CrGSTA_fedformer
+#run_experiment_nonlinear_CrGSTA_fedformer
 
 
 
@@ -247,7 +247,7 @@ run_experiment_nonlinear_CrGSTA_iTransformer() {
     done
 }
 # --- Run experiments ---
-run_experiment_nonlinear_CrGSTA_iTransformer
+#run_experiment_nonlinear_CrGSTA_iTransformer
 
 
 
@@ -311,4 +311,133 @@ run_experiment_nonlinear_CrGSTA_baselines() {
     done
 }
 # --- Run experiments ---
-run_experiment_nonlinear_CrGSTA_baselines
+#run_experiment_nonlinear_CrGSTA_baselines
+
+
+
+
+
+
+
+# --- Configurations ---
+seeds=(7 8 9)
+dataset=("nonlinear")
+coeff_architecture="GVAR"
+window_size=(1 3 5 7 10)
+main_model=("aerca_based")
+att_dim=64
+heads=2
+outer_heads=2
+outer_hidden_dim=64
+
+# --- Helper function to run experiments ---
+run_experiment_nonlinear_CrGSTA_GVAR() {
+    for seed in "${seeds[@]}"; do
+        for window_size_item in "${window_size[@]}"; do
+                        for main_model_item in "${main_model[@]}"; do
+                                echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model_item"
+
+                                #seed 1 and window size 12 for preprocessing
+                                if [ "$seed" == "1" ] && [ "$window_size_item" == "1" ]; then
+                                    preprocessing_data=1
+                                    echo "###----Preprocessing data enabled for the first time----###"
+                                else
+                                    preprocessing_data=0
+                                fi
+
+                                cmd="python3 main.py \
+                                    --correlated_KL=0 --mean_std_recon_loss=0 --AMOC_Loss=0 \
+                                    --encoder_alpha=0.5 --decoder_alpha=0.5 --encoder_gamma=0.5 --decoder_gamma=0.5 \
+                                    --encoder_lambda=0.5 --decoder_lambda=0.5 --beta=0.5 \
+
+                                    --main_model=$main_model \
+                                    --coeff_architecture="$coeff_architecture" \
+                                    --preprocessing_data=$preprocessing_data \
+                                    --seed=$seed \
+                                    --dataset=$dataset \
+                                    --window_size=$window_size_item \
+                                    --num_vars=20 \
+                                    --training_aerca=1 \
+                                    --results_csv=RQ_1_nonlinear.csv \
+                                    
+                                    --epochs=100 \
+                                    --time_freq_representation=mag_phase \
+                                    --attention_dim="$att_dim" \
+                                    --num_attention_heads="$heads" \
+                                    --outer_heads_num="$outer_heads" \
+                                    --outer_hidden_dim="$outer_hidden_dim" \
+
+                                    "
+
+                                eval $cmd
+                        done
+            
+        done
+    done
+}
+# --- Run experiments ---
+#run_experiment_nonlinear_CrGSTA_GVAR
+
+
+
+
+
+
+# --- Configurations ---
+seeds=(1 2 3 4 5 6 10 11 12 7 8 9)
+dataset=("nonlinear")
+coeff_architecture="causalrca"
+window_size=(1 3 5 7 10)
+main_model=("aerca_based")
+att_dim=256
+heads=2
+outer_heads=2
+outer_hidden_dim=256
+
+# --- Helper function to run experiments ---
+run_experiment_nonlinear_CrGSTA_CauslRCA() {
+    for seed in "${seeds[@]}"; do
+        for window_size_item in "${window_size[@]}"; do
+                        for main_model_item in "${main_model[@]}"; do
+                                echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model_item"
+
+                                #seed 1 and window size 12 for preprocessing
+                                if [ "$seed" == "1" ] && [ "$window_size_item" == "1" ]; then
+                                    preprocessing_data=1
+                                    echo "###----Preprocessing data enabled for the first time----###"
+                                else
+                                    preprocessing_data=0
+                                fi
+
+                                cmd="python3 main.py \
+                                    --correlated_KL=0 --mean_std_recon_loss=0 --AMOC_Loss=0 \
+                                    --encoder_alpha=0.5 --decoder_alpha=0.5 --encoder_gamma=0.5 --decoder_gamma=0.5 \
+                                    --encoder_lambda=0.5 --decoder_lambda=0.5 --beta=0.5 \
+
+                                    --main_model=$main_model \
+                                    --coeff_architecture="$coeff_architecture" \
+                                    --preprocessing_data=$preprocessing_data \
+                                    --seed=$seed \
+                                    --dataset=$dataset \
+                                    --window_size=$window_size_item \
+                                    --num_vars=20 \
+                                    --training_aerca=1 \
+                                    --results_csv=RQ_1_nonlinear.csv \
+                                    
+                                    --epochs=100 \
+                                    --time_freq_representation=mag_phase \
+                                    --attention_dim="$att_dim" \
+                                    --num_attention_heads="$heads" \
+                                    --outer_heads_num="$outer_heads" \
+                                    --outer_hidden_dim="$outer_hidden_dim" \
+
+                                    "
+
+                                eval $cmd
+                        done
+            
+        done
+    done
+}
+# --- Run experiments ---
+#run_experiment_nonlinear_CrGSTA_CauslRCA

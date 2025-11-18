@@ -321,7 +321,7 @@ seeds=(13 14 15 16 17 18)
 dataset=("msds")
 lrs=("1e-4")
 window_size=(1 2 3 4 5)
-arch="cuts_mlp"
+arch="GVAR"
 main_model="aerca_based"
 attention_dim=256
 heads=2
@@ -372,58 +372,3 @@ run_experiment_Cuts_MLP 1
 
 
 
-
-
-# --- Configurations ---
-seeds=(13 14 15 16 17 18)
-dataset=("msds")
-lrs=("1e-4")
-window_size=(1 2 3 4 5)
-arch="cuts_lstm"
-main_model="aerca_based"
-attention_dim=256
-heads=2
-outer_att_dim_val=256
-outer_heads_val=2
-# --- Helper function to run experiments ---
-run_experiment_Cuts_LSTM() {
-    for seed in "${seeds[@]}"; do
-        for window_size_item in "${window_size[@]}"; do
-                                echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model | coeff_architecture=$arch"
-
-                                cmd="python3 main.py \
-                                        --correlated_KL=0 --mean_std_recon_loss=0 --AMOC_Loss=0 \
-                                        --encoder_alpha=0.5 --decoder_alpha=0.5 --encoder_gamma=0.5 --decoder_gamma=0.5 \
-                                        --encoder_lambda=0.5 --decoder_lambda=0.5 --beta=0.5 \
-
-                                    --main_model=$main_model \
-                                     --coeff_architecture="$arch" \
-                                    --time_freq_representation="mag_phase" \
-
-                                    --lr="$lrs" \
-                                    --seed="$seed" \
-                                    --dataset="$dataset" \
-                                    --window_size="$window_size_item" \
-
-                                    --training_aerca=1 \
-                                    --epochs=1000 \
-                                    --early_stopping=0 \
-                                    --preprocessing_data=0 \
-                                    --results_csv="RQ_1_msds.csv" \
-
-                                    --attention_dim="$attention_dim" \
-                                    --num_attention_heads="$heads" \
-                                    --outer_heads_num="$outer_heads_val" \
-                                    --outer_hidden_dim="$outer_att_dim_val" \
-
-                                       "
-
-                                eval $cmd
-                        
-            
-        done
-    done
-}
-# --- Run experiments ---
-# 2. With AMOC
-run_experiment_Cuts_LSTM 1
