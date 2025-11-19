@@ -137,7 +137,7 @@ run_experiment_SWAT_CrGSTA() {
 }
 # --- Run experiments ---
 # 2. With AMOC
-run_experiment_SWAT_CrGSTA 1
+#run_experiment_SWAT_CrGSTA 1
 
 
 seeds=(7 8 9 10 11 12)
@@ -175,6 +175,125 @@ run_experiment_deepmlp() {
 }
 
 #run_experiment_deepmlp
+
+
+
+
+
+# --- Configurations ---
+seeds=(1 2 3 4 5 6)
+dataset=("swat")
+lrs=("1e-4")
+window_size=(5 1 7 10 12)
+arch="GVAR"
+main_model="aerca_based"
+attention_dim=256
+heads=2
+outer_att_dim_val=256
+outer_heads_val=2
+# --- Helper function to run experiments ---
+run_experiment_SWAT_GVAR() {
+    for seed in "${seeds[@]}"; do
+        for window_size_item in "${window_size[@]}"; do
+                                echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model"
+
+                                cmd="python3 main.py \
+                                        --correlated_KL=0 --mean_std_recon_loss=0 --AMOC_Loss=0 \
+                                        --encoder_alpha=0.5 --decoder_alpha=0.5 --encoder_gamma=0.5 --decoder_gamma=0.5 \
+                                        --encoder_lambda=0.5 --decoder_lambda=0.5 --beta=0.5 \
+
+                                    --main_model=$main_model \
+                                    --coeff_architecture="$arch" \
+                                    --time_freq_representation="mag_phase" \
+
+                                    --lr="$lrs" \
+                                    --seed="$seed" \
+                                    --dataset="$dataset" \
+                                    --window_size="$window_size_item" \
+
+                                    --training_aerca=1 \
+                                    --epochs=1000 \
+                                    --early_stopping=0 \
+                                    --preprocessing_data=0 \
+                                    --combine_method="attention" \
+                                    --results_csv="RQ_1_swat.csv" \
+
+                                    --attention_dim="$attention_dim" \
+                                    --num_attention_heads="$heads" \
+                                    --outer_heads_num="$outer_heads_val" \
+                                    --outer_hidden_dim="$outer_att_dim_val" \
+
+                                       "
+
+                                eval $cmd
+                        
+            
+        done
+    done
+}
+# --- Run experiments ---
+# 2. With AMOC
+run_experiment_SWAT_GVAR 1
+
+
+
+
+
+
+# --- Configurations ---
+seeds=(1 2 3 4 5 6)
+dataset=("swat")
+lrs=("1e-4")
+window_size=(5 1 7 10 12)
+arch="causalrca"
+main_model="aerca_based"
+attention_dim=256
+heads=2
+outer_att_dim_val=256
+outer_heads_val=2
+# --- Helper function to run experiments ---
+run_experiment_SWAT_causalrca() {
+    for seed in "${seeds[@]}"; do
+        for window_size_item in "${window_size[@]}"; do
+                                echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model"
+
+                                cmd="python3 main.py \
+                                        --correlated_KL=0 --mean_std_recon_loss=0 --AMOC_Loss=0 \
+                                        --encoder_alpha=0.5 --decoder_alpha=0.5 --encoder_gamma=0.5 --decoder_gamma=0.5 \
+                                        --encoder_lambda=0.5 --decoder_lambda=0.5 --beta=0.5 \
+
+                                    --main_model=$main_model \
+                                    --coeff_architecture="$arch" \
+                                    --time_freq_representation="mag_phase" \
+
+                                    --lr="$lrs" \
+                                    --seed="$seed" \
+                                    --dataset="$dataset" \
+                                    --window_size="$window_size_item" \
+
+                                    --training_aerca=1 \
+                                    --epochs=1000 \
+                                    --early_stopping=0 \
+                                    --preprocessing_data=0 \
+                                    --combine_method="attention" \
+                                    --results_csv="RQ_1_swat.csv" \
+
+                                    --attention_dim="$attention_dim" \
+                                    --num_attention_heads="$heads" \
+                                    --outer_heads_num="$outer_heads_val" \
+                                    --outer_hidden_dim="$outer_att_dim_val" \
+
+                                       "
+
+                                eval $cmd
+                        
+            
+        done
+    done
+}
+# --- Run experiments ---
+# 2. With AMOC
+run_experiment_SWAT_causalrca 1
 
 #-------------------------------------------------------------------
 #------------------------Lotka Volterra-----------------------------
@@ -423,3 +542,98 @@ run_experiment_Lotka_Volterra_Fedformer() {
 # --- Run experiments ---
 # 2. With AMOC
 #run_experiment_Lotka_Volterra_Fedformer 1
+
+
+
+
+# --- Configurations ---
+seeds=(1 2 3)
+dataset=("lotka_volterra")
+lrs=("1e-4")
+window_size=(1 5 7 10 12)
+coeff_architecture="GVAR"
+main_model=("aerca_based")
+attention_dim=64
+heads=2
+# --- Helper function to run experiments ---
+run_experiment_Lotka_Volterra_GVAR() {
+    for seed in "${seeds[@]}"; do
+        for window_size_item in "${window_size[@]}"; do
+                        for main_model_item in "${main_model[@]}"; do
+                                echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model_item"
+                                if [ "$seed" == "1" ]; then
+                                    preprocessing_data=1
+                                else
+                                    preprocessing_data=0
+                                fi
+                                cmd="python3 main.py \
+                                    --main_model=$main_model \
+                                    --coeff_architecture="$coeff_architecture" \
+                                    --seed=$seed \
+                                    --dataset=$dataset \
+                                    --preprocessing_data=$preprocessing_data \
+                                    --window_size=$window_size_item \
+                                    --attention_dim=$attention_dim \
+                                    --num_attention_heads=$heads \
+                                    --num_vars=40 \
+                                    --training_aerca=1 \
+                                    --epochs=100 \
+                                    --results_csv=RQ_1_lotka_volterra_new.csv"
+
+                                eval $cmd
+                        done
+            
+        done
+    done
+}
+# --- Run experiments ---
+# 2. With AMOC
+run_experiment_Lotka_Volterra_GVAR 1
+
+
+
+
+
+# --- Configurations ---
+seeds=(1 2 3)
+dataset=("lotka_volterra")
+lrs=("1e-4")
+window_size=(1 5 7 10 12)
+coeff_architecture="causalrca"
+main_model=("aerca_based")
+attention_dim=256
+heads=2
+# --- Helper function to run experiments ---
+run_experiment_Lotka_Volterra_causalrca() {
+    for seed in "${seeds[@]}"; do
+        for window_size_item in "${window_size[@]}"; do
+                        for main_model_item in "${main_model[@]}"; do
+                                echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model_item"
+                                if [ "$seed" == "1" ]; then
+                                    preprocessing_data=1
+                                else
+                                    preprocessing_data=0
+                                fi
+                                cmd="python3 main.py \
+                                    --main_model=$main_model \
+                                    --coeff_architecture="$coeff_architecture" \
+                                    --seed=$seed \
+                                    --dataset=$dataset \
+                                    --preprocessing_data=$preprocessing_data \
+                                    --window_size=$window_size_item \
+                                    --attention_dim=$attention_dim \
+                                    --num_attention_heads=$heads \
+                                    --num_vars=40 \
+                                    --training_aerca=1 \
+                                    --epochs=100 \
+                                    --results_csv=RQ_1_lotka_volterra_new.csv"
+
+                                eval $cmd
+                        done
+            
+        done
+    done
+}
+# --- Run experiments ---
+# 2. With AMOC
+run_experiment_Lotka_Volterra_causalrca 1
