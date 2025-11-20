@@ -5,30 +5,124 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "SWAT - AERCA-based",
+            "name": "Lotka (case-study)",
             "type": "debugpy",
             "request": "launch",
             "program": "main.py",
             "args": [
                 "--seed","1",
                 "--main_model","aerca_based",
-                "--dataset_name", "swat",
+                "--dataset_name", "lotka_volterra",
                 "--lr","1e-4",
                 "--window_size","7",
                 "--preprocessing_data","0",
-                "--training_aerca","1",
-                "--coeff_architecture","TemporalGNN_Attention_fourier",
-                "--time_freq_representation","mag_phase",
-                "--num_attention_heads","2",
-                "--attention_dim","256",
-                "--outer_heads_num","2",
-                "--outer_hidden_dim","256",
-                "--correlated_KL","0",
-                "--epochs","1000",
-                "--AMOC_Loss","0",
-                "--mean_std_recon_loss","0"
+                "--training_aerca","0",
+                "--coeff_architecture","TemporalGNN_Attention_crossattn",
+                "--epochs","100",
+                "--num_vars","40"
             ],
             "console": "integratedTerminal"
+        },
+        {
+            "name": "SWAT - AERCA-based",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "main.py",
+            "args": [
+                "--correlated_KL", "0",
+                "--mean_std_recon_loss", "0",
+                "--AMOC_Loss", "0",
+
+                "--encoder_alpha", "0.5",
+                "--decoder_alpha", "0.5",
+                "--encoder_gamma", "0.5",
+                "--decoder_gamma", "0.5",
+                "--encoder_lambda", "0.5",
+                "--decoder_lambda", "0.5",
+                "--beta", "0.5",
+
+                "--main_model", "FEDformer",
+                "--time_freq_representation", "mag_phase",
+
+                "--lr", "1e-4",
+                "--seed", "7",
+                "--dataset", "msds",
+                "--window_size", "1",
+
+                "--training_aerca", "1",
+                "--epochs", "1000",
+                "--early_stopping", "0",
+                "--preprocessing_data", "0",
+                "--results_csv", "RQ_1_msds.csv",
+
+                "--attention_dim", "16",
+                "--num_attention_heads", "2",
+                "--outer_heads_num", "2",
+                "--outer_hidden_dim", "16"
+            ]
+,
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "GVAR",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "main.py",
+            "args": [
+                "--correlated_KL", "0",
+                "--mean_std_recon_loss", "0",
+                "--AMOC_Loss", "0",
+
+                "--encoder_alpha", "0.5",
+                "--decoder_alpha", "0.5",
+                "--encoder_gamma", "0.5",
+                "--decoder_gamma", "0.5",
+                "--encoder_lambda", "0.5",
+                "--decoder_lambda", "0.5",
+                "--beta", "0.5",
+                
+                "--coeff_architecture", "GVAR",
+                "--main_model", "aerca_based",
+                "--time_freq_representation", "mag_phase",
+
+                "--lr", "1e-4",
+                "--seed", "7",
+                "--dataset", "msds",
+                "--window_size", "2",
+
+                "--training_aerca", "1",
+                "--epochs", "1000",
+                "--early_stopping", "0",
+                "--preprocessing_data", "0",
+                "--results_csv", "RQ_1_msds.csv",
+
+                "--attention_dim", "16",
+                "--num_attention_heads", "2",
+                "--outer_heads_num", "2",
+                "--outer_hidden_dim", "16"
+            ]
+,
+            "console": "integratedTerminal"
+        },
+         {
+            "name": "case styudy lotka volterra",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "main.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--main_model", "aerca_based",
+                "--seed", "10",
+                "--coeff_architecture", "TemporalGNN_Attention_crossattn",
+                "--dataset", "msds",
+                "--preprocessing_data", "0",
+                "--epochs", "100",
+                "--window_size", "7",
+                
+                "--training_aerca", "1",
+                "--results_csv", "RQ_casestudy.csv"
+            ]
+
         },
         {
             "name": "iTransformer",

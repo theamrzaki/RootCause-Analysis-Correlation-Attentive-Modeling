@@ -85,16 +85,16 @@ run_experiment_SWAT_iTransformer() {
 
 
 # --- Configurations ---
-seeds=(7 8 9 10 11 12)
-dataset=("msds")
+seeds=(1 2 3 4 5 6)
+dataset=("swat")
 lrs=("1e-4")
-window_size=(1 2 3 4 5)
+window_size=(5 1 7 10 12)
 arch="TemporalGNN_Attention_crossattn"
 main_model="aerca_based"
-attention_dim=16
-heads=2
-outer_att_dim_val=16
-outer_heads_val=2
+attention_dim=256
+heads=1
+outer_att_dim_val=256
+outer_heads_val=1
 # --- Helper function to run experiments ---
 run_experiment_SWAT_CrGSTA() {
     for seed in "${seeds[@]}"; do
@@ -120,7 +120,7 @@ run_experiment_SWAT_CrGSTA() {
                                     --early_stopping=0 \
                                     --preprocessing_data=0 \
                                     --combine_method="attention" \
-                                    --results_csv="RQ_1_msds.csv" \
+                                    --results_csv="RQ_1_swat.csv" \
 
                                     --attention_dim="$attention_dim" \
                                     --num_attention_heads="$heads" \
@@ -137,7 +137,7 @@ run_experiment_SWAT_CrGSTA() {
 }
 # --- Run experiments ---
 # 2. With AMOC
-#run_experiment_SWAT_CrGSTA 1
+run_experiment_SWAT_CrGSTA 1
 
 
 seeds=(7 8 9 10 11 12)
@@ -233,7 +233,7 @@ run_experiment_SWAT_GVAR() {
 }
 # --- Run experiments ---
 # 2. With AMOC
-run_experiment_SWAT_GVAR 1
+#run_experiment_SWAT_GVAR 1
 
 
 
@@ -293,7 +293,7 @@ run_experiment_SWAT_causalrca() {
 }
 # --- Run experiments ---
 # 2. With AMOC
-run_experiment_SWAT_causalrca 1
+#run_experiment_SWAT_causalrca 1
 
 #-------------------------------------------------------------------
 #------------------------Lotka Volterra-----------------------------
@@ -588,7 +588,7 @@ run_experiment_Lotka_Volterra_GVAR() {
 }
 # --- Run experiments ---
 # 2. With AMOC
-run_experiment_Lotka_Volterra_GVAR 1
+#run_experiment_Lotka_Volterra_GVAR 1
 
 
 
@@ -636,4 +636,4 @@ run_experiment_Lotka_Volterra_causalrca() {
 }
 # --- Run experiments ---
 # 2. With AMOC
-run_experiment_Lotka_Volterra_causalrca 1
+#run_experiment_Lotka_Volterra_causalrca 1
