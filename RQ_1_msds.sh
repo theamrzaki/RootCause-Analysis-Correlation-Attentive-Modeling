@@ -317,7 +317,7 @@ run_experiment_SWAT_CausalRCA() {
 
 
 # --- Configurations ---
-seeds=(13 14 15 16 17 18)
+seeds=(14 15 16 17 18)
 dataset=("msds")
 lrs=("1e-4")
 window_size=(1 2 3 4 5)
