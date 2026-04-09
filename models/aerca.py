@@ -69,7 +69,7 @@ class AERCA(nn.Module):
             self._log_and_print('Number of parameters in encoder: {}', self._count_parameters(self.encoder))
             self.total_params = (self._count_parameters(self.encoder)  )
 
-        if(self.options["coeff_architecture"] == "deep_mlp"):
+        if(self.options["coeff_architecture"] in ["deep_mlp"]):
             self.decoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, args=options, device=device).to(device)
             self.decoder_prev = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, args=options, device=device).to(device)
             self._log_and_print('Number of parameters in encoder: {}', self._count_parameters(self.encoder))
@@ -79,50 +79,65 @@ class AERCA(nn.Module):
                                  self._count_parameters(self.decoder) +
                                  self._count_parameters(self.decoder_prev)  )
             
-        elif(self.options["coeff_architecture"] in ["TemporalGNN_Attention", "TemporalGNN_Attention_fourier", "TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced","cuts_mlp","cuts_lstm"]):
+        elif(self.options["coeff_architecture"] in ["TemporalGNN_Attention", "TemporalGNN_Attention_fourier", "TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced","cuts_mlp","cuts_lstm","vlinear"]):
             # --- Efficient attention-based decoder layers ---
             hidden_dim_small = min(hidden_layer_size, 64)  # smaller hidden dim to reduce parameters
-            rank = 1                 # low-rank for coefficient matrices
+            self.rank = 8                 # low-rank for coefficient matrices
 
             self.decoding_input_proj = nn.Linear(num_vars, hidden_dim_small).to(device)
 
-            self.decoding_attn = nn.MultiheadAttention(
-                embed_dim=hidden_dim_small, num_heads=2, batch_first=True
-            ).to(device)
+            #self.decoding_attn = nn.MultiheadAttention(
+            #    embed_dim=hidden_dim_small, num_heads=2, batch_first=True
+            #).to(device)
 
             self.decoding_norm = nn.LayerNorm(hidden_dim_small).to(device)
 
-            self.temporal_attn_decoder = nn.MultiheadAttention(
-                embed_dim=hidden_dim_small, num_heads=1, batch_first=True
-            ).to(device)
+            #self.temporal_attn_decoder = nn.MultiheadAttention(
+            #    embed_dim=hidden_dim_small, num_heads=1, batch_first=True
+            #).to(device)
 
             self.decoding_output_proj = nn.Linear(hidden_dim_small, num_vars).to(device)
 
-            self.decoding_coeff_proj = nn.Linear(hidden_dim_small, 2 * num_vars * rank).to(device)  
+            self.decoding_coeff_proj = nn.Linear(hidden_dim_small, 2 * num_vars * self.rank).to(device)  
+
+
             # produces U and V for low-rank coeffs
 
-            self.coeff_proj_decoder = nn.Linear(hidden_dim_small, 2 * num_vars * rank).to(device)   
+            self.coeff_proj_decoder = nn.Linear(hidden_dim_small, 2 * num_vars * self.rank).to(device)   
             # for prev_coeffs
+
+            order = window_size
+            self.orth_transformer = options.get('orth_transformer') 
+            self.vf = nn.Sequential(
+                nn.Linear(hidden_dim_small, hidden_dim_small * 2),
+                nn.ReLU(),
+                nn.Linear(hidden_dim_small * 2, order) 
+            ).to(device)
+            # 'order' is the size of the orthogonal coefficients (in your case, 1)
+            self.decoding_input_proj = nn.Linear(num_vars, hidden_dim_small).to(device)
+
+            # This projects the hidden representation back to 1 value per sensor
+            self.decoding_output_proj = nn.Linear(hidden_dim_small, 1).to(device)
 
             #self._log_and_print('Number of parameters in encoder: {}', self._count_parameters(self.encoder))
             self._log_and_print('Number of parameters in decoding_input_proj: {}', self._count_parameters(self.decoding_input_proj))
-            self._log_and_print('Number of parameters in decoding_attn: {}', self._count_parameters(self.decoding_attn))
+            #self._log_and_print('Number of parameters in decoding_attn: {}', self._count_parameters(self.decoding_attn))
             self._log_and_print('Number of parameters in decoding_output_proj: {}', self._count_parameters(self.decoding_output_proj))
             self._log_and_print('Number of parameters in decoding_coeff_proj: {}', self._count_parameters(self.decoding_coeff_proj))
             self._log_and_print('Number of parameters in decoding_norm: {}', self._count_parameters(self.decoding_norm))
-            self._log_and_print('Number of parameters in temporal_attn_decoder: {}', self._count_parameters(self.temporal_attn_decoder))
+            #self._log_and_print('Number of parameters in temporal_attn_decoder: {}', self._count_parameters(self.temporal_attn_decoder))
             self._log_and_print('Number of parameters in coeff_proj_decoder: {}', self._count_parameters(self.coeff_proj_decoder))
 
 
             self.total_params = (self._count_parameters(self.encoder) +
                                 self._count_parameters(self.decoding_input_proj) +
-                                self._count_parameters(self.decoding_attn) +
+                                #self._count_parameters(self.decoding_attn) +
                                 self._count_parameters(self.decoding_output_proj) +
                                 self._count_parameters(self.decoding_coeff_proj) +
                                 self._count_parameters(self.decoding_norm)+
-                                self._count_parameters(self.temporal_attn_decoder) +
-                                self._count_parameters(self.coeff_proj_decoder))
-        
+                                #self._count_parameters(self.temporal_attn_decoder) +
+                                self._count_parameters(self.coeff_proj_decoder) +
+                                self._count_parameters(self.vf)  )
         
         elif(self.options["coeff_architecture"] == "causalrca"):
             from models.causalrca import MLPDecoder
@@ -198,13 +213,13 @@ class AERCA(nn.Module):
         self.writer = SummaryWriter(log_dir=os.path.join(self.save_dir, "runs", self.local_model_name))
         
         # if total_params > 100 million stop training and go to write_results function
-        if self.total_params > 100_000_000:
-            self._log_and_print('Total parameters exceed 100 million, stopping training.')
-            ac_at = [0, 0, 0, 0]
-            k_at_step_all = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-            write_results(self.options, self.local_model_name, ac_at, k_at_step_all, self.total_params, self.options.get("results_csv", 'RQ_swat_windows.csv'))
-            #stop the whole python program
-            os._exit(1)
+        #if self.total_params > 100_000_000:
+        #    self._log_and_print('Total parameters exceed 100 million, stopping training.')
+        #    ac_at = [0, 0, 0, 0]
+        #    k_at_step_all = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        #    write_results(self.options, self.local_model_name, ac_at, k_at_step_all, self.total_params, self.options.get("results_csv", #'RQ_swat_windows.csv'))
+        #    #stop the whole python program
+        #    os._exit(1)
         
     def _count_parameters(self, model):
         num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -409,17 +424,21 @@ class AERCA(nn.Module):
         rank = self.decoding_coeff_proj.out_features // (2 * p)  # dynamically recover rank
 
         # --- Sliding windows ---
+        ##us = self.orth_transformer(us.unsqueeze(1)) 
         u_windows = sliding_window_view_torch(us, self.window_size + 1)
         u_winds = u_windows[:, :-1, :]  # (B, window, p)
         u_next = u_windows[:, -1, :]    # (B, p)
 
         # --- Project and attend ---
         u_proj = self.decoding_input_proj(u_winds)                   # (B, window, hidden_dim)
-        attn_out, _ = self.decoding_attn(u_proj, u_proj, u_proj)    # (B, window, hidden_dim)
-        attn_norm = self.decoding_norm(attn_out)
+        #attn_out, _ = self.decoding_attn(u_proj, u_proj, u_proj)    # (B, window, hidden_dim)
+        #attn_norm = self.decoding_norm(attn_out)
+        attn_norm = self.decoding_norm(u_proj)
 
         query = attn_norm[:, -1:, :]                                   # (B, 1, hidden_dim)
-        temp_out, _ = self.temporal_attn_decoder(query, attn_norm, attn_norm)  # (B, 1, hidden_dim)
+        #replace temporal attn decoder with simple max pooling over the window dimension
+        #temp_out, _ = self.temporal_attn_decoder(query, attn_norm, attn_norm)  # (B, 1, hidden_dim)
+        temp_out = torch.max(attn_norm, dim=1, keepdim=True)[0]  # (B, 1, hidden_dim)
 
         # --- Predictions ---
         preds = self.decoding_output_proj(temp_out).squeeze(1)        # (B, p)
@@ -433,9 +452,12 @@ class AERCA(nn.Module):
 
         # --- Previous coefficients from winds ---
         winds_proj = self.decoding_input_proj(winds)
-        winds_attn, _ = self.decoding_attn(winds_proj, winds_proj, winds_proj)
-        winds_norm = self.decoding_norm(winds_attn)
-        winds_temp, _ = self.temporal_attn_decoder(winds_norm[:, -1:, :], winds_norm, winds_norm)
+        #winds_attn, _ = self.decoding_attn(winds_proj, winds_proj, winds_proj)
+        #winds_norm = self.decoding_norm(winds_attn)
+        winds_norm = self.decoding_norm(winds_proj)
+        # replace temporal attn decoder with simple max pooling over the window dimension
+        #winds_temp, _ = self.temporal_attn_decoder(winds_norm[:, -1:, :], winds_norm, winds_norm)
+        winds_temp = torch.max(winds_norm, dim=1, keepdim=True)[0]  # (B, 1, hidden_dim)
 
         prev_flat = self.coeff_proj_decoder(winds_temp)              # (B, 1, 2 * p * rank)
         U_prev, V_prev = torch.split(prev_flat, p * rank, dim=-1)
@@ -665,9 +687,9 @@ class AERCA(nn.Module):
         return nexts_hat, coeffs, prev_coeffs
 
     def decoding(self, us, winds, add_u=True,aux_vars=None):
-        if self.options["coeff_architecture"] == "deep_mlp":
+        if self.options["coeff_architecture"] in ["deep_mlp"]:
             return self.decoding_2decoders(us, winds, add_u=add_u)
-        elif self.options["coeff_architecture"] in ["TemporalGNN_Attention", "TemporalGNN_Attention_fourier", "TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced","cuts_mlp","cuts_lstm"]:
+        elif self.options["coeff_architecture"] in ["TemporalGNN_Attention", "TemporalGNN_Attention_fourier", "TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced","cuts_mlp","cuts_lstm","vlinear"]:
             return self.decoding_1decoder(us, winds, add_u=add_u)
         elif self.options["coeff_architecture"] == "causalrca":
             return self.decoding_causalrca(us, winds, add_u=add_u, aux_vars=aux_vars)
