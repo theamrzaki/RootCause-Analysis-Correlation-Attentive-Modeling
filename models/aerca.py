@@ -278,6 +278,7 @@ class AERCA(nn.Module):
             """
         except:
             #when testing & for lotka volterra training
+            # (3, 38)
             windows = sliding_window_view(xs, (self.window_size + 1, self.num_vars))[:, 0, :, :]
             winds = windows[:, :-1, :]
             nexts = windows[:, -1, :]
@@ -1230,9 +1231,9 @@ class AERCA(nn.Module):
         if self.options["dataset_name"] in ["msds","lotka_volterra","lorenz96","nonlinear"]:
             self._training_msds_lotka_swat_original(xs)
         elif self.options["dataset_name"] in ["swat","smap","smd"]:
-            if self.options["coeff_architecture"] == "deep_mlp":
-                self._training_msds_lotka_swat_original(xs)
-            else:
+            #if self.options["coeff_architecture"] == "deep_mlp":
+            #    self._training_msds_lotka_swat_original(xs)
+            #else:
                 self._training_batches_swat(xs)
         else:
             raise ValueError(f"Unknown dataset {self.options['dataset']} for training")
@@ -1266,10 +1267,15 @@ class AERCA(nn.Module):
 
             # --- Training loop with batching ---
             for i in range(0, len(xs_train), batch_size):
+                # xs_train shape
+                # swat = (131, 1000, 51)
+                # smd = (56672, 10, 38)
                 batch_windows = xs_train[i:i+batch_size]
                 x_batch = torch.tensor(batch_windows, dtype=torch.float32, device=self.device)  # (B, W, P)
 
                 self.optimizer.zero_grad()
+                #SWaT = torch.Size([131, 1000, 51])
+                #SMD = torch.Size([1000, 10, 38])
                 loss, _ = self._training_step(x_batch)
                 loss.backward()
                 self.optimizer.step()

@@ -3,17 +3,17 @@ import os
 
 def create_arg_parser():
     """
-    Creates and returns the argument parser for the smd dataset.
+    Creates and returns the argument parser for the SWaT dataset.
 
     Returns:
-        argparse.ArgumentParser: The argument parser for the smd dataset.
+        argparse.ArgumentParser: The argument parser for the SMD dataset.
     """
-    parser = argparse.ArgumentParser(description='smd')
+    parser = argparse.ArgumentParser(description='SMD')
 
     # Dataset arguments
     parser.add_argument('--preprocessing_data', type=int, default=1, help='Flag for preprocessing data (default: 1)')
-    parser.add_argument('--data_dir', type=str, default=os.path.join(os.getcwd(), 'datasets', 'smap'), help='Data directory (default: ./datasets/smd)')
-    parser.add_argument('--num_vars', type=int, default=55, help='Number of variables (default: 51)')
+    parser.add_argument('--data_dir', type=str, default=os.path.join(os.getcwd(), 'datasets', 'smd'), help='Data directory (default: ./datasets/smd)')
+    parser.add_argument('--num_vars', type=int, default=38, help='Number of variables (default: 38)')
     parser.add_argument('--causal_quantile', type=float, default=0.70, help='Causal quantile (default: 0.70)')
     parser.add_argument('--shuffle', type=int, default=1, help='Flag for shuffling data (default: 1)')
     parser.add_argument('--main_model', type=str, default='aerca', help='Main model to use (default: aerca)')
@@ -21,7 +21,7 @@ def create_arg_parser():
     # Meta arguments
     parser.add_argument('--seed', type=int, default=4, help='Random seed (default: 4)')
     parser.add_argument('--device', type=str, default='cuda', help='Device to use (default: cuda)')
-    parser.add_argument('--dataset_name', type=str, default='smap', help='Dataset name (default: smd)')
+    parser.add_argument('--dataset_name', type=str, default='smd', help='Dataset name (default: smd)')
 
     # AERCA arguments
     parser.add_argument('--window_size', type=int, default=1, help='Window size (default: 1)')

@@ -45,48 +45,38 @@ class SMD:
         return label_matrix
 
 
-    def process_abnormal(self, test_df, global_labels, root_cause_labels, target_len):
+    def process_abnormal(self, test_df, global_labels, root_cause_labels, lookback, lookahead):
         test_x_lst = []
         test_label_lst = []
-        stride = 10
-        # For 3 steps, we need a 30-row raw window
-        total_raw_needed = target_len * stride 
         
+        # We use a stride of 1 to ensure we don't miss anything
         anomaly_indices = np.where(global_labels == 1)[0]
+        
         if len(anomaly_indices) > 0:
+            # Group contiguous anomaly timestamps
             events = np.split(anomaly_indices, np.where(np.diff(anomaly_indices) > 1)[0] + 1)
             
             for event in events:
-                start_idx_event = event[0]
+                # The exact moment the anomaly starts
+                onset = event[0]
                 
-                # SWaT Logic: 2/3 lookback (20 rows), 1/3 lookahead (10 rows)
-                # We align raw_start so that the STRIDE hits the start_idx_event exactly
-                raw_start = int(start_idx_event - 20)
-                raw_end = raw_start + total_raw_needed
+                # THE ANCHOR:
+                # raw_start is placed so that the 'onset' is the first index 
+                # of the lookahead portion.
+                raw_start = onset - lookback
+                raw_end = onset + lookahead
                 
+                # Boundary check
                 if raw_start >= 0 and raw_end <= len(test_df):
-                    slice_x = test_df.values[raw_start:raw_end:stride]
-                    slice_y = root_cause_labels[raw_start:raw_end:stride]
+                    slice_x = test_df.values[raw_start:raw_end]
+                    slice_y = root_cause_labels[raw_start:raw_end]
                     
-                    # --- THE FIX FOR SMD ---
-                    # If this specific slice missed the root cause, shift the window 
-                    # forward slightly until the stride lands on a '1'
-                    shift = 0
-                    while not np.any(slice_y == 1) and shift < stride:
-                        shift += 1
-                        temp_start = raw_start + shift
-                        temp_end = temp_start + total_raw_needed
-                        if temp_end <= len(test_df):
-                            slice_y = root_cause_labels[temp_start:temp_end:stride]
-                            if np.any(slice_y == 1):
-                                raw_start, raw_end = temp_start, temp_end
-                                slice_x = test_df.values[raw_start:raw_end:stride]
-                                break
-
-                    if len(slice_x) == target_len and np.any(slice_y == 1):
+                    # Check if this specific window actually contains root cause labels
+                    # (This prevents empty labels if the global label is 1 but root cause isn't yet)
+                    if len(slice_x) == (lookback + lookahead) and np.any(slice_y[lookback:] == 1):
                         test_x_lst.append(slice_x)
                         test_label_lst.append(slice_y)
-                            
+                                
         return test_x_lst, test_label_lst
 
     def process_normal(self, combined_train, target_len):
@@ -112,7 +102,6 @@ class SMD:
         all_test_x = []
         all_test_y = []
         normal_block_len = 1000 
-        abnormal_target_len = 3
 
         for m_file in machines:
             # 1. Load raw data
@@ -126,7 +115,16 @@ class SMD:
             )
 
             # 3. Call Abnormal Processor
-            m_test_x, m_test_y = self.process_abnormal(test_df, global_labels, root_cause_labels, abnormal_target_len)
+            #m_test_x, m_test_y = self.process_abnormal(test_df, global_labels, root_cause_labels, window_size=self.window_size)
+            # We give it history (lookback), but we only evaluate a small, 
+            # concentrated window where the anomaly actually happens (lookahead).
+            m_test_x, m_test_y = self.process_abnormal(
+                test_df, 
+                global_labels, 
+                root_cause_labels, 
+                lookback=self.window_size * 2, # Keep history relative to window
+                lookahead=5                   # Fixed small window for SMD accuracy
+            )
             all_test_x.extend(m_test_x)
             all_test_y.extend(m_test_y)
 
@@ -146,9 +144,7 @@ class SMD:
         # 7. Final Storage
         self.data_dict['x_n_list'] = np.array(x_n_list)
         test_x_transformed = [scaler.transform(x) for x in all_test_x]
-        # (281, 1000, 38)
         self.data_dict['x_ab_list'] = np.array(test_x_transformed)
-        # (281, 1000, 38)
         self.data_dict['label_list'] = np.array(all_test_y)
         
         # Shuffle train data
