@@ -84,8 +84,6 @@ class AERCA(nn.Module):
             hidden_dim_small = min(hidden_layer_size, 64)  # smaller hidden dim to reduce parameters
             self.rank = 8                 # low-rank for coefficient matrices
 
-            self.decoding_input_proj = nn.Linear(num_vars, hidden_dim_small).to(device)
-
             #self.decoding_attn = nn.MultiheadAttention(
             #    embed_dim=hidden_dim_small, num_heads=2, batch_first=True
             #).to(device)
@@ -266,7 +264,11 @@ class AERCA(nn.Module):
     def encoding(self, xs):
         #
         try:
-            windows = self.encoding_batch(xs.cpu().numpy())
+            if type(xs) == np.ndarray:
+                pass
+            else:
+                xs = xs.cpu().numpy()
+            windows = self.encoding_batch(xs)
             winds = windows[:, 0, :-1, :]  # only the first window as it is much faster and enough to be trained upon
             nexts = windows[:, 0, -1, :]
             """
@@ -414,7 +416,7 @@ class AERCA(nn.Module):
 
         return nexts_hat, coeffs, prev_coeffs
 
-    def decoding_1decoder(self, us, winds, add_u=True, attn_dropout=0.1, residual_alpha=0.9):
+    def decoding_1decoder___(self, us, winds, add_u=True, attn_dropout=0.1, residual_alpha=0.9):
         """
         Attention-based decoding replacing dual decoders.
         us: latent states (B, T, num_vars)
@@ -471,6 +473,63 @@ class AERCA(nn.Module):
 
         return nexts_hat, coeffs, prev_coeffs
     
+    def decoding_1decoder(self, us, winds, add_u=True, attn_dropout=0.1, residual_alpha=0.9):
+        # us: (B, 2*p) -> [residuals, surprise]
+        # winds: (B, T, p)
+        
+        batch_size, dual_p = us.shape
+        p = self.num_vars # 51
+        # Recover rank based on actual p (51), not dual_p (102)
+        rank = self.decoding_coeff_proj.out_features // (2 * p) 
+
+        # --- Sliding windows ---
+        u_windows = sliding_window_view_torch(us, self.window_size + 1)
+        u_winds = u_windows[:, :-1, :]  # (B, window, 102)
+        
+        # --- MINIMUM CHANGE 1: Slice u_next to get only the 51 residuals ---
+        # We add only the 'physics' back to nexts_hat, not the 'surprise'
+        u_next = u_windows[:, -1, :][:, :p] # (B, p)
+
+        # --- Project and attend ---
+        # Note: self.decoding_input_proj MUST be nn.Linear(102, hidden_dim)
+        u_proj = self.decoding_input_proj(u_winds) 
+        attn_norm = self.decoding_norm(u_proj)
+        temp_out = torch.max(attn_norm, dim=1, keepdim=True)[0] 
+
+        # --- Predictions ---
+        preds = self.decoding_output_proj(temp_out).squeeze(1) 
+
+        # --- Low-rank coefficient reconstruction ---
+        coeff_flat = self.decoding_coeff_proj(temp_out) 
+        U, V = torch.split(coeff_flat, p * rank, dim=-1)
+        U = U.view(-1, 1, p, rank)
+        V = V.view(-1, 1, p, rank)
+        coeffs = torch.matmul(U, V.transpose(-2, -1))
+
+        # --- Previous coefficients from winds ---
+        # --- MINIMUM CHANGE 2: Ensure winds_proj uses the correct weights ---
+        # Since self.decoding_input_proj is now 102-dim, we must pad or 
+        # use a separate projection for the 51-dim 'winds'.
+        # Easiest way: zero-pad winds to 102 to match the projection layer
+        #winds_padded = torch.cat([winds, torch.zeros_like(winds)], dim=-1)
+        #winds_proj = self.decoding_input_proj(winds_padded)
+        winds_proj = self.decoding_input_proj(winds)
+        
+        winds_norm = self.decoding_norm(winds_proj)
+        winds_temp = torch.max(winds_norm, dim=1, keepdim=True)[0] 
+
+        prev_flat = self.coeff_proj_decoder(winds_temp) 
+        U_prev, V_prev = torch.split(prev_flat, p * rank, dim=-1)
+        U_prev = U_prev.view(-1, 1, p, rank)
+        V_prev = V_prev.view(-1, 1, p, rank)
+        prev_coeffs = torch.matmul(U_prev, V_prev.transpose(-2, -1)) 
+        prev_preds = self.decoding_output_proj(winds_temp).squeeze(1) 
+
+        # --- Final next-step prediction ---
+        nexts_hat = preds + u_next + prev_preds if add_u else preds + prev_preds
+
+        return nexts_hat, coeffs, prev_coeffs
+
     def decoding_causalrca__(self, us, winds, add_u=True, aux_vars=None):
         """
         MLP-based CausalRCA decoding.
@@ -763,7 +822,18 @@ class AERCA(nn.Module):
             decoder_coeffs = torch.tensor([])
             prev_coeffs = torch.tensor([])
         else:
+            # 1. Expand kl_div to [B, 51] so each sensor "knows" the global penalty
+            #kl_expanded = kl_div.view(-1, 1).expand(-1, self.num_vars) 
+
+            # 2. Concatenate
+            #us_causal = torch.cat([us, kl_expanded], dim=-1) # [B, 102]
+
+            u_surprise = torch.pow(us, 2) # Per-element KL signal
+            us_causal = torch.cat([us, u_surprise], dim=-1) # [B, 102]
+
+            #nexts_hat, decoder_coeffs, prev_coeffs = self.decoding(us_causal, winds, add_u=add_u)
             nexts_hat, decoder_coeffs, prev_coeffs = self.decoding(us, winds, add_u=add_u)
+        attn_weights = winds #TODO, clean it afterwards
         return nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us, attn_weights
     
     
@@ -827,8 +897,48 @@ class AERCA(nn.Module):
         nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us, attns = self.forward(x, add_u=add_u)
 
         # === Full reconstruction loss ===
-        loss_full_recon = self.mse_loss(nexts_hat, nexts)
-        logging.info('Reconstruction loss (full): %s', loss_full_recon.item())
+        # 2. Compute "Deterioration" (Per-Variable surprise)
+        # Instead of just MSE, we treat this as the deterioration from Phase 1.
+        # If your model was pre-trained on normal data, this MSE represents 
+        # the 'likelihood deterioration' the paper mentions.
+        per_var_deterioration = (nexts_hat - nexts).pow(2) # [Batch, Vars]
+        
+        # 3. Predict the Intervention Target (The Paper's Heuristic)
+        # We find the variable Xi showing the greatest deterioration
+        with torch.no_grad():
+            # Mean deterioration across the batch to find the 'Winner'
+            # target_prob shape: [Vars]
+            target_scores = per_var_deterioration.mean(dim=0)
+            tau_ident = self.options.get("sdi_temperature", 0.1)
+            # Softmax identifies the root cause index (AC@1 focus)
+            target_identity = torch.softmax(target_scores / tau_ident, dim=-1)
+            predicted_root_cause = torch.argmax(target_identity)
+
+        # 4. Masked Causal Loss (The REPLACEMENT for loss_full_recon)
+        # "The contribution to the total log-likelihood of a sample coming from 
+        # the intervened variable Xi is masked."
+        
+        # Create a binary mask that is 0 for the root cause and 1 for everyone else
+        mask = torch.ones_like(per_var_deterioration)
+        mask[:, predicted_root_cause] = 0.0
+        
+        # The new loss signal: Minimize the error of the *rest* of the system 
+        # given the intervention on the target.
+        loss_causal_signal = (per_var_deterioration * mask).sum(dim=-1).mean()
+        
+        # 5. SDI Competition Penalty (From the paper's Phase 2 scoring)
+        # This forces the encoder_coeffs to align with the deterioration
+        p_comp = encoder_coeffs[-per_var_deterioration.size(0):, -1, :, :].sum(dim=-1)
+        p_comp = torch.softmax(p_comp / tau_ident, dim=-1)
+        
+        # Modular alignment: The model's attribution (p_comp) must match the deterioration
+        loss_sdi_modular = (p_comp * per_var_deterioration).sum(dim=-1).mean()
+
+        # Replace your old loss_recon with this causal-aware signal
+        loss_full_recon = loss_causal_signal + self.options.get("lambda_sdi", 1.0) * loss_sdi_modular
+
+        #loss_full_recon = self.mse_loss(nexts_hat, nexts)
+        #logging.info('Reconstruction loss (full): %s', loss_full_recon.item())
 
         # === Mean/Std reconstruction loss (optional) ===
         if self.options.get("mean_std_recon_loss", False):
@@ -966,6 +1076,23 @@ class AERCA(nn.Module):
         else:
             loss_aug_total = torch.tensor(0.0, device=self.device)
 
+
+        # --- Velocity (Derivative) Loss ---
+        # nexts: [B, P] (current actual)
+        # winds[:, -1, :]: [B, P] (previous actual)
+        # nexts_hat: [B, P] (predicted)
+        winds = attns #TODO clearn it afterwards
+        actual_velocity = nexts - winds[:, -1, :].squeeze(1) 
+        predicted_velocity = nexts_hat - winds[:, -1, :].squeeze(1)
+
+        loss_velocity = self.mse_loss(predicted_velocity, actual_velocity)
+        logging.info('Velocity reconstruction loss: %s', loss_velocity.item())
+
+        # Add a hyperparameter to control the weight of velocity
+        lambda_velocity = self.options.get("lambda_velocity", 0.1)
+
+
+
         # === Total loss ===
         loss = (loss_recon +
                 self.encoder_lambda * loss_encoder_coeffs +
@@ -1102,7 +1229,7 @@ class AERCA(nn.Module):
     def _training(self, xs):
         if self.options["dataset_name"] in ["msds","lotka_volterra","lorenz96","nonlinear"]:
             self._training_msds_lotka_swat_original(xs)
-        elif self.options["dataset_name"] in ["swat","smap"]:
+        elif self.options["dataset_name"] in ["swat","smap","smd"]:
             if self.options["coeff_architecture"] == "deep_mlp":
                 self._training_msds_lotka_swat_original(xs)
             else:

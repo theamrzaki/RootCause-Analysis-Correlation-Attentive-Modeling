@@ -1,8 +1,11 @@
+from torch import nn
+import torch
 import pandas as pd
 import numpy as np
 import os
 from sklearn.preprocessing import StandardScaler
 from datetime import datetime
+from layers.vlinear_arch import OrthTransform # Assuming you save the previous code there
 
 class SWaT:
     def __init__(self, options):
@@ -178,10 +181,46 @@ class SWaT:
         np.save(os.path.join(self.data_dir, 'x_ab_list'), self.data_dict['x_ab_list'])
         np.save(os.path.join(self.data_dir, 'label_list'), self.data_dict['label_list'])
 
+    def apply_orthogonal_transform(self, save_path, device='cpu'):
+        """
+        Projects windowed data into the orthogonal domain using the Q matrix.
+        """
+        # Ensure the save directory for the matrix exists
+        os.makedirs(save_path, exist_ok=True)
+
+        # 1. Initialize the Transform 
+        # It will use self.data_dict['x_n_list'] to compute Q if not saved
+        self.orth_transformer = OrthTransform(
+            dataset_obj=self, 
+            time_lag=self.window_size,
+            save_path=save_path, 
+            device=device
+        )
+        
+        # 2. Transform Normal Data
+        x_n_tensor = torch.from_numpy(self.data_dict['x_n_list']).float().to(device)
+        with torch.no_grad():
+            self.data_dict['x_n_orth'] = self.orth_transformer(x_n_tensor).cpu().numpy()
+        
+        # 3. Transform Abnormal (Attack) Data
+        x_ab_tensor = torch.from_numpy(self.data_dict['x_ab_list']).float().to(device)
+        with torch.no_grad():
+            self.data_dict['x_ab_orth'] = self.orth_transformer(x_ab_tensor).cpu().numpy()
+        
+        print(f"Orthogonal transformation complete. Shape: {self.data_dict['x_n_orth'].shape}")
+        return self.orth_transformer
+
     def load_data(self):
         """
-        Load the processed data arrays from .npy files in the data directory into data_dict.
+        Loads saved .npy files and immediately applies OrthTransform.
         """
-        self.data_dict['x_n_list'] = np.load(os.path.join(self.data_dir, 'x_n_list.npy'), allow_pickle=False)
-        self.data_dict['x_ab_list'] = np.load(os.path.join(self.data_dir, 'x_ab_list.npy'), allow_pickle=True)
-        self.data_dict['label_list'] = np.load(os.path.join(self.data_dir, 'label_list.npy'), allow_pickle=True)
+        # Load standard lists
+        self.data_dict['x_n_list'] = np.load(os.path.join(self.data_dir, 'x_n_list.npy'))
+        self.data_dict['x_ab_list'] = np.load(os.path.join(self.data_dir, 'x_ab_list.npy'))
+        self.data_dict['label_list'] = np.load(os.path.join(self.data_dir, 'label_list.npy'))
+
+        # Define path for the Q matrix specifically
+        orth_matrix_dir = os.path.join(self.data_dir, 'orth_transform_meta')
+        
+        device = 'cpu'
+        return self.apply_orthogonal_transform(save_path=orth_matrix_dir, device=device)

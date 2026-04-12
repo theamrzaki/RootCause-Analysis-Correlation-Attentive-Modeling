@@ -4,8 +4,8 @@ import logging
 import argparse
 import numpy as np
 
-from datasets import linear, lotka_volterra, lorenz96, swat, nonlinear, msds, sock, smap#, wadi
-from args import linear_args, lotka_volterra_args, lorenz96_args, swat_args, msds_args, nonlinear_args, sock_args, smap_args#, wadi_args
+from datasets import linear, lotka_volterra, lorenz96, swat, nonlinear, msds, sock, smd#, wadi
+from args import linear_args, lotka_volterra_args, lorenz96_args, swat_args, msds_args, nonlinear_args, sock_args, smd_args#, wadi_args
 from models import aerca, iTransformer, FEDformer
 from utils import utils
 import warnings
@@ -81,10 +81,10 @@ def main(argv):
             "log_file": "nonlinear.log",
             "use_slice": True
         },
-        "smap": {
-            "args": smap_args.create_arg_parser,
-            "dataset_class": smap.SMAP_RCA,
-            "log_file": "smap.log",
+        "smd": {
+            "args": smd_args.create_arg_parser,
+            "dataset_class": smd.SMD,
+            "log_file": "smd.log",
             "use_slice": False
         }
         #,
@@ -131,9 +131,10 @@ def main(argv):
         print('Preprocessing data: generating and saving new data...')
         data_class.generate_example()
         data_class.save_data()
+        orth_transformer = data_class.load_data()
     else:
         print('Loading existing data...')
-        data_class.load_data()
+        orth_transformer = data_class.load_data()
 
     # Instantiate the iTransformer model using the common set of parameters.
     if options["main_model"] in ["iTransformer","FEDformer"]:
@@ -158,6 +159,7 @@ def main(argv):
         elif options["main_model"] == "FEDformer":
             aerca_model = FEDformer.Model(configs=config, epochs=options['epochs'])
     elif options["main_model"] == "aerca_based":
+        options['orth_transformer'] = orth_transformer
         aerca_model = aerca.AERCA(
             num_vars=options['num_vars'],
             hidden_layer_size=options['hidden_layer_size'],
