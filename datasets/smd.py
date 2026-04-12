@@ -45,14 +45,12 @@ class SMD:
         return label_matrix
 
 
-
     def process_abnormal(self, test_df, global_labels, root_cause_labels, target_len):
         test_x_lst = []
         test_label_lst = []
-        
-        # Stride is 10, so to get target_len timestamps, we need (target_len * 10) raw rows
         stride = 10
-        raw_width = target_len * stride # 10 * 10 = 100
+        # For 3 steps, we need a 30-row raw window
+        total_raw_needed = target_len * stride 
         
         anomaly_indices = np.where(global_labels == 1)[0]
         if len(anomaly_indices) > 0:
@@ -61,18 +59,34 @@ class SMD:
             for event in events:
                 start_idx_event = event[0]
                 
-                # Center the window on the start of the event
-                # 50 rows before, 50 rows after = 100 total raw rows
-                raw_start = int(start_idx_event - (raw_width // 2))
-                raw_end = int(start_idx_event + (raw_width // 2))
+                # SWaT Logic: 2/3 lookback (20 rows), 1/3 lookahead (10 rows)
+                # We align raw_start so that the STRIDE hits the start_idx_event exactly
+                raw_start = int(start_idx_event - 20)
+                raw_end = raw_start + total_raw_needed
                 
                 if raw_start >= 0 and raw_end <= len(test_df):
                     slice_x = test_df.values[raw_start:raw_end:stride]
                     slice_y = root_cause_labels[raw_start:raw_end:stride]
                     
-                    if len(slice_x) == target_len:
+                    # --- THE FIX FOR SMD ---
+                    # If this specific slice missed the root cause, shift the window 
+                    # forward slightly until the stride lands on a '1'
+                    shift = 0
+                    while not np.any(slice_y == 1) and shift < stride:
+                        shift += 1
+                        temp_start = raw_start + shift
+                        temp_end = temp_start + total_raw_needed
+                        if temp_end <= len(test_df):
+                            slice_y = root_cause_labels[temp_start:temp_end:stride]
+                            if np.any(slice_y == 1):
+                                raw_start, raw_end = temp_start, temp_end
+                                slice_x = test_df.values[raw_start:raw_end:stride]
+                                break
+
+                    if len(slice_x) == target_len and np.any(slice_y == 1):
                         test_x_lst.append(slice_x)
                         test_label_lst.append(slice_y)
+                            
         return test_x_lst, test_label_lst
 
     def process_normal(self, combined_train, target_len):
@@ -97,7 +111,8 @@ class SMD:
         all_train_data = []
         all_test_x = []
         all_test_y = []
-        target_len = 10 
+        normal_block_len = 1000 
+        abnormal_target_len = 3
 
         for m_file in machines:
             # 1. Load raw data
@@ -111,12 +126,12 @@ class SMD:
             )
 
             # 3. Call Abnormal Processor
-            m_test_x, m_test_y = self.process_abnormal(test_df, global_labels, root_cause_labels, target_len)
+            m_test_x, m_test_y = self.process_abnormal(test_df, global_labels, root_cause_labels, abnormal_target_len)
             all_test_x.extend(m_test_x)
             all_test_y.extend(m_test_y)
 
             # 4. Collect train data for the Normal Processor
-            all_train_data.append(train_df.values)
+            all_train_data.append(train_df.values[::3])
 
         # 5. Scaling
         scaler = StandardScaler()
@@ -126,12 +141,14 @@ class SMD:
         # 6. Call Normal Processor
         # We transform the combined data first, then segment it
         scaled_train = scaler.transform(combined_train)
-        x_n_list = self.process_normal(scaled_train, target_len)
+        x_n_list = self.process_normal(scaled_train, normal_block_len)
 
         # 7. Final Storage
         self.data_dict['x_n_list'] = np.array(x_n_list)
         test_x_transformed = [scaler.transform(x) for x in all_test_x]
+        # (281, 1000, 38)
         self.data_dict['x_ab_list'] = np.array(test_x_transformed)
+        # (281, 1000, 38)
         self.data_dict['label_list'] = np.array(all_test_y)
         
         # Shuffle train data
@@ -160,7 +177,7 @@ class SMD:
         self.data_dict['x_ab_list'] = np.load(os.path.join(self.data_dir, 'x_ab_list.npy'))
         self.data_dict['label_list'] = np.load(os.path.join(self.data_dir, 'label_list.npy'))
         orth_matrix_dir = os.path.join(self.data_dir, 'orth_transform_meta')
-        return None#self.apply_orthogonal_transform(save_path=orth_matrix_dir, device='cpu')
+        return self.apply_orthogonal_transform(save_path=orth_matrix_dir, device='cpu')
 
     def apply_orthogonal_transform(self, save_path, device='cpu'):
         # ... (same as your SWaT implementation)
@@ -173,8 +190,11 @@ class SMD:
         )
         x_n_tensor = torch.from_numpy(self.data_dict['x_n_list']).float().to(device)
         with torch.no_grad():
+            # smd = torch.Size([236, 38, 1000])
             self.data_dict['x_n_orth'] = self.orth_transformer(x_n_tensor).cpu().numpy()
+        #(281, 1000, 38)
         x_ab_tensor = torch.from_numpy(self.data_dict['x_ab_list']).float().to(device)
         with torch.no_grad():
+            # (281, 38, 1000)
             self.data_dict['x_ab_orth'] = self.orth_transformer(x_ab_tensor).cpu().numpy()
         return self.orth_transformer
