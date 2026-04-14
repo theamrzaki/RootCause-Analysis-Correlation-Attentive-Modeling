@@ -91,10 +91,13 @@ class WADI:
         labels = np.zeros((len(df_attack), len(common_sensors)))
 
         # WADI 1s data is too 'slow'. 10s or 30s is the sweet spot.
-        sample_rate = 30#0 # 10 seconds
+        sample_rate = 20#0 # 10 seconds
 
         df_normal = df_normal.iloc[::sample_rate, :].reset_index(drop=True)
-        #df_attack_features = df_attack_features.iloc[::sample_rate, :].reset_index(drop=True)
+        df_attack_features = df_attack_features.iloc[::sample_rate, :].reset_index(drop=True)
+        labels = labels[::sample_rate]
+        # IMPORTANT: keep timestamps aligned for labeling/debugging
+        df_attack = df_attack.iloc[::sample_rate, :].reset_index(drop=True)
 
         # Important: You must also downsample your labels to match the new length!
         #labels = labels[::sample_rate]
@@ -182,8 +185,8 @@ class WADI:
         
         # Match the logic used in SMD (lookback=window_size*2, lookahead=5)
         # This creates the '7' or '3' middle dimension seen in your successful tests
-        lookback = self.window_size * 2 # If window_size=1, this is 2
-        lookahead = 50                  # Change to 1 for SWaT-style '3' total length
+        lookback = self.window_size * 20 # If window_size=1, this is 2
+        lookahead = 200                  # Change to 1 for SWaT-style '3' total length
         
         test_x_lst = []
         test_y_lst = []

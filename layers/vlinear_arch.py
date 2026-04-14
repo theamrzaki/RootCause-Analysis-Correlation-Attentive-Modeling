@@ -16,7 +16,6 @@ class OrthTransform(nn.Module):
         super().__init__()
         self.device = device
         self.time_lag = time_lag
-        
         # Use the data_dir from the dataset object to define the matrix path
         # This ensures the Q matrix is tied to the specific dataset processing
         filename = "swat_q_matrix"
@@ -70,7 +69,114 @@ class OrthTransform(nn.Module):
         np.save(self.matrix_path, q_mat)
         return q_mat
 
-    def forward(self, x):
+    def _compute_q_matrix_median(self, train_data, time_lag, save_path):
+        """
+        Computes a single Global Q matrix across all 51 variables using 
+        Robust Median Aggregation and Temporal Decay.
+        """
+        if not os.path.exists(save_path): os.makedirs(save_path)
+        
+        # train_data shape: [Samples, Window, Vars]
+        S, W, V = train_data.shape
+        
+        sigma_list = []
+        for feature_idx in range(V):
+            # Extract feature across all samples: [Samples, Window]
+            feat_windows = train_data[:, :, feature_idx]
+            
+            # 1. Zero-Mean the windows locally to focus on dynamics, not DC offset
+            feat_windows = feat_windows - np.mean(feat_windows, axis=1, keepdims=True)
+            
+            # 2. Compute temporal covariance [W, W]
+            cov = np.cov(feat_windows.T) 
+            diag = np.diag(cov)
+            
+            # Skip features with zero variance to prevent NaNs
+            if (diag < 1e-6).any(): 
+                continue
+                
+            # 3. Standardize to Correlation Matrix (Pearson logic)
+            corr = cov / (np.sqrt(np.outer(diag, diag)) + 1e-9) 
+            sigma_list.append(corr)
+
+        if not sigma_list:
+            raise ValueError("No valid features found to compute OrthTransform. Check data variance.")
+
+        # --- ENHANCEMENT 1: ROBUST MEDIAN AGGREGATION ---
+        # Instead of np.mean, use median to prevent a single noisy sensor 
+        # from 'smearing' the global temporal basis.
+        sigma_stack = np.stack(sigma_list, axis=0)
+        sigma_final = np.median(sigma_stack, axis=0)
+
+        # --- ENHANCEMENT 2: TEMPORAL DECAY PRIOR (Optional but recommended) ---
+        # Dampen correlations between time-steps that are very far apart
+        # This sharpens the basis for local anomaly detection.
+        mask = np.fromfunction(lambda i, j: np.exp(-np.abs(i - j) / (W / 2)), (W, W))
+        sigma_final = sigma_final * mask
+
+        # 4. Eigen-Decomposition
+        eigenvalues, eigenvectors = eigh(sigma_final)
+        
+        # 5. Sort descending to get the Principal Temporal Components
+        q_mat = np.flip(eigenvectors.T, axis=0)
+        
+        # 6. Save and Return
+        np.save(self.matrix_path, q_mat)
+        return q_mat
+
+    def _compute_q_matrix_grouped_not_working(self, train_data, time_lag, save_path):
+        """
+        Computes a Nuanced Q matrix per sensor group (Stage-wise).
+        """
+        if not os.path.exists(save_path): os.makedirs(save_path)
+        
+        S, W, V = train_data.shape
+        
+        # 1. Define SWaT Stages (Update these indices if your CSV columns differ)
+        SWAT_STAGES = {
+            "P1": list(range(0, 10)),   # Raw water
+            "P2": list(range(10, 16)),  # Pre-treatment
+            "P3": list(range(16, 26)),  # Ultrafiltration
+            "P4": list(range(26, 35)),  # De-chlorination
+            "P5": list(range(35, 46)),  # Reverse Osmosis
+            "P6": list(range(46, 51))   # Effluent
+        }
+
+        # Final container: [Num_Sensors, Window, Window]
+        full_q_tensor = np.zeros((V, W, W))
+
+        for stage, indices in SWAT_STAGES.items():
+            sigma_list = []
+            
+            # Calculate correlations only for this stage's sensors
+            for idx in indices:
+                feat_windows = train_data[:, :, idx]
+                cov = np.cov(feat_windows.T)
+                diag = np.diag(cov)
+                
+                if (diag < 1e-6).any(): continue
+                
+                corr = cov / (np.sqrt(np.outer(diag, diag)) + 1e-9)
+                sigma_list.append(corr)
+
+            if not sigma_list:
+                print(f"Warning: No variance in Stage {stage}, using Identity.")
+                q_stage = np.eye(W)
+            else:
+                # Average correlation for this specific stage
+                sigma_mean = np.mean(sigma_list, axis=0)
+                eigenvalues, eigenvectors = eigh(sigma_mean)
+                q_stage = np.flip(eigenvectors.T, axis=0) # [W, W]
+
+            # Assign this stage-specific Q to all sensors in this group
+            for idx in indices:
+                full_q_tensor[idx] = q_stage
+
+        # Save the full [51, W, W] tensor
+        np.save(self.matrix_path, full_q_tensor)
+        return full_q_tensor
+
+    def forward___(self, x):
         # x is [Batch, Window, Channels] -> (20, 36, 51)
         # self.Q is [1000, 1000]
         
@@ -94,7 +200,7 @@ class OrthTransform(nn.Module):
     #    out = torch.einsum('bcw,wv->bcv', x_orth, self.Q)
     #    return out.transpose(1, 2)
     
-    def inverse(self, x_orth):
+    def inverse___(self, x_orth):
         # x_orth: [Batch, Channels, 10]
         # self.Q: [1000, 1000]
         
@@ -110,7 +216,45 @@ class OrthTransform(nn.Module):
         
         # Transpose to [Batch, Window, Channels] -> [131, 10, 51]
         return out.transpose(1, 2)
+    
+    def forward(self, x, disable_orth=False):
+        # x: [Batch, Window, Channels] (e.g., 20, 36, 51)
+        target_len = self.Q.shape[0] # 1000
+        current_len = x.shape[1]    # 36
+        disable_orth = False
+        if disable_orth:
+            # IDENTITY MODE: Pure temporal pass-through
+            # No spectral mixing happens here.
+            return x.transpose(1, 2)
+        
+        # --- ORTHOGONAL MODE ---
+        if current_len < target_len:
+            # Pad the temporal dimension to match the basis size
+            padding = (0, 0, target_len - current_len, 0)
+            x = torch.nn.functional.pad(x, padding, "constant", 0)
+        
+        # Apply basis projection: [B, W, C] * [W_new, W] -> [B, W_new, C]
+        out = torch.einsum('bwc, vw -> bvc', x, self.Q)
+        
+        # Return the relevant window transposed to [Batch, Channels, Window]
+        return out[:, -current_len:, :].transpose(1, 2)
 
+    def inverse(self, x_orth, disable_orth=False):
+        disable_orth = False
+        # x_orth: [Batch, Channels, Current_W]
+        if disable_orth:
+            # IDENTITY MODE: Just return to time-major shape
+            return x_orth.transpose(1, 2)
+
+        # --- ORTHOGONAL MODE ---
+        current_w = x_orth.shape[2] 
+        # Project back using the top coefficients
+        Q_sliced = self.Q[:current_w, :current_w]
+        
+        # [B, C, W] * [W, W] -> [B, C, W]
+        out = torch.einsum('bcw, wv -> bcv', x_orth, Q_sliced)
+        
+        return out.transpose(1, 2)
 
 import torch
 import torch.nn as nn
@@ -145,7 +289,8 @@ class vlinear(nn.Module):
         
         # 3. Projection matching the Model's logic
         self.temporal_proj = nn.Linear(self.order, hidden_dim)
-
+        self.a = nn.Parameter(torch.randn(num_vars))
+        self.ln = nn.LayerNorm(hidden_dim)
         self.vf = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim * 2),
             nn.ReLU(),
@@ -164,6 +309,8 @@ class vlinear(nn.Module):
 
     def forward(self, inputs: torch.Tensor):
         B, O_curr, P = inputs.shape
+        # z: [B, P, H]
+
         
         # --- 1. Step into Orthogonal Domain ---
         x_orth = self.orth_transformer(inputs) # [B, P, 1000]
@@ -176,17 +323,24 @@ class vlinear(nn.Module):
         # --- 3. vecTrans Latent Generation ---
         # Flatten back to 3D for the Linear layer
 
-        z = self.temporal_proj(x_orth_biased.squeeze(-2)) # [B, P, H]
+        #z = self.temporal_proj(x_orth_biased.squeeze(-2)) # [B, P, H]
 
 
-
+       
         z = self.temporal_proj(x_orth_biased.squeeze(-2))
         
-        # Use expansion-based embedding as seen in Model.tokenEmb
-        #z_gated = z * self.spatial_weight 
-        
-        #cond = z_gated * self.sensor_embeddings.unsqueeze(0)
-        cond = z * self.embeddings # [B, P, H]
+        # Step 1: weights
+        w = torch.sigmoid(self.a)
+        w = w / (w.sum() + 1e-8)   # L1 normalize
+
+        # Step 2: aggregation
+        s = torch.einsum('p,bph->bh', w, z)   # [B, H]
+
+        # Step 3: broadcast
+        vec = s.unsqueeze(1).repeat(1, self.num_vars, 1)  # [B, P, H]
+
+        # Residual-style combination (IMPORTANT)
+        cond = self.ln(z + vec)
         
         # --- 4. Prediction with Delta2 ---
         v_pred = self.vf(cond).unsqueeze(-2) + self.delta2
