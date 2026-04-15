@@ -4,8 +4,8 @@ import logging
 import argparse
 import numpy as np
 
-from datasets import linear, lotka_volterra, lorenz96, swat, nonlinear, msds, sock, smd#, wadi
-from args import linear_args, lotka_volterra_args, lorenz96_args, swat_args, msds_args, nonlinear_args, sock_args, smd_args#, wadi_args
+from datasets import linear, lotka_volterra, lorenz96, swat, nonlinear, msds, smd, wadi
+from args import linear_args, lotka_volterra_args, lorenz96_args, swat_args, msds_args, nonlinear_args, sock_args, smd_args, wadi_args
 from models import aerca, iTransformer, FEDformer
 from utils import utils
 import warnings
@@ -63,12 +63,6 @@ def main(argv):
             "log_file": "msds.log",
             "use_slice": False
         },
-        "sock": {
-            "args": sock_args.create_arg_parser,
-            "dataset_class": sock.sock,
-            "log_file": "sock.log",
-            "use_slice": False
-        },
         "swat": {
             "args": swat_args.create_arg_parser,
             "dataset_class": swat.SWaT,
@@ -86,14 +80,13 @@ def main(argv):
             "dataset_class": smd.SMD,
             "log_file": "smd.log",
             "use_slice": False
-        }
-        #,
-        #"wadi": {
-        #    "args": wadi_args.create_arg_parser,
-        #    "dataset_class": wadi.WADI,
-        #    "log_file": "wadi.log",
-        #    "use_slice": False
-        #},
+        },
+        "wadi": {
+            "args": wadi_args.create_arg_parser,
+            "dataset_class": wadi.WADI,
+            "log_file": "wadi.log",
+            "use_slice": False
+        },
     }
 
     # Ensure the specified dataset is recognized.
