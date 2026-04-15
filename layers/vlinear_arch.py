@@ -330,14 +330,19 @@ class vlinear(nn.Module):
         z = self.temporal_proj(x_orth_biased.squeeze(-2))
         
         # Step 1: weights
-        w = torch.sigmoid(self.a)
+        #w = torch.sigmoid(self.a)
+        #τ < 1 → sharper distribution
+        #try τ = 0.3 or 0.1
+        tau = 0.1
+        w = torch.softmax(self.a / tau, dim=0)
         w = w / (w.sum() + 1e-8)   # L1 normalize
 
         # Step 2: aggregation
-        s = torch.einsum('p,bph->bh', w, z)   # [B, H]
-
+        #s = torch.einsum('p,bph->bh', w, z)   # [B, H]
+        vec = w[None, :, None] * z
+        vec = vec.sum(dim=1, keepdim=True).expand_as(z)
         # Step 3: broadcast
-        vec = s.unsqueeze(1).repeat(1, self.num_vars, 1)  # [B, P, H]
+        #vec = s.unsqueeze(1).repeat(1, self.num_vars, 1)  # [B, P, H]
 
         # Residual-style combination (IMPORTANT)
         cond = self.ln(z + vec)
