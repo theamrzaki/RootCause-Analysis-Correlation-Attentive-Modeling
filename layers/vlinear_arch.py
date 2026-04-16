@@ -267,7 +267,25 @@ import numpy as np
 # In forward
 
 
+class RevIN(nn.Module):
+    def __init__(self, num_vars, eps=1e-5):
+        super().__init__()
+        self.eps = eps
+        self.gamma = nn.Parameter(torch.ones(1, 1, num_vars))
+        self.beta = nn.Parameter(torch.zeros(1, 1, num_vars))
 
+    def forward(self, x, mode):
+        # x: [B, O, P]
+        if mode == 'norm':
+            self.mu = x.mean(dim=1, keepdim=True)        # [B,1,P]
+            self.sigma = x.std(dim=1, keepdim=True) + self.eps
+            x = (x - self.mu) / self.sigma
+            return x * self.gamma + self.beta
+
+        elif mode == 'denorm':
+            x = (x - self.beta) / (self.gamma + self.eps)
+            return x * self.sigma + self.mu
+        
 class vlinear(nn.Module):
     def __init__(self, num_vars, order, hidden_dim=256, device="cpu", options=None):
         super().__init__()
@@ -296,16 +314,7 @@ class vlinear(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim * 2, self.order) 
         )
-        #self.spatial_weight = nn.Parameter(torch.ones(1, num_vars, 1))
-        
-        # Identity-preserving embedding
-        #self.sensor_embeddings = nn.Parameter(torch.randn(num_vars, hidden_dim))
-        # Instead of one hidden_dim, we use 3 heads 
-        # (e.g., Immediate Lag, Medium Lag, Long Lag)
-        self.num_heads = 4
-        self.head_dim = hidden_dim // self.num_heads
-        self.query_proj = nn.Linear(self.head_dim, self.head_dim)
-        self.key_proj = nn.Linear(self.head_dim, self.head_dim)
+        #self.revin = RevIN(num_vars)
 
     def forward(self, inputs: torch.Tensor):
         B, O_curr, P = inputs.shape
@@ -313,6 +322,7 @@ class vlinear(nn.Module):
 
         
         # --- 1. Step into Orthogonal Domain ---
+        #inputs = self.revin(inputs, mode='norm')
         x_orth = self.orth_transformer(inputs) # [B, P, 1000]
         
         # --- 2. Apply Delta1 Bias ---
@@ -333,20 +343,20 @@ class vlinear(nn.Module):
         #w = torch.sigmoid(self.a)
         #τ < 1 → sharper distribution
         #try τ = 0.3 or 0.1
-        tau = 0.1
-        w = torch.softmax(self.a / tau, dim=0)
-        w = w / (w.sum() + 1e-8)   # L1 normalize
-
-        # Step 2: aggregation
-        #s = torch.einsum('p,bph->bh', w, z)   # [B, H]
-        vec = w[None, :, None] * z
-        vec = vec.sum(dim=1, keepdim=True).expand_as(z)
-        # Step 3: broadcast
-        #vec = s.unsqueeze(1).repeat(1, self.num_vars, 1)  # [B, P, H]
-
-        # Residual-style combination (IMPORTANT)
-        cond = self.ln(z + vec)
-        
+        ###tau = 0.1
+        ###w = torch.softmax(self.a / tau, dim=0)
+        ###w = w / (w.sum() + 1e-8)   # L1 normalize
+####
+        ##### Step 2: aggregation
+        #####s = torch.einsum('p,bph->bh', w, z)   # [B, H]
+        ###vec = w[None, :, None] * z
+        ###vec = vec.sum(dim=1, keepdim=True).expand_as(z)
+        ##### Step 3: broadcast
+        #####vec = s.unsqueeze(1).repeat(1, self.num_vars, 1)  # [B, P, H]
+####
+        ##### Residual-style combination (IMPORTANT)
+        ###cond = self.ln(z + vec)
+        cond = z * self.embeddings # [B, P, H]
         # --- 4. Prediction with Delta2 ---
         v_pred = self.vf(cond).unsqueeze(-2) + self.delta2
         v_pred = v_pred.squeeze(-2) # [B, P, 1000]
@@ -354,6 +364,8 @@ class vlinear(nn.Module):
         # --- 5. Return to Time Domain ---
         preds_all_time = self.orth_transformer.inverse(v_pred)
         preds = preds_all_time[:, -1, :] 
+        #preds_all_time = self.revin(preds_all_time, mode='denorm')
+        #preds = preds_all_time[:, -1, :]
 
         # AERCA Coefficients
         coeffs_time = torch.einsum('bph,bqh->bpq', cond, cond)
@@ -381,101 +393,3 @@ class vlinear(nn.Module):
 
         return preds, coeffs_time, coeffs_freq
     
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-class vlinear___(nn.Module):
-    def __init__(self, num_vars, order, hidden_dim=256, device="cpu", options=None):
-        super().__init__()
-        self.num_vars = num_vars
-        self.order = order # window size for orth domain
-        self.device = device
-        self.orth_transformer = options.get('orth_transformer')
-        
-        # --- PATH 1: Orthogonal (Spectral) Domain ---
-        self.spectral_proj = nn.Linear(self.order, hidden_dim)
-        self.delta1 = nn.Parameter(torch.zeros(1, num_vars, 1, self.order))
-        self.delta2 = nn.Parameter(torch.zeros(1, num_vars, 1, self.order))
-
-        # --- PATH 2: Temporal (Point-wise) Domain ---
-        # Captures the local "shocks" in the window
-        self.temporal_path = nn.Sequential(
-            nn.Linear(1, hidden_dim // 4),
-            nn.ReLU(),
-            nn.Linear(hidden_dim // 4, hidden_dim)
-        )
-
-        # --- BRIDGE: Linear Attention ---
-        # Q: Spectral Context | K, V: Temporal Local Dynamics
-        self.num_heads = 4
-        self.head_dim = hidden_dim // self.num_heads
-        self.q_proj = nn.Linear(hidden_dim, hidden_dim)
-        self.k_proj = nn.Linear(hidden_dim, hidden_dim)
-        self.v_proj = nn.Linear(hidden_dim, hidden_dim)
-        
-        # --- Output / Forecasting ---
-        self.vf = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim * 2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim * 2, self.order)
-        )
-        
-        self.sensor_embeddings = nn.Parameter(torch.randn(num_vars, hidden_dim))
-
-    def forward(self, inputs: torch.Tensor):
-        # inputs shape: [B, W, P]
-        B, W, P = inputs.shape
-        
-        # --- 1. Path A: Spectral Extraction ---
-        x_orth = self.orth_transformer(inputs) # [B, P, order]
-        x_orth_biased = x_orth.unsqueeze(-2) + self.delta1
-        z_spec = self.spectral_proj(x_orth_biased.squeeze(-2)) # [B, P, H]
-        
-        # --- 2. Path B: Temporal Extraction ---
-        # Map each time-step per sensor to a latent feature
-        # [B, W, P] -> [B, P, W, 1]
-        x_temp = inputs.permute(0, 2, 1).unsqueeze(-1)
-        z_temp_seq = self.temporal_path(x_temp) # [B, P, W, H]
-        # Pool to match spectral dimensions [B, P, H]
-        z_temp = z_temp_seq.mean(dim=2) 
-        
-        # --- 3. Linear Attention Interaction ---
-        # Q: Spectral (Global Physics), K/V: Temporal (Local Dynamics)
-        q = self.q_proj(z_spec).view(B, P, self.num_heads, self.head_dim)
-        k = self.k_proj(z_temp).view(B, P, self.num_heads, self.head_dim)
-        v = self.v_proj(z_temp).view(B, P, self.num_heads, self.head_dim)
-
-        # Apply Feature Mapping for Linear Attention (Kernel Trick)
-        # Using ELU+1 to ensure positivity
-        q = F.elu(q) + 1
-        k = F.elu(k) + 1
-        
-        # Context computation (Linearized: O(P) instead of O(P^2))
-        # This aggregates how the temporal shocks relate to the global physics
-        context = torch.einsum('bphd, bphm -> bhdm', k, v) # [B, H, D, D]
-        z_bridge = torch.einsum('bphd, bhdm -> bphm', q, context) # [B, P, H, D]
-        z_bridge = z_bridge.reshape(B, P, -1)
-        
-        # --- 4. Causal & Prediction Heads ---
-        # Combine bridge features with sensor identity
-        cond = z_bridge * self.sensor_embeddings.unsqueeze(0)
-        
-        # Causal Matrix
-        coeffs_spatial = torch.einsum('bph, bqh -> bpq', cond, cond)
-        
-        # Prediction (Residual spectral prediction)
-        v_pred = self.vf(cond) + x_orth_biased.squeeze(-2)
-        v_pred = v_pred.unsqueeze(-2) + self.delta2
-        v_pred = v_pred.squeeze(-2)
-        
-        # Return to Time Domain
-        preds_all_time = self.orth_transformer.inverse(v_pred)
-        preds = preds_all_time[:, -1, :] 
-
-        # AERCA/GVAR compatibility
-        coeffs_time = coeffs_spatial.unsqueeze(1).repeat(1, W, 1, 1)
-        coeffs_freq = coeffs_time[:, 0, :, :]
-
-        return preds, coeffs_time, coeffs_freq
