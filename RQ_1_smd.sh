@@ -1,8 +1,8 @@
 seeds=(1)
-dataset="swat"
+dataset="smd"
 window_size=(10)
 lrs=("1e-4")
-#to run this script, first use chmod +x RQ_1_swat.sh
+#to run this script, first use chmod +x RQ_1_smd.sh
 
 #-------------------------------------------------------------------
 #-----------------------------vlinear-------------------------------
@@ -10,10 +10,10 @@ lrs=("1e-4")
 
 arch="vlinear"
 main_model="aerca_based"
-attention_dim=16
-heads=2
-outer_att_dim_val=16
-outer_heads_val=2
+attention_dim=256
+heads=1
+outer_att_dim_val=256
+outer_heads_val=1
 
 run_SMD_CrGSTA() {
     for seed in "${seeds[@]}"; do
@@ -47,7 +47,7 @@ run_SMD_CrGSTA() {
                                     --early_stopping=0 \
                                     --preprocessing_data=0 \
                                     --combine_method="attention" \
-                                    --results_csv="RQ_1_swat.csv" \
+                                    --results_csv="RQ_1_smd.csv" \
 
                                     --attention_dim="$attention_dim" \
                                     --num_attention_heads="$heads" \
@@ -62,6 +62,8 @@ run_SMD_CrGSTA() {
         done
     done
 }
+
+
 #run_SMD_CrGSTA 1
 
 
@@ -91,7 +93,7 @@ run_deepmlp() {
                         --training_aerca=1 \
                         --epochs=1000 \
                         --early_stopping=1 \
-                        --results_csv=RQ_1_swat.csv"
+                        --results_csv=RQ_1_smd.csv"
 
                     eval $cmd
         done
@@ -131,7 +133,7 @@ run_SMD_Fedformer() {
                                     --training_aerca=1 \
                                     --epochs=1000 \
                                     --early_stopping=0 \
-                                    --results_csv=RQ_1_swat.csv"
+                                    --results_csv=RQ_1_smd.csv"
 
                                 eval $cmd
                         done
@@ -172,7 +174,7 @@ run_SMD_iTransformer() {
                                     --training_aerca=1 \
                                     --epochs=1000 \
                                     --early_stopping=0 \
-                                    --results_csv=RQ_1_swat.csv"
+                                    --results_csv=RQ_1_smd.csv"
 
                                 eval $cmd
                         done
@@ -180,6 +182,8 @@ run_SMD_iTransformer() {
         done
     done
 }
+
+
 #run_SMD_iTransformer 1
 
 
@@ -224,7 +228,7 @@ run_SMD_GVAR() {
                                     --early_stopping=0 \
                                     --preprocessing_data=0 \
                                     --combine_method="attention" \
-                                    --results_csv="RQ_1_swat.csv" \
+                                    --results_csv="RQ_1_smd.csv" \
 
                                     --attention_dim="$attention_dim" \
                                     --num_attention_heads="$heads" \
@@ -243,19 +247,72 @@ run_SMD_GVAR 1
 
 
 
-
-#-------------------------------------------------------------------
-#-----------------------------causalrca-----------------------------
-#-------------------------------------------------------------------
-
-arch="causalrca"
+seeds=(1)
+dataset="wadi"
+window_size=(5 1 7 10)
+lrs=("1e-4")
+arch="GVAR"
 main_model="aerca_based"
 attention_dim=256
 heads=2
 outer_att_dim_val=256
 outer_heads_val=2
 
-run_SMD_causalrca() {
+run_WADI_GVAR() {
+    for seed in "${seeds[@]}"; do
+        for window_size_item in "${window_size[@]}"; do
+                                echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model"
+
+                                cmd="python3 main.py \
+                                        --correlated_KL=0 --mean_std_recon_loss=0 --AMOC_Loss=0 \
+                                        --encoder_alpha=0.5 --decoder_alpha=0.5 --encoder_gamma=0.5 --decoder_gamma=0.5 \
+                                        --encoder_lambda=0.5 --decoder_lambda=0.5 --beta=0.5 \
+
+                                    --main_model=$main_model \
+                                    --coeff_architecture="$arch" \
+                                    --time_freq_representation="mag_phase" \
+
+                                    --lr="$lrs" \
+                                    --seed="$seed" \
+                                    --dataset="$dataset" \
+                                    --window_size="$window_size_item" \
+
+                                    --training_aerca=1 \
+                                    --epochs=1000 \
+                                    --early_stopping=0 \
+                                    --preprocessing_data=0 \
+                                    --combine_method="attention" \
+                                    --results_csv="RQ_1_wadi.csv" \
+
+                                    --attention_dim="$attention_dim" \
+                                    --num_attention_heads="$heads" \
+                                    --outer_heads_num="$outer_heads_val" \
+                                    --outer_hidden_dim="$outer_att_dim_val" \
+
+                                       "
+
+                                eval $cmd
+                        
+            
+        done
+    done
+}
+run_WADI_GVAR 1
+
+
+
+seeds=(1)
+dataset="swat"
+window_size=(5 1 7 10)
+lrs=("1e-4")
+arch="GVAR"
+main_model="aerca_based"
+attention_dim=256
+heads=2
+outer_att_dim_val=256
+outer_heads_val=2
+
+run_swat_GVAR() {
     for seed in "${seeds[@]}"; do
         for window_size_item in "${window_size[@]}"; do
                                 echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model"
@@ -294,7 +351,62 @@ run_SMD_causalrca() {
         done
     done
 }
-run_SMD_causalrca 1
+run_swat_GVAR 1
+
+
+
+#-------------------------------------------------------------------
+#-----------------------------causalrca-----------------------------
+#-------------------------------------------------------------------
+
+arch="causalrca"
+main_model="aerca_based"
+attention_dim=256
+heads=2
+outer_att_dim_val=256
+outer_heads_val=2
+
+run_SMD_causalrca() {
+    for seed in "${seeds[@]}"; do
+        for window_size_item in "${window_size[@]}"; do
+                                echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model"
+
+                                cmd="python3 main.py \
+                                        --correlated_KL=0 --mean_std_recon_loss=0 --AMOC_Loss=0 \
+                                        --encoder_alpha=0.5 --decoder_alpha=0.5 --encoder_gamma=0.5 --decoder_gamma=0.5 \
+                                        --encoder_lambda=0.5 --decoder_lambda=0.5 --beta=0.5 \
+
+                                    --main_model=$main_model \
+                                    --coeff_architecture="$arch" \
+                                    --time_freq_representation="mag_phase" \
+
+                                    --lr="$lrs" \
+                                    --seed="$seed" \
+                                    --dataset="$dataset" \
+                                    --window_size="$window_size_item" \
+
+                                    --training_aerca=1 \
+                                    --epochs=1000 \
+                                    --early_stopping=0 \
+                                    --preprocessing_data=0 \
+                                    --combine_method="attention" \
+                                    --results_csv="RQ_1_smd.csv" \
+
+                                    --attention_dim="$attention_dim" \
+                                    --num_attention_heads="$heads" \
+                                    --outer_heads_num="$outer_heads_val" \
+                                    --outer_hidden_dim="$outer_att_dim_val" \
+
+                                       "
+
+                                eval $cmd
+                        
+            
+        done
+    done
+}
+
+#run_SMD_causalrca 1
 
 #-------------------------------------------------------------------
 #-----------------------------rcd & epsilon diagnosis---------------
@@ -325,7 +437,7 @@ run_experiment_baselines() {
                                     --window_size=$window_size_item \
                                     --main_model=$main_model \
                                     --training_aerca=0 \                                    
-                                    --results_csv=RQ_1_swat.csv"
+                                    --results_csv=RQ_1_smd.csv"
 
                                 eval $cmd
             done

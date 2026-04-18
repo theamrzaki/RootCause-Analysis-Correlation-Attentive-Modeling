@@ -377,7 +377,7 @@ def topk_at_step(scores, labels, k_range=10):
 
 
 def write_results(args, local_model_name, ac_at,k_at_step_all, total_params,file_name='result.csv'):
-    file_path = "./results/"+file_name
+    file_path = "./results_journal/"+file_name
     #infodict = {'pr':ps, 'rc':rs, 'auc':auc, 'ap':ap, 'f1':effection}
     
     ac_at = [k_at_step_all[0], k_at_step_all[2], k_at_step_all[4], k_at_step_all[9]]

@@ -1,8 +1,8 @@
 seeds=(1)
-dataset="swat"
-window_size=(10)
+dataset="wadi"
+window_size=(5 1 7 10)
 lrs=("1e-4")
-#to run this script, first use chmod +x RQ_1_swat.sh
+#to run this script, first use chmod +x RQ_1_wadi.sh
 
 #-------------------------------------------------------------------
 #-----------------------------vlinear-------------------------------
@@ -10,10 +10,10 @@ lrs=("1e-4")
 
 arch="vlinear"
 main_model="aerca_based"
-attention_dim=16
-heads=2
-outer_att_dim_val=16
-outer_heads_val=2
+attention_dim=256
+heads=1
+outer_att_dim_val=256
+outer_heads_val=1
 
 run_SMD_CrGSTA() {
     for seed in "${seeds[@]}"; do
@@ -47,7 +47,7 @@ run_SMD_CrGSTA() {
                                     --early_stopping=0 \
                                     --preprocessing_data=0 \
                                     --combine_method="attention" \
-                                    --results_csv="RQ_1_swat.csv" \
+                                    --results_csv="RQ_1_wadi.csv" \
 
                                     --attention_dim="$attention_dim" \
                                     --num_attention_heads="$heads" \
@@ -62,7 +62,9 @@ run_SMD_CrGSTA() {
         done
     done
 }
-#run_SMD_CrGSTA 1
+
+
+run_SMD_CrGSTA 1
 
 
 #-------------------------------------------------------------------
@@ -91,13 +93,13 @@ run_deepmlp() {
                         --training_aerca=1 \
                         --epochs=1000 \
                         --early_stopping=1 \
-                        --results_csv=RQ_1_swat.csv"
+                        --results_csv=RQ_1_wadi.csv"
 
                     eval $cmd
         done
     done
 }
-#run_deepmlp
+run_deepmlp
 
 
 
@@ -131,7 +133,7 @@ run_SMD_Fedformer() {
                                     --training_aerca=1 \
                                     --epochs=1000 \
                                     --early_stopping=0 \
-                                    --results_csv=RQ_1_swat.csv"
+                                    --results_csv=RQ_1_wadi.csv"
 
                                 eval $cmd
                         done
@@ -139,7 +141,7 @@ run_SMD_Fedformer() {
         done
     done
 }
-#run_SMD_Fedformer 1
+run_SMD_Fedformer 1
 
 
 #-------------------------------------------------------------------
@@ -172,7 +174,7 @@ run_SMD_iTransformer() {
                                     --training_aerca=1 \
                                     --epochs=1000 \
                                     --early_stopping=0 \
-                                    --results_csv=RQ_1_swat.csv"
+                                    --results_csv=RQ_1_wadi.csv"
 
                                 eval $cmd
                         done
@@ -180,7 +182,9 @@ run_SMD_iTransformer() {
         done
     done
 }
-#run_SMD_iTransformer 1
+
+
+run_SMD_iTransformer 1
 
 
 
@@ -224,7 +228,7 @@ run_SMD_GVAR() {
                                     --early_stopping=0 \
                                     --preprocessing_data=0 \
                                     --combine_method="attention" \
-                                    --results_csv="RQ_1_swat.csv" \
+                                    --results_csv="RQ_1_wadi.csv" \
 
                                     --attention_dim="$attention_dim" \
                                     --num_attention_heads="$heads" \
@@ -239,6 +243,8 @@ run_SMD_GVAR() {
         done
     done
 }
+
+
 run_SMD_GVAR 1
 
 
@@ -279,7 +285,7 @@ run_SMD_causalrca() {
                                     --early_stopping=0 \
                                     --preprocessing_data=0 \
                                     --combine_method="attention" \
-                                    --results_csv="RQ_1_swat.csv" \
+                                    --results_csv="RQ_1_wadi.csv" \
 
                                     --attention_dim="$attention_dim" \
                                     --num_attention_heads="$heads" \
@@ -294,6 +300,7 @@ run_SMD_causalrca() {
         done
     done
 }
+
 run_SMD_causalrca 1
 
 #-------------------------------------------------------------------
@@ -325,7 +332,7 @@ run_experiment_baselines() {
                                     --window_size=$window_size_item \
                                     --main_model=$main_model \
                                     --training_aerca=0 \                                    
-                                    --results_csv=RQ_1_swat.csv"
+                                    --results_csv=RQ_1_wadi.csv"
 
                                 eval $cmd
             done

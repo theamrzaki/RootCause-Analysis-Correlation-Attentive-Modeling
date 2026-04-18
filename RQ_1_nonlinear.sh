@@ -1,10 +1,15 @@
 
 
 # --- Configurations ---
-seeds=(1 2 3 4 5 6 10 11 12)
+seeds=(1)
 dataset=("nonlinear")
-coeff_architecture="TemporalGNN_Attention_crossattn"
 window_size=(1 3 5 7 10)
+
+
+
+
+
+coeff_architecture="TemporalGNN_Attention_crossattn"
 main_model=("aerca_based")
 att_dim=64
 heads=2
@@ -57,7 +62,7 @@ run_experiment_nonlinear_CrGSTA() {
     done
 }
 # --- Run experiments ---
-run_experiment_nonlinear_CrGSTA
+#run_experiment_nonlinear_CrGSTA
 
 
 
@@ -67,10 +72,7 @@ run_experiment_nonlinear_CrGSTA
 
 
 # --- Configurations ---
-seeds=(1 2 3 4 5 6 10 11 12)
-dataset=("nonlinear")
 coeff_architecture="deep_mlp"
-window_size=(1 3 5 7 10)
 main_model=("aerca_based")
 att_dim=64
 heads=2
@@ -122,17 +124,14 @@ run_experiment_nonlinear_CrGSTA_deep() {
     done
 }
 # --- Run experiments ---
-#run_experiment_nonlinear_CrGSTA_deep
+run_experiment_nonlinear_CrGSTA_deep
 
 
 
 
 
 # --- Configurations ---
-seeds=(1 2 3 4 5 6 10 11 12)
-dataset=("nonlinear")
 coeff_architecture="deep_mlp"
-window_size=(1 3 5 7 10)
 main_model=("FEDformer")
 att_dim=64
 heads=2
@@ -184,7 +183,7 @@ run_experiment_nonlinear_CrGSTA_fedformer() {
     done
 }
 # --- Run experiments ---
-#run_experiment_nonlinear_CrGSTA_fedformer
+run_experiment_nonlinear_CrGSTA_fedformer
 
 
 
@@ -192,11 +191,9 @@ run_experiment_nonlinear_CrGSTA_fedformer() {
 
 
 # --- Configurations ---
-seeds=(1 2 3 4 5 6 10 11 12)
 dataset=("nonlinear")
 coeff_architecture="deep_mlp"
 window_size=(1 3 5 7 10)
-main_model=("iTransformer")
 att_dim=64
 heads=2
 outer_heads=2
@@ -247,17 +244,15 @@ run_experiment_nonlinear_CrGSTA_iTransformer() {
     done
 }
 # --- Run experiments ---
-#run_experiment_nonlinear_CrGSTA_iTransformer
+run_experiment_nonlinear_CrGSTA_iTransformer
 
 
 
 
 
 # --- Configurations ---
-seeds=(1 2 3 4 5 6 10 11 12)
 dataset=("nonlinear")
 coeff_architecture=("rcd" "epsilon_diagnosis")
-window_size=(1 3 5 7 10)
 main_model=("aerca_based")
 att_dim=64
 heads=2
@@ -311,7 +306,7 @@ run_experiment_nonlinear_CrGSTA_baselines() {
     done
 }
 # --- Run experiments ---
-#run_experiment_nonlinear_CrGSTA_baselines
+run_experiment_nonlinear_CrGSTA_baselines
 
 
 
@@ -320,10 +315,8 @@ run_experiment_nonlinear_CrGSTA_baselines() {
 
 
 # --- Configurations ---
-seeds=(7 8 9)
 dataset=("nonlinear")
 coeff_architecture="GVAR"
-window_size=(1 3 5 7 10)
 main_model=("aerca_based")
 att_dim=64
 heads=2
@@ -376,7 +369,7 @@ run_experiment_nonlinear_CrGSTA_GVAR() {
     done
 }
 # --- Run experiments ---
-#run_experiment_nonlinear_CrGSTA_GVAR
+run_experiment_nonlinear_CrGSTA_GVAR
 
 
 
@@ -384,10 +377,7 @@ run_experiment_nonlinear_CrGSTA_GVAR() {
 
 
 # --- Configurations ---
-seeds=(1 2 3 4 5 6 10 11 12 7 8 9)
-dataset=("nonlinear")
 coeff_architecture="causalrca"
-window_size=(1 3 5 7 10)
 main_model=("aerca_based")
 att_dim=256
 heads=2
@@ -440,4 +430,4 @@ run_experiment_nonlinear_CrGSTA_CauslRCA() {
     done
 }
 # --- Run experiments ---
-#run_experiment_nonlinear_CrGSTA_CauslRCA
+run_experiment_nonlinear_CrGSTA_CauslRCA

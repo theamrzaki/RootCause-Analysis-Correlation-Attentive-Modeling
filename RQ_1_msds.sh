@@ -1,15 +1,18 @@
-
-# --- Configurations ---
-seeds=(13 14 15 16 17 18)
+seeds=(1 2 3)
 dataset=("msds")
 lrs=("1e-4")
 window_size=(1 2 3 4 5)
+
+
+#-----------------------------------------------------
+#-----------------------------Fedformer---------------
+#-----------------------------------------------------
 main_model="FEDformer"
 attention_dim=16
 heads=2
 outer_att_dim_val=16
 outer_heads_val=2
-# --- Helper function to run experiments ---
+
 run_experiment_Fedformer() {
     for seed in "${seeds[@]}"; do
         for window_size_item in "${window_size[@]}"; do
@@ -47,24 +50,19 @@ run_experiment_Fedformer() {
         done
     done
 }
-# --- Run experiments ---
-# 2. With AMOC
 #run_experiment_Fedformer 1
 
 
-
-# --- Configurations ---
-seeds=(13 14 15 16 17 18)
-dataset=("msds")
-lrs=("1e-4")
-window_size=(1 2 3 4 5)
+#-----------------------------------------------------
+#-----------------------------rcd & epsilon diagnosis---------------
+#-----------------------------------------------------
 coeff_architecture=("rcd" "epsilon_diagnosis")
 main_model="aerca_based"
 attention_dim=16
 heads=2
 outer_att_dim_val=16
 outer_heads_val=2
-# --- Helper function to run experiments ---
+
 run_experiment_Baselines() {
     for seed in "${seeds[@]}"; do
         for window_size_item in "${window_size[@]}"; do
@@ -103,25 +101,19 @@ run_experiment_Baselines() {
         done
     done
     }
-# --- Run experiments ---
-# 2. With AMOC
 #run_experiment_Baselines 1
 
 
-
-
-# --- Configurations ---
-seeds=(13 14 15 16 17 18)
-dataset=("msds")
-lrs=("1e-4")
-window_size=(1 2 3 4 5)
+#-----------------------------------------------------
+#-----------------------------iTransformer---------------
+#-----------------------------------------------------
 arch="iTransformer"
 main_model="iTransformer"
 attention_dim=16
 heads=2
 outer_att_dim_val=16
 outer_heads_val=2
-# --- Helper function to run experiments ---
+
 run_experiment_SWAT_iTransformer() {
     for seed in "${seeds[@]}"; do
         for window_size_item in "${window_size[@]}"; do
@@ -159,23 +151,20 @@ run_experiment_SWAT_iTransformer() {
         done
     done
 }
-# --- Run experiments ---
-# 2. With AMOC
 #run_experiment_SWAT_iTransformer 1
 
-# --- Configurations ---
-# stopeed 17 window 5
-seeds=(18)
-dataset=("msds")
-lrs=("1e-4")
-window_size=(1 2 3 4 5)
-arch="TemporalGNN_Attention_crossattn"
+
+
+#-----------------------------------------------------
+#-----------------------------vLinear---------------
+#-----------------------------------------------------
+arch="vlinear"
 main_model="aerca_based"
 attention_dim=16
 heads=2
 outer_att_dim_val=16
 outer_heads_val=2
-# --- Helper function to run experiments ---
+
 run_experiment_SWAT_CrGSTA() {
     for seed in "${seeds[@]}"; do
         for window_size_item in "${window_size[@]}"; do
@@ -196,7 +185,7 @@ run_experiment_SWAT_CrGSTA() {
                                     --window_size="$window_size_item" \
 
                                     --training_aerca=1 \
-                                    --epochs=1000 \
+                                    --epochs=50 \
                                     --early_stopping=0 \
                                     --preprocessing_data=0 \
                                     --combine_method="attention" \
@@ -215,22 +204,21 @@ run_experiment_SWAT_CrGSTA() {
         done
     done
 }
-# --- Run experiments ---
-# 2. With AMOC
 #run_experiment_SWAT_CrGSTA 1
 
 
-seeds=(7 8 9 10 11 12)
-window_size=(3 4 5)
+
+#-----------------------------------------------------
+#-----------------------------Deep MLP---------------
+#-----------------------------------------------------
 coeff_architecture="deep_mlp"
-dataset="msds"
 main_model="aerca_based"
 lrs="1e-6"
-att_dim=256
 
 run_experiment_deepmlp() {
-    for window_size_item in "${window_size[@]}"; do
-        for seed in "${seeds[@]}"; do
+    for seed in "${seeds[@]}"; do
+        for window_size_item in "${window_size[@]}"; do
+        
                     echo "Running: dataset=$dataset | seed=$seed | arch=$coeff_architecture | window_size=$window_size_item | lr=$lrs"
 
                     cmd="python3 main.py \
@@ -245,32 +233,29 @@ run_experiment_deepmlp() {
                         --window_size=$window_size_item \
                         --preprocessing_data=0 \
                         --training_aerca=1 \
-                        --epochs=5000 \
+                        --epochs=1000 \
                         --early_stopping=1 \
-                        --results_csv=RQ_1_swat.csv"
+                        --results_csv=RQ_1_msds.csv"
 
                     eval $cmd
         done
     done
 }
-
 #run_experiment_deepmlp
 
 
 
 
-# --- Configurations ---
-seeds=(13 14 15 16 17 18)
-dataset=("msds")
-lrs=("1e-4")
-window_size=(1 2 3 4 5)
+#-----------------------------------------------------
+#-----------------------------CausalRCA---------------
+#-----------------------------------------------------
 arch="causalrca"
 main_model="aerca_based"
 attention_dim=256
 heads=2
 outer_att_dim_val=256
 outer_heads_val=2
-# --- Helper function to run experiments ---
+
 run_experiment_SWAT_CausalRCA() {
     for seed in "${seeds[@]}"; do
         for window_size_item in "${window_size[@]}"; do
@@ -309,25 +294,22 @@ run_experiment_SWAT_CausalRCA() {
         done
     done
 }
-# --- Run experiments ---
-# 2. With AMOC
 #run_experiment_SWAT_CausalRCA 1
 
 
 
 
-# --- Configurations ---
-seeds=(14 15 16 17 18)
-dataset=("msds")
-lrs=("1e-4")
-window_size=(1 2 3 4 5)
+
+#-----------------------------------------------------
+#-----------------------------GVAR---------------
+#-----------------------------------------------------
 arch="GVAR"
 main_model="aerca_based"
 attention_dim=256
 heads=2
 outer_att_dim_val=256
 outer_heads_val=2
-# --- Helper function to run experiments ---
+
 run_experiment_Cuts_MLP() {
     for seed in "${seeds[@]}"; do
         for window_size_item in "${window_size[@]}"; do
@@ -366,8 +348,6 @@ run_experiment_Cuts_MLP() {
         done
     done
 }
-# --- Run experiments ---
-# 2. With AMOC
 run_experiment_Cuts_MLP 1
 
 

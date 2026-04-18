@@ -1082,12 +1082,12 @@ class AERCA(nn.Module):
         # nexts: [B, P] (current actual)
         # winds[:, -1, :]: [B, P] (previous actual)
         # nexts_hat: [B, P] (predicted)
-        winds = attns #TODO clearn it afterwards
-        actual_velocity = nexts - winds[:, -1, :].squeeze(1) 
-        predicted_velocity = nexts_hat - winds[:, -1, :].squeeze(1)
+        #winds = attns #TODO clearn it afterwards
+        #actual_velocity = nexts - winds[:, -1, :].squeeze(1) 
+        #predicted_velocity = nexts_hat - winds[:, -1, :].squeeze(1)
 
-        loss_velocity = self.mse_loss(predicted_velocity, actual_velocity)
-        logging.info('Velocity reconstruction loss: %s', loss_velocity.item())
+        #loss_velocity = self.mse_loss(predicted_velocity, actual_velocity)
+        #logging.info('Velocity reconstruction loss: %s', loss_velocity.item())
 
         # Add a hyperparameter to control the weight of velocity
         lambda_velocity = self.options.get("lambda_velocity", 0.1)
@@ -1230,7 +1230,7 @@ class AERCA(nn.Module):
     def _training(self, xs):
         if self.options["dataset_name"] in ["msds","lotka_volterra","lorenz96","nonlinear"]:
             self._training_msds_lotka_swat_original(xs)
-        elif self.options["dataset_name"] in ["swat","smap","smd"]:
+        elif self.options["dataset_name"] in ["swat","smap","smd","wadi"]:
             #if self.options["coeff_architecture"] == "deep_mlp":
             #    self._training_msds_lotka_swat_original(xs)
             #else:
@@ -1278,7 +1278,18 @@ class AERCA(nn.Module):
                 #SMD = torch.Size([1000, 10, 38])
                 loss, _ = self._training_step(x_batch)
                 loss.backward()
-                self.optimizer.step()
+                try:
+                    self.optimizer.step()
+                # check if exception due to out of memory error 
+                except Exception as e:
+                    print(e)
+                    if 'CUDA out of memory' in str(e):
+                        self._log_and_print('Total parameters exceed 100 million, stopping training.')
+                        ac_at = [0, 0, 0, 0]
+                        k_at_step_all = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+                        write_results(self.options, self.local_model_name, ac_at, k_at_step_all, self.total_params, self.options.get("results_csv", 'RQ_swat_windows.csv'))
+                        #stop the whole python program
+                        os._exit(1)
                 epoch_loss += loss.item()
 
             self.writer.add_scalar('Loss/train', epoch_loss, epoch)
@@ -1829,7 +1840,14 @@ class AERCA(nn.Module):
                     pot_val, _ = pot(col_data, self.risk, self.initial_level, self.num_candidates)
                 except Exception as e:
                     self._log_and_print("POT failed for variable {}: {}", i, str(e))
-                    pot_val = np.percentile(col_data, 99.9)  # fallback
+                    #pot_val = np.percentile(col_data, 99.9)  # fallback
+                    # 3. SMART FALLBACK: 3-Sigma
+                    # This is more robust than a 99.9 percentile because it creates a gap
+                    mu = np.mean(col_data)
+                    sigma = np.std(col_data)
+                    
+                    # Use 3-sigma or a minimum 'noise floor' to avoid triggering on zeros
+                    pot_val = mu + max(3 * sigma, 1e-3)
 
             us_all_z_score_pot.append(pot_val)
 

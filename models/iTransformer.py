@@ -177,7 +177,7 @@ class Model(nn.Module):
     def _training(self, xs):
         if self.configs.options["dataset_name"] in ["msds","lotka_volterra","nonlinear"]:
             self._training_msds_lotka(xs)
-        elif self.configs.options["dataset_name"] in ["swat"]:
+        elif self.configs.options["dataset_name"] in ["swat","smd","wadi"]:
             self._training_batches_swat(xs)
         else:
             raise ValueError(f"Unknown dataset {self.configs.options['dataset']} for training")
