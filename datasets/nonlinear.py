@@ -3,7 +3,8 @@ import random
 import igraph as ig
 import os
 from tqdm import tqdm
-
+from layers.vlinear_arch import OrthTransform 
+import torch
 
 class Nonlinear:
     def __init__(self, options):
@@ -20,6 +21,7 @@ class Nonlinear:
         self.adtype = options['adtype']
         self.noise_scale = options['noise_scale']
         self.dependent_features = options['dependent_features']
+        self.window_size = options['window_size']
         self.generate_dag_graph()
 
     def generate_er_graph(self):
@@ -82,7 +84,7 @@ class Nonlinear:
         eps_ab_list = []
         label_list = []
 
-        coefficients = np.random.uniform(low=0.1, high=2.0, size=(self.num_vars, self.num_vars, 5))
+        coefficients = np.random.uniform(low=0.1, high=2.0, size=(self.num_vars, self.num_vars, self.window_size))
 
         for i in tqdm(range(self.n)):
             # Generate noise based on dependency flag.
@@ -108,12 +110,11 @@ class Nonlinear:
 
             # Initialize time series arrays with random initial values for the first 5 time steps.
             x = np.zeros((self.t, self.num_vars))
-            x[:5] = np.random.randn(5, self.num_vars)
+            x[:self.window_size] = np.random.randn(self.window_size, self.num_vars)
             x_ab = np.zeros((self.t, self.num_vars))
-            x_ab[:5] = x[:5].copy()
+            x_ab[:self.window_size] = x[:self.window_size].copy()
 
-            A_list = [self.data_dict['causal_struct'] * coefficients[:, :, lag] for lag in range(5)]
-
+            A_list = [self.data_dict['causal_struct'] * coefficients[:, :, lag] for lag in range(self.window_size)]
             # Set up anomaly parameters.
             t_p = np.random.randint(int(0.2 * self.t), int(0.8 * self.t), size=1)
             if self.adlength > 1:
@@ -127,28 +128,28 @@ class Nonlinear:
             temp_label[t_p, feature_p] = 1
 
             # Generate the normal time series x using the vectorized inner loop.
-            for t in range(5, self.t):
-                # Sum contributions from the previous 5 time steps.
+            for t in range(self.window_size, self.t):
+                # Sum contributions from the previous self.window_size time steps.
                 #contributions = sum(
-                #    A_list[lag].dot(np.cos(x[t - lag - 1, :] + 1)) for lag in range(5)
+                #    A_list[lag].dot(np.cos(x[t - lag - 1, :] + 1)) for lag in range(self.window_size)
                 #)
                 #contributions = sum(
                 #    A_list[lag].dot(
                 #        np.sin(x[t - lag - 1, :] + 0.5) + np.tanh(x[t - lag - 1, :]**2) + np.log1p(np.abs(x[t - lag - 1, :]))
                 #    )
-                #    for lag in range(5)
+                #    for lag in range(self.window_size)
                 #)
                 contributions = sum(
                     A_list[lag].dot(
                         np.sin(x[t - lag - 1, :] + 0.5) + np.log1p(np.abs(x[t - lag - 1, :]))
                     )
-                    for lag in range(5)
+                    for lag in range(self.window_size)
                 )
                 x[t, :] = contributions + eps_normal[t, :]
 
             # Generate the anomalous time series x_ab.
             ab_effect = np.zeros(self.num_vars)  # For causal adtype smoothing
-            for t in range(5, self.t):
+            for t in range(self.window_size, self.t):
                 # For anomaly time steps, update the noise with the anomaly effect.
                 if t in t_p_set:
                     if self.adtype == 'non_causal':
@@ -162,7 +163,7 @@ class Nonlinear:
                     eps_anom[t, :] += ab_effect
                     ab_effect = 0.95 * ab_effect  # decay for next timestep
                 contributions_ab = sum(
-                    A_list[lag].dot(np.cos(x_ab[t - lag - 1, :] + 1)) for lag in range(5)
+                    A_list[lag].dot(np.cos(x_ab[t - lag - 1, :] + 1)) for lag in range(self.window_size)
                 )
                 x_ab[t, :] = contributions_ab + eps_anom[t, :]
 
@@ -179,6 +180,39 @@ class Nonlinear:
         self.data_dict['eps_ab_list'] = np.array(eps_ab_list)
         self.data_dict['label_list'] = np.array(label_list)
 
+    def apply_orthogonal_transform(self, save_path, device='cpu'):
+        """
+        Projects windowed data into the orthogonal domain using the Q matrix.
+        """
+        # Ensure the save directory for the matrix exists
+        os.makedirs(save_path, exist_ok=True)
+
+        # 1. Initialize the Transform 
+        # It will use self.data_dict['x_n_list'] to compute Q if not saved
+        self.orth_transformer = OrthTransform(
+            dataset_obj=self, 
+            time_lag=self.window_size,
+            save_path=save_path, 
+            device=device
+        )
+        
+        # 2. Transform Normal Data
+        x_n_tensor = torch.from_numpy(self.data_dict['x_n_list']).float().to(device)
+        with torch.no_grad():
+            #(164, 51, 1000)
+            self.data_dict['x_n_orth'] = self.orth_transformer(x_n_tensor).cpu().numpy()
+        
+        # 3. Transform Abnormal (Attack) Data
+        # (20, 3, 51)
+        # label = (20, 3, 51)
+        x_ab_tensor = torch.from_numpy(self.data_dict['x_ab_list']).float().to(device)
+        with torch.no_grad():
+            #(20, 51, 3)
+            self.data_dict['x_ab_orth'] = self.orth_transformer(x_ab_tensor).cpu().numpy()
+        
+        print(f"Orthogonal transformation complete. Shape: {self.data_dict['x_n_orth'].shape}")
+        return self.orth_transformer
+    
     def generate_example_(self):
         if self.seed is not None:
             random.seed(self.seed)
@@ -530,3 +564,8 @@ class Nonlinear:
         self.data_dict['causal_struct'] = np.load(os.path.join(self.data_dir, 'causal_struct.npy'))
         self.data_dict['label_list'] = np.load(os.path.join(self.data_dir, 'label_list.npy'))
         self.data_dict['signed_causal_struct'] = None
+        # Define path for the Q matrix specifically
+        orth_matrix_dir = os.path.join(self.data_dir, 'orth_transform_meta')
+        
+        device = 'cpu'
+        return self.apply_orthogonal_transform(save_path=orth_matrix_dir, device=device)

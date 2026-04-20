@@ -22,3 +22,10 @@ wadiGVAR_(no mean)_normal_KL18_001337_5_0.0001_1_window_5,wadi,1,normal_KL,GVAR,
 wadiGVAR_(no mean)_normal_KL18_002602_1_0.0001_1_window_1,wadi,1,normal_KL,GVAR,256,2,0.0001,0.2625,0.30000000000000004,0.3125,0.325,0.3075,1984025,1,0,1000,0,0,256,2,123,0,mag_phase,attention,aerca_based
 wadiGVAR_(no mean)_normal_KL18_003522_7_0.0001_1_window_7,wadi,1,normal_KL,GVAR,256,2,0.0001,0.0875,0.1625,0.2,0.26875000000000004,0.20562500000000003,13888175,7,0,1000,0,0,256,2,123,0,mag_phase,attention,aerca_based
 wadiGVAR_(no mean)_normal_KL18_004915_10_0.0001_1_window_10,wadi,1,normal_KL,GVAR,256,2,0.0001,0.15,0.21250000000000002,0.28750000000000003,0.3625,0.265,19840250,10,0,1000,0,0,256,2,123,0,mag_phase,attention,aerca_based
+deep_mlp_(no mean)_normal_KL18_154617_5_0.0001_1_window_5,wadi,1,normal_KL,deep_mlp,256,2,0.0001,0.1125,0.1625,0.1875,0.2375,0.19375,794885,5,0,1000,0,0,128,2,123,0,normal,gated,iTransformer
+deep_mlp_(no mean)_normal_KL18_155129_5_0.0001_1_window_5,wadi,1,normal_KL,deep_mlp,256,2,0.0001,0.0375,0.07500000000000001,0.07500000000000001,0.15000000000000002,0.09250000000000001,2057718,5,0,1000,0,0,128,2,123,0,normal,gated,FEDformer
+deep_mlp_(no mean)_normal_KL18_155454_1_0.0001_1_window_1,wadi,1,normal_KL,deep_mlp,256,2,0.0001,0.175,0.3,0.4,0.4875,0.38125,1795574,1,0,1000,0,0,128,2,123,0,normal,gated,FEDformer
+deep_mlp_(no mean)_normal_KL18_155714_7_0.0001_1_window_7,wadi,1,normal_KL,deep_mlp,256,2,0.0001,0.0,0.0125,0.0125,0.025,0.01625,2123254,7,0,1000,0,0,128,2,123,0,normal,gated,FEDformer
+deep_mlp_(no mean)_normal_KL18_160051_10_0.0001_1_window_10,wadi,1,normal_KL,deep_mlp,256,2,0.0001,0.0,0.0,0.0,0.0,0.0,2385398,10,0,1000,0,0,128,2,123,0,normal,gated,FEDformer
+wadiGVAR_(no mean)_normal_KL18_160914_5_0.0001_1_window_5,wadi,1,normal_KL,GVAR,256,2,0.0001,0.1125,0.1625,0.2,0.225,0.18750000000000003,9920125,5,0,1000,0,0,256,2,123,0,mag_phase,attention,aerca_based
+wadiGVAR_(no mean)_normal_KL18_162236_1_0.0001_1_window_1,wadi,1,normal_KL,GVAR,256,2,0.0001,0.2625,0.30000000000000004,0.3125,0.325,0.3075,1984025,1,0,1000,0,0,256,2,123,0,mag_phase,attention,aerca_based

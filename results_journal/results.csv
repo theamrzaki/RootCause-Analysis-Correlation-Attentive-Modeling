@@ -13,3 +13,11 @@ swatrcd_(no mean)_normal_KL18_021354_7_0.0001_1_window_7,swat,1,normal_KL,rcd,25
 swatepsilon_diagnosis_(no mean)_normal_KL18_021413_7_0.0001_1_window_7,swat,1,normal_KL,epsilon_diagnosis,256,2,0.0001,0.0,0.1,0.1,0.3,0.14,0,7,0,100,0,0,128,2,51,0,normal,gated,aerca_based
 swatrcd_(no mean)_normal_KL18_140412_10_0.0001_1_window_10,swat,1,normal_KL,rcd,256,2,0.0001,0.0,0.0,0.0,0.3,0.1,0,10,0,100,0,0,128,2,51,0,normal,gated,aerca_based
 swatepsilon_diagnosis_(no mean)_normal_KL18_140444_10_0.0001_1_window_10,swat,1,normal_KL,epsilon_diagnosis,256,2,0.0001,0.05,0.1,0.1,0.3,0.14250000000000002,0,10,0,100,0,0,128,2,51,0,normal,gated,aerca_based
+swatrcd_(no mean)_normal_KL18_163336_5_0.0001_1_window_5,swat,1,normal_KL,rcd,256,2,0.0001,0.0,0.0,0.0,0.3,0.1,0,5,0,100,0,0,128,2,51,0,normal,gated,aerca_based
+swatepsilon_diagnosis_(no mean)_normal_KL18_163408_5_0.0001_1_window_5,swat,1,normal_KL,epsilon_diagnosis,256,2,0.0001,0.05,0.1,0.1,0.3,0.14250000000000002,0,5,0,100,0,0,128,2,51,0,normal,gated,aerca_based
+swatrcd_(no mean)_normal_KL18_163603_1_0.0001_1_window_1,swat,1,normal_KL,rcd,256,2,0.0001,0.0,0.0,0.0,0.3,0.1,0,1,0,100,0,0,128,2,51,0,normal,gated,aerca_based
+swatepsilon_diagnosis_(no mean)_normal_KL18_163633_1_0.0001_1_window_1,swat,1,normal_KL,epsilon_diagnosis,256,2,0.0001,0.05,0.1,0.1,0.3,0.14250000000000002,0,1,0,100,0,0,128,2,51,0,normal,gated,aerca_based
+swatrcd_(no mean)_normal_KL18_163831_7_0.0001_1_window_7,swat,1,normal_KL,rcd,256,2,0.0001,0.0,0.0,0.0,0.3,0.1,0,7,0,100,0,0,128,2,51,0,normal,gated,aerca_based
+swatepsilon_diagnosis_(no mean)_normal_KL18_163909_7_0.0001_1_window_7,swat,1,normal_KL,epsilon_diagnosis,256,2,0.0001,0.05,0.1,0.1,0.3,0.14250000000000002,0,7,0,100,0,0,128,2,51,0,normal,gated,aerca_based
+swatrcd_(no mean)_normal_KL18_164109_10_0.0001_1_window_10,swat,1,normal_KL,rcd,256,2,0.0001,0.0,0.0,0.0,0.3,0.1,0,10,0,100,0,0,128,2,51,0,normal,gated,aerca_based
+swatepsilon_diagnosis_(no mean)_normal_KL18_164142_10_0.0001_1_window_10,swat,1,normal_KL,epsilon_diagnosis,256,2,0.0001,0.05,0.1,0.1,0.3,0.14250000000000002,0,10,0,100,0,0,128,2,51,0,normal,gated,aerca_based

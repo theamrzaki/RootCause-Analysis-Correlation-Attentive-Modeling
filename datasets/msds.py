@@ -1,3 +1,4 @@
+import torch
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
@@ -6,6 +7,7 @@ import zipfile
 from datetime import datetime
 import os
 from functools import reduce
+from layers.vlinear_arch import OrthTransform 
 
 
 def download_and_extract_zenodo_msds():
@@ -171,6 +173,39 @@ class MSDS:
         self.data_dict['x_ab_list'] = np.array(test_x_lst)
         self.data_dict['label_list'] = np.array(label_lst)
 
+    def apply_orthogonal_transform(self, save_path, device='cpu'):
+        """
+        Projects windowed data into the orthogonal domain using the Q matrix.
+        """
+        # Ensure the save directory for the matrix exists
+        os.makedirs(save_path, exist_ok=True)
+
+        # 1. Initialize the Transform 
+        # It will use self.data_dict['x_n_list'] to compute Q if not saved
+        self.orth_transformer = OrthTransform(
+            dataset_obj=self, 
+            time_lag=self.window_size,
+            save_path=save_path, 
+            device=device
+        )
+        
+        # 2. Transform Normal Data
+        x_n_tensor = torch.from_numpy(self.data_dict['x_n_list']).float().to(device)
+        with torch.no_grad():
+            #(164, 51, 1000)
+            self.data_dict['x_n_orth'] = self.orth_transformer(x_n_tensor).cpu().numpy()
+        
+        # 3. Transform Abnormal (Attack) Data
+        # (20, 3, 51)
+        # label = (20, 3, 51)
+        x_ab_tensor = torch.from_numpy(self.data_dict['x_ab_list']).float().to(device)
+        with torch.no_grad():
+            #(20, 51, 3)
+            self.data_dict['x_ab_orth'] = self.orth_transformer(x_ab_tensor).cpu().numpy()
+        
+        print(f"Orthogonal transformation complete. Shape: {self.data_dict['x_n_orth'].shape}")
+        return self.orth_transformer
+    
     def save_data(self):
         if not os.path.exists(self.data_dir):
             os.makedirs(self.data_dir)
@@ -183,3 +218,8 @@ class MSDS:
         self.data_dict['x_n_list'] = np.load(os.path.join(self.data_dir, 'x_n_list.npy'), allow_pickle=False)
         self.data_dict['x_ab_list'] = np.load(os.path.join(self.data_dir, 'x_ab_list.npy'), allow_pickle=True)
         self.data_dict['label_list'] = np.load(os.path.join(self.data_dir, 'label_list.npy'), allow_pickle=True)
+        # Define path for the Q matrix specifically
+        orth_matrix_dir = os.path.join(self.data_dir, 'orth_transform_meta')
+        
+        device = 'cpu'
+        return None#self.apply_orthogonal_transform(save_path=orth_matrix_dir, device=device)

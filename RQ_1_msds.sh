@@ -1,22 +1,31 @@
-seeds=(1 2 3)
-dataset=("msds")
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate RCAEval
+
+seeds=(1)
+dataset="msds"
+window_size=(2 3 4 5)
 lrs=("1e-4")
-window_size=(1 2 3 4 5)
+
+#-------------------------------------------------------------------
+#-----------------------------vlinear-------------------------------
+#-------------------------------------------------------------------
 
 
-#-----------------------------------------------------
-#-----------------------------Fedformer---------------
-#-----------------------------------------------------
-main_model="FEDformer"
-attention_dim=16
-heads=2
-outer_att_dim_val=16
-outer_heads_val=2
 
-run_experiment_Fedformer() {
-    for seed in "${seeds[@]}"; do
-        for window_size_item in "${window_size[@]}"; do
+run_vlinear() {
+    local preprocessing_data=$1
+    local seed=$2
+    local window_size_item=$3
+
+    local arch="vlinear"
+    local main_model="aerca_based"
+    local attention_dim=16
+    local heads=2
+    local outer_att_dim_val=16
+    local outer_heads_val=2
+
                                 echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model"
+
 
                                 cmd="python3 main.py \
                                         --correlated_KL=0 --mean_std_recon_loss=0 --AMOC_Loss=0 \
@@ -24,7 +33,10 @@ run_experiment_Fedformer() {
                                         --encoder_lambda=0.5 --decoder_lambda=0.5 --beta=0.5 \
 
                                     --main_model=$main_model \
+                                    --coeff_architecture="$arch" \
                                     --time_freq_representation="mag_phase" \
+
+                                    --preprocessing_data="$preprocessing_data" \
 
                                     --lr="$lrs" \
                                     --seed="$seed" \
@@ -34,8 +46,8 @@ run_experiment_Fedformer() {
                                     --training_aerca=1 \
                                     --epochs=1000 \
                                     --early_stopping=0 \
-                                    --preprocessing_data=0 \
-                                    --results_csv="RQ_1_msds.csv" \
+                                    --combine_method="attention" \
+                                    --results_csv="RQ_1_msds_window_correct.csv" \
 
                                     --attention_dim="$attention_dim" \
                                     --num_attention_heads="$heads" \
@@ -47,127 +59,150 @@ run_experiment_Fedformer() {
                                 eval $cmd
                         
             
-        done
-    done
 }
-#run_experiment_Fedformer 1
 
 
-#-----------------------------------------------------
-#-----------------------------rcd & epsilon diagnosis---------------
-#-----------------------------------------------------
-coeff_architecture=("rcd" "epsilon_diagnosis")
-main_model="aerca_based"
-attention_dim=16
-heads=2
-outer_att_dim_val=16
-outer_heads_val=2
-
-run_experiment_Baselines() {
-    for seed in "${seeds[@]}"; do
-        for window_size_item in "${window_size[@]}"; do
-            for coeff_architecture_item in "${coeff_architecture[@]}"; do
-                                echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model | coeff_architecture=$coeff_architecture_item"
-
-                                cmd="python3 main.py \
-                                        --correlated_KL=0 --mean_std_recon_loss=0 --AMOC_Loss=0 \
-                                        --encoder_alpha=0.5 --decoder_alpha=0.5 --encoder_gamma=0.5 --decoder_gamma=0.5 \
-                                        --encoder_lambda=0.5 --decoder_lambda=0.5 --beta=0.5 \
-
-                                    --main_model=$main_model \
-                                    --time_freq_representation="mag_phase" \
-
-                                    --lr="$lrs" \
-                                    --seed="$seed" \
-                                    --dataset="$dataset" \
-                                    --window_size="$window_size_item" \
-
-                                    --training_aerca=0\
-                                    --epochs=1000 \
-                                    --early_stopping=0 \
-                                    --preprocessing_data=0 \
-                                    --results_csv="RQ_1_msds.csv" \
-                                    --coeff_architecture="$coeff_architecture_item" \
-                                    --attention_dim="$attention_dim" \
-                                    --num_attention_heads="$heads" \
-                                    --outer_heads_num="$outer_heads_val" \
-                                    --outer_hidden_dim="$outer_att_dim_val" \
-
-                                       "
-
-                                eval $cmd
-                        
-            done
-        done
-    done
-    }
-#run_experiment_Baselines 1
+#-------------------------------------------------------------------
+#------------------------------Deep MLP-----------------------------
+#-------------------------------------------------------------------
 
 
-#-----------------------------------------------------
-#-----------------------------iTransformer---------------
-#-----------------------------------------------------
-arch="iTransformer"
-main_model="iTransformer"
-attention_dim=16
-heads=2
-outer_att_dim_val=16
-outer_heads_val=2
+run_deepmlp() {
+    local preprocessing_data=$1
+    local seed=$2
+    local window_size_item=$3
 
-run_experiment_SWAT_iTransformer() {
-    for seed in "${seeds[@]}"; do
-        for window_size_item in "${window_size[@]}"; do
-                                echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model"
+    local coeff_architecture="deep_mlp"
+    local main_model="aerca_based"
+    local att_dim=16
+    
+                    echo "Running: dataset=$dataset | seed=$seed | arch=$coeff_architecture | window_size=$window_size_item | lr=$lrs"
+
+                    cmd="python3 main.py \
+                        --correlated_KL=0 --mean_std_recon_loss=0 --AMOC_Loss=0 \
+                        --encoder_alpha=0.5 --decoder_alpha=0.5 --encoder_gamma=0.5 --decoder_gamma=0.5 \
+                        --encoder_lambda=0.5 --decoder_lambda=0.5 --beta=0.5 \
+                        --main_model=$main_model \
+                        --lr=$lrs \
+                        --seed=$seed \
+                        --dataset=$dataset \
+                        --coeff_architecture=$coeff_architecture \
+                        --window_size=$window_size_item \
+                        --preprocessing_data=$preprocessing_data \
+                        --training_aerca=1 \
+                        --epochs=1000 \
+                        --early_stopping=1 \
+                        --results_csv=RQ_1_msds_window_correct.csv"
+
+                    eval $cmd
+}
+
+
+
+#-------------------------------------------------------------------
+#-----------------------------Fedformer-----------------------------
+#-------------------------------------------------------------------
+
+
+run_Fedformer() {
+    local preprocessing_data=$1
+    local seed=$2
+    local window_size_item=$3
+
+    local lrs=("1e-4")
+    local main_model=("FEDformer")
+    local attention_dim=16
+    local heads=2
+
+                        for main_model_item in "${main_model[@]}"; do
+                                echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model_item"
 
                                 cmd="python3 main.py \
-                                        --correlated_KL=0 --mean_std_recon_loss=0 --AMOC_Loss=0 \
-                                        --encoder_alpha=0.5 --decoder_alpha=0.5 --encoder_gamma=0.5 --decoder_gamma=0.5 \
-                                        --encoder_lambda=0.5 --decoder_lambda=0.5 --beta=0.5 \
-
-                                    --main_model=$main_model \
-                                    --time_freq_representation="mag_phase" \
-
-                                    --lr="$lrs" \
-                                    --seed="$seed" \
-                                    --dataset="$dataset" \
-                                    --window_size="$window_size_item" \
-
+                                                --correlated_KL=0 --mean_std_recon_loss=0 --AMOC_Loss=0 \
+                                    --encoder_alpha=0.5 --decoder_alpha=0.5 --encoder_gamma=0.5 --decoder_gamma=0.5 \
+                                    --encoder_lambda=0.5 --decoder_lambda=0.5 --beta=0.5 \
+                                    --lr=$lrs \
+                                    --main_model=$main_model_item \
+                                    --attention_dim=$attention_dim \
+                                    --num_attention_heads=$heads \
+                                    --seed=$seed \
+                                    --dataset=$dataset \
+                                    --preprocessing_data=$preprocessing_data \
+                                    --window_size=$window_size_item \
                                     --training_aerca=1 \
                                     --epochs=1000 \
                                     --early_stopping=0 \
-                                    --preprocessing_data=0 \
-                                    --results_csv="RQ_1_msds.csv" \
-
-                                    --attention_dim="$attention_dim" \
-                                    --num_attention_heads="$heads" \
-                                    --outer_heads_num="$outer_heads_val" \
-                                    --outer_hidden_dim="$outer_att_dim_val" \
-
-                                       "
+                                    --results_csv=RQ_1_msds_window_correct.csv"
 
                                 eval $cmd
-                        
+                        done
             
-        done
-    done
 }
-#run_experiment_SWAT_iTransformer 1
+
+
+#-------------------------------------------------------------------
+#-----------------------------iTransformer--------------------------
+#-------------------------------------------------------------------
+
+
+run_iTransformer() {
+    local preprocessing_data=$1
+    local seed=$2
+    local window_size_item=$3
+
+    local lrs=("1e-4")
+    local main_model=("iTransformer")
+    local attention_dim=16
+    local heads=2
+
+                                echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model"
+
+                                cmd="python3 main.py \
+                                                --correlated_KL=0 --mean_std_recon_loss=0 --AMOC_Loss=0 \
+                                    --encoder_alpha=0.5 --decoder_alpha=0.5 --encoder_gamma=0.5 --decoder_gamma=0.5 \
+                                    --encoder_lambda=0.5 --decoder_lambda=0.5 --beta=0.5 \
+                                    --lr=$lrs \
+                                    --main_model=$main_model \
+                                    --attention_dim=$attention_dim \
+                                    --num_attention_heads=$heads \
+                                    --seed=$seed \
+                                    --dataset=$dataset \
+                                    --window_size=$window_size_item \
+                                    --preprocessing_data=$preprocessing_data \
+                                    --training_aerca=1 \
+                                    --epochs=1000 \
+                                    --early_stopping=0 \
+                                    --results_csv=RQ_1_msds_window_correct.csv"
+
+                                eval $cmd
+            
+}
 
 
 
-#-----------------------------------------------------
-#-----------------------------vLinear---------------
-#-----------------------------------------------------
-arch="vlinear"
-main_model="aerca_based"
-attention_dim=16
-heads=2
-outer_att_dim_val=16
-outer_heads_val=2
 
-run_experiment_SWAT_CrGSTA() {
-    for seed in "${seeds[@]}"; do
-        for window_size_item in "${window_size[@]}"; do
+
+
+
+#-------------------------------------------------------------------
+#-----------------------------GVAR----------------------------------
+#-------------------------------------------------------------------
+
+
+
+run_GVAR() {
+    local preprocessing_data=$1
+    local seed=$2
+    local window_size_item=$3
+
+    local lrs=("1e-4")
+    local arch="GVAR"
+    local main_model="aerca_based"
+    local attention_dim=16
+    local heads=2
+    local outer_att_dim_val=16
+    local outer_heads_val=2
+
                                 echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model"
 
                                 cmd="python3 main.py \
@@ -185,11 +220,11 @@ run_experiment_SWAT_CrGSTA() {
                                     --window_size="$window_size_item" \
 
                                     --training_aerca=1 \
-                                    --epochs=50 \
+                                    --epochs=1000 \
                                     --early_stopping=0 \
-                                    --preprocessing_data=0 \
+                                    --preprocessing_data=$preprocessing_data \
                                     --combine_method="attention" \
-                                    --results_csv="RQ_1_msds.csv" \
+                                    --results_csv="RQ_1_msds_window_correct.csv" \
 
                                     --attention_dim="$attention_dim" \
                                     --num_attention_heads="$heads" \
@@ -201,65 +236,31 @@ run_experiment_SWAT_CrGSTA() {
                                 eval $cmd
                         
             
-        done
-    done
 }
-#run_experiment_SWAT_CrGSTA 1
-
-
-
-#-----------------------------------------------------
-#-----------------------------Deep MLP---------------
-#-----------------------------------------------------
-coeff_architecture="deep_mlp"
-main_model="aerca_based"
-lrs="1e-6"
-
-run_experiment_deepmlp() {
-    for seed in "${seeds[@]}"; do
-        for window_size_item in "${window_size[@]}"; do
-        
-                    echo "Running: dataset=$dataset | seed=$seed | arch=$coeff_architecture | window_size=$window_size_item | lr=$lrs"
-
-                    cmd="python3 main.py \
-                        --correlated_KL=0 --mean_std_recon_loss=0 --AMOC_Loss=0 \
-                        --encoder_alpha=0.5 --decoder_alpha=0.5 --encoder_gamma=0.5 --decoder_gamma=0.5 \
-                        --encoder_lambda=0.5 --decoder_lambda=0.5 --beta=0.5 \
-                        --main_model=$main_model \
-                        --lr=$lrs \
-                        --seed=$seed \
-                        --dataset=$dataset \
-                        --coeff_architecture=$coeff_architecture \
-                        --window_size=$window_size_item \
-                        --preprocessing_data=0 \
-                        --training_aerca=1 \
-                        --epochs=1000 \
-                        --early_stopping=1 \
-                        --results_csv=RQ_1_msds.csv"
-
-                    eval $cmd
-        done
-    done
-}
-#run_experiment_deepmlp
 
 
 
 
-#-----------------------------------------------------
-#-----------------------------CausalRCA---------------
-#-----------------------------------------------------
-arch="causalrca"
-main_model="aerca_based"
-attention_dim=256
-heads=2
-outer_att_dim_val=256
-outer_heads_val=2
+#-------------------------------------------------------------------
+#-----------------------------causalrca-----------------------------
+#-------------------------------------------------------------------
 
-run_experiment_SWAT_CausalRCA() {
-    for seed in "${seeds[@]}"; do
-        for window_size_item in "${window_size[@]}"; do
-                                echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model | coeff_architecture=$arch"
+
+
+run_causalrca() {
+
+    local preprocessing_data=$1
+    local seed=$2
+    local window_size_item=$3
+
+    local arch="causalrca"
+    local main_model="aerca_based"
+    local attention_dim=16
+    local heads=2
+    local outer_att_dim_val=16
+    local outer_heads_val=2
+
+                                echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model"
 
                                 cmd="python3 main.py \
                                         --correlated_KL=0 --mean_std_recon_loss=0 --AMOC_Loss=0 \
@@ -267,7 +268,7 @@ run_experiment_SWAT_CausalRCA() {
                                         --encoder_lambda=0.5 --decoder_lambda=0.5 --beta=0.5 \
 
                                     --main_model=$main_model \
-                                     --coeff_architecture="$arch" \
+                                    --coeff_architecture="$arch" \
                                     --time_freq_representation="mag_phase" \
 
                                     --lr="$lrs" \
@@ -278,8 +279,9 @@ run_experiment_SWAT_CausalRCA() {
                                     --training_aerca=1 \
                                     --epochs=1000 \
                                     --early_stopping=0 \
-                                    --preprocessing_data=0 \
-                                    --results_csv="RQ_1_msds.csv" \
+                                    --preprocessing_data=$preprocessing_data \
+                                    --combine_method="attention" \
+                                    --results_csv="RQ_1_msds_window_correct.csv" \
 
                                     --attention_dim="$attention_dim" \
                                     --num_attention_heads="$heads" \
@@ -291,64 +293,63 @@ run_experiment_SWAT_CausalRCA() {
                                 eval $cmd
                         
             
-        done
+}
+
+#-------------------------------------------------------------------
+#-----------------------------rcd & epsilon diagnosis---------------
+#-------------------------------------------------------------------
+
+
+
+run_experiment_baselines() {
+    local preprocessing_data=$1
+    local seed=$2
+    local window_size_item=$3
+
+    local coeff_architecture=("rcd" "epsilon_diagnosis")
+    local main_model="aerca_based" # Changed from array to string
+
+    for arch in "${coeff_architecture[@]}"; do
+        echo "Running: dataset=$dataset | seed=$seed | arch=$arch | window_size=$window_size_item"
+
+        cmd="python3 main.py \
+            --seed=$seed \
+            --dataset=$dataset \
+            --coeff_architecture=$arch \
+            --preprocessing_data=$preprocessing_data \
+            --window_size=$window_size_item \
+            --main_model=$main_model \
+            --training_aerca=0 \
+            --results_csv=RQ_1_msds_window_correct.csv" # Removed the comment/backslash error here
+
+        eval $cmd
     done
 }
-#run_experiment_SWAT_CausalRCA 1
 
 
 
+#-------------------------------------------------------------------
+#-----------------------------SWAT experiments-------------------------
+#-------------------------------------------------------------------
 
-
-#-----------------------------------------------------
-#-----------------------------GVAR---------------
-#-----------------------------------------------------
-arch="GVAR"
-main_model="aerca_based"
-attention_dim=256
-heads=2
-outer_att_dim_val=256
-outer_heads_val=2
-
-run_experiment_Cuts_MLP() {
+for window_size_item in "${window_size[@]}"; do
     for seed in "${seeds[@]}"; do
-        for window_size_item in "${window_size[@]}"; do
-                                echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model | coeff_architecture=$arch"
+        if [ $seed -eq 1 ]; then
+            preprocessing_data=1
+        else
+            preprocessing_data=0
+        fi
+        run_deepmlp $preprocessing_data $seed $window_size_item
+                
 
-                                cmd="python3 main.py \
-                                        --correlated_KL=0 --mean_std_recon_loss=0 --AMOC_Loss=0 \
-                                        --encoder_alpha=0.5 --decoder_alpha=0.5 --encoder_gamma=0.5 --decoder_gamma=0.5 \
-                                        --encoder_lambda=0.5 --decoder_lambda=0.5 --beta=0.5 \
-
-                                    --main_model=$main_model \
-                                     --coeff_architecture="$arch" \
-                                    --time_freq_representation="mag_phase" \
-
-                                    --lr="$lrs" \
-                                    --seed="$seed" \
-                                    --dataset="$dataset" \
-                                    --window_size="$window_size_item" \
-
-                                    --training_aerca=1 \
-                                    --epochs=1000 \
-                                    --early_stopping=0 \
-                                    --preprocessing_data=0 \
-                                    --results_csv="RQ_1_msds.csv" \
-
-                                    --attention_dim="$attention_dim" \
-                                    --num_attention_heads="$heads" \
-                                    --outer_heads_num="$outer_heads_val" \
-                                    --outer_hidden_dim="$outer_att_dim_val" \
-
-                                       "
-
-                                eval $cmd
-                        
-            
-        done
+        #run_vlinear $preprocessing_data $seed $window_size_item
+        if [ $preprocessing_data -eq 1 ]; then
+            preprocessing_data=0
+        fi
+        run_Fedformer $preprocessing_data $seed $window_size_item
+        run_iTransformer $preprocessing_data $seed $window_size_item
+        run_GVAR $preprocessing_data $seed $window_size_item
+        run_causalrca $preprocessing_data $seed $window_size_item
+        run_experiment_baselines $preprocessing_data $seed $window_size_item
     done
-}
-run_experiment_Cuts_MLP 1
-
-
-
+done
