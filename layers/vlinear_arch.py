@@ -243,7 +243,6 @@ class OrthTransform(nn.Module):
         disable_orth = False
         # x_orth: [Batch, Channels, Current_W]
         if disable_orth:
-            # IDENTITY MODE: Just return to time-major shape
             return x_orth.transpose(1, 2)
 
         # --- ORTHOGONAL MODE ---
@@ -303,27 +302,34 @@ class vlinear(nn.Module):
 
         # 2. Updated Embeddings 
         # In the Model code, embeddings are often 1D and expanded
-        self.embeddings = nn.Parameter(torch.randn(1, hidden_dim))
-        
+        #self.embeddings = nn.Parameter(torch.randn(1, hidden_dim))
+        self.embeddings = nn.Parameter(torch.randn(1, num_vars, 1, hidden_dim))
         # 3. Projection matching the Model's logic
-        self.temporal_proj = nn.Linear(self.order, hidden_dim)
+        #self.temporal_proj = nn.Linear(self.order, hidden_dim)
+        self.temporal_proj = nn.Linear(1, hidden_dim)
+        #self.temporal_proj = nn.Sequential(
+        #    nn.Linear(1, hidden_dim // 2),
+        #    nn.GELU(),
+        #    nn.Linear(hidden_dim // 2, hidden_dim)
+        #)
         self.a = nn.Parameter(torch.randn(num_vars))
         self.ln = nn.LayerNorm(hidden_dim)
         self.vf = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim * 2),
+            nn.Linear(hidden_dim, hidden_dim*2),
             nn.ReLU(),
-            nn.Linear(hidden_dim * 2, self.order) 
+            nn.Linear(hidden_dim*2, self.order) 
         )
         #self.revin = RevIN(num_vars)
 
-    def forward(self, inputs: torch.Tensor):
+    def forward_temporal_smear(self, inputs: torch.Tensor):
         B, O_curr, P = inputs.shape
-        # z: [B, P, H]
-
         
         # --- 1. Step into Orthogonal Domain ---
         #inputs = self.revin(inputs, mode='norm')
-        x_orth = self.orth_transformer(inputs) # [B, P, 1000]
+        if self.orth_transformer is None:
+            x_orth = inputs.transpose(1, 2) # [B, P, O_curr] -> [B, O_curr, P]
+        else:
+            x_orth = self.orth_transformer(inputs) # [B, P, 1000]
         
         # --- 2. Apply Delta1 Bias ---
         # We unsqueeze to [B, P, 1, 1000] to match Model's 4D logic
@@ -362,7 +368,10 @@ class vlinear(nn.Module):
         v_pred = v_pred.squeeze(-2) # [B, P, 1000]
         
         # --- 5. Return to Time Domain ---
-        preds_all_time = self.orth_transformer.inverse(v_pred)
+        if self.orth_transformer is None:
+            preds_all_time = v_pred.transpose(1, 2) # [B, P, O_curr] -> [B, O_curr, P]
+        else:
+            preds_all_time = self.orth_transformer.inverse(v_pred)
         preds = preds_all_time[:, -1, :] 
         #preds_all_time = self.revin(preds_all_time, mode='denorm')
         #preds = preds_all_time[:, -1, :]
@@ -393,3 +402,260 @@ class vlinear(nn.Module):
 
         return preds, coeffs_time, coeffs_freq
     
+    def forward(self, inputs: torch.Tensor):
+        B, O_curr, P = inputs.shape # [B, 20, 51]
+        
+        # --- 1. Step into Orthogonal Domain ---
+        if self.orth_transformer is None:
+            x_orth = inputs.transpose(1, 2) # [B, 51, 20]
+        else:
+            x_orth = self.orth_transformer(inputs) # [B, 51, 20]
+        
+        # --- 2. Apply Delta1 Bias ---
+        # x_orth_biased: [B, P, 1, 20]
+        x_orth_biased = x_orth.unsqueeze(-2) + self.delta1
+        
+        # --- 3. Truly Dynamic Latent Generation ---
+        # We reshape to treat (Batch * Sensor * Time) as independent observations
+        # of the same physical process.
+        # [B, P, 1, 20] -> [B, 20, P, 1]
+        x_t = x_orth_biased.squeeze(-2).transpose(1, 2).unsqueeze(-1)
+        
+        # Project each sensor at each time step into H-space
+        # cond: [B, 20, P, H]
+        cond = self.temporal_proj(x_t) * self.embeddings.transpose(1, 2) 
+        
+        # --- 4. Dynamic AERCA Coefficients (The "Anti-Smear") ---
+        # This creates a unique PxP matrix for every single step in the window.
+        # No more .repeat()!
+        coeffs_time = torch.einsum('btph, btqh -> btpq', cond, cond)
+        coeffs_time = torch.tanh(coeffs_time)
+
+        # --- 5. Prediction (Forecasting) ---
+        # We aggregate the temporal info for the final forecast.
+        # You can use the last step or a mean across the window.
+        z_final = cond.mean(dim=1) # [B, P, H]
+        v_pred = self.vf(z_final).unsqueeze(-2) + self.delta2
+        v_pred = v_pred.squeeze(-2) 
+
+        if self.orth_transformer is None:
+            preds_all_time = v_pred.transpose(1, 2)
+        else:
+            preds_all_time = self.orth_transformer.inverse(v_pred)
+        
+        preds = preds_all_time[:, -1, :] 
+        coeffs_freq = coeffs_time[:, 0, :, :] # First step of the window
+
+        return preds, coeffs_time, coeffs_freq
+    
+
+class vlinear_new2(nn.Module):
+    def __init__(self, num_vars, order, hidden_dim=256, device="cpu", options=None):
+        super().__init__()
+        self.num_vars = num_vars  
+        self.order = order # This is your 'seq_len' or 'lag'
+        self.device = device
+        
+        # Pull the orthogonal transformer (Q_in/Q_out logic) from options
+        self.orth_transformer = options.get('orth_transformer') 
+        
+        # 1. Delta Biases (Matches your Model's delta1/delta2)
+        # These provide the "learned baseline" in the spectral domain
+        self.delta1 = nn.Parameter(torch.zeros(1, num_vars, 1, self.order))
+        self.delta2 = nn.Parameter(torch.zeros(1, num_vars, 1, self.order))
+
+        # 2. Spectral Embedding
+        # Matches your tokenEmb logic (x * embeddings)
+        self.embed_dim = hidden_dim
+        self.embeddings = nn.Parameter(torch.randn(1, self.embed_dim))
+        
+        # 3. Temporal Projection (The Theta Generator)
+        # We project the 1D sensor value at each spectral tick into hidden space
+        self.temporal_proj = nn.Linear(1, self.embed_dim)
+        
+        # 4. Query-Key Heads (For Dynamic i,j Coefficients)
+        # This increases capacity and ensures theta(x) varies per step
+        self.q_proj = nn.Linear(self.embed_dim, self.embed_dim // 2)
+        self.k_proj = nn.Linear(self.embed_dim, self.embed_dim // 2)
+
+        # 5. Prediction Head (The Velocity Field / Forecasting logic)
+        self.vf_head = nn.Sequential(
+            nn.Linear(self.embed_dim, self.embed_dim),
+            nn.GELU(),
+            nn.Linear(self.embed_dim, self.order) 
+        )
+
+    def forward(self, inputs: torch.Tensor):
+        B, O_curr, P = inputs.shape # [Batch, Time, Sensors]
+        
+        # --- 1. Spectral Transformation ---
+        # Move to [B, P, O_curr] then apply the Q_in matrix via the transformer
+        if self.orth_transformer is not None:
+            x_spec = self.orth_transformer(inputs) # [B, P, Order]
+        else:
+            x_spec = inputs.transpose(1, 2)
+
+        # --- 2. Spectral Bias & Embedding (Faithfulness) ---
+        # [B, P, Order] -> [B, P, 1, Order] + [1, P, 1, Order]
+        x_spec_biased = x_spec.unsqueeze(-2) + self.delta1
+        
+        # Tokenize: [B, P, 1, Order] -> [B, Order, P, 1]
+        x_t = x_spec_biased.squeeze(-2).transpose(1, 2).unsqueeze(-1)
+        
+        # cond: [B, Order, P, Hidden]
+        # This is your 'theta' generator base
+        cond = self.temporal_proj(x_t) * self.embeddings 
+        
+        # --- 3. Generate Dynamic Coefficients (The "Anti-Smear" Fix) ---
+        # We use Q-K interaction to find the i,j influence at each spectral tick
+        q = self.q_proj(cond) # [B, Order, P, H/2]
+        k = self.k_proj(cond) # [B, Order, P, H/2]
+        
+        # coeffs_time: [B, Order, P, P] 
+        # This is entry (i,j): effect of sensor j on sensor i at time t
+        coeffs_time = torch.einsum('btph, btqh -> btpq', q, k)
+        coeffs_time = torch.tanh(coeffs_time)
+
+        # --- 4. Prediction Logic ---
+        # Following your 'gen_latent_rep' logic: mean over time then project back
+        z_latent = cond.mean(dim=1) # [B, P, Hidden]
+        
+        # Apply the forecasting head and the second bias
+        v_pred = self.vf_head(z_latent).unsqueeze(-2) + self.delta2
+        v_pred = v_pred.squeeze(-2) # [B, P, Order]
+        
+        # --- 5. Inverse Spectral Transformation ---
+        if self.orth_transformer is not None:
+            preds_all_time = self.orth_transformer.inverse(v_pred)
+        else:
+            preds_all_time = v_pred.transpose(1, 2)
+            
+        # Standard output for next-step prediction
+        preds = preds_all_time[:, -1, :] 
+        
+        # Coeffs for the current state (usually the start of the window)
+        coeffs_freq = coeffs_time[:, 0, :, :] 
+
+        return preds, coeffs_time, coeffs_freq
+    
+
+class vlinear_new(nn.Module):
+    def __init__(self, num_vars, order, hidden_dim=256, device="cpu", options=None):
+        super().__init__()
+
+        self.num_vars = num_vars
+        self.order = order
+        self.device = device
+
+        self.orth_transformer = options.get('orth_transformer')
+
+        # ----------------------------
+        # SAFE DELTAS (no 4D tensors)
+        # ----------------------------
+        self.delta1 = nn.Parameter(torch.zeros(1, num_vars, order))
+        self.delta2 = nn.Parameter(torch.zeros(1, num_vars, order))
+
+        # ----------------------------
+        # embeddings (kept)
+        # ----------------------------
+        self.embeddings = nn.Parameter(torch.randn(1, hidden_dim))
+
+        # ----------------------------
+        # TSFlow-style projection block
+        # replaces: temporal_proj + flatten logic
+        # ----------------------------
+        self.in_proj = nn.Linear(order, hidden_dim)
+        self.mix = nn.Sequential(
+            nn.LayerNorm(hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU()
+        )
+        self.out_proj = nn.Linear(hidden_dim, order)
+
+        # ----------------------------
+        # lightweight coefficient head (replaces P×P einsum)
+        # ----------------------------
+        self.q_proj = nn.Linear(hidden_dim, hidden_dim // 2)
+        self.k_proj = nn.Linear(hidden_dim, hidden_dim // 2)
+
+        # output model
+        self.vf = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim * 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim * 2, order)
+        )
+
+    # ------------------------------------------------------------
+    # FORWARD
+    # ------------------------------------------------------------
+    def forward(self, inputs: torch.Tensor):
+        """
+        inputs: [B, O_curr, P]
+        """
+
+        B, O_curr, P = inputs.shape
+
+        # --------------------------------------------------------
+        # 1. Orthogonal transform (UNCHANGED but treated safely)
+        # --------------------------------------------------------
+        x_orth = self.orth_transformer(inputs)  # [B, P, order]
+
+        # --------------------------------------------------------
+        # 2. Add delta WITHOUT 4D expansion
+        # --------------------------------------------------------
+        x_orth = x_orth + self.delta1  # broadcast-safe
+
+        # --------------------------------------------------------
+        # 3. TSFlow-style compression (NO flatten(P * order))
+        # --------------------------------------------------------
+        h = self.in_proj(x_orth)       # [B, P, H]
+        h = self.mix(h)                # stabilizer
+
+        # --------------------------------------------------------
+        # 4. latent reconstruction (replaces temporal_proj path)
+        # --------------------------------------------------------
+        z = self.out_proj(h)           # [B, P, order]
+        z = z + self.delta2            # safe bias
+
+        # --------------------------------------------------------
+        # 5. embeddings (kept but stable)
+        # --------------------------------------------------------
+        cond = z * self.embeddings     # [B, P, H]
+
+        # --------------------------------------------------------
+        # 6. velocity field prediction (unchanged idea)
+        # --------------------------------------------------------
+        v_pred = self.vf(cond)         # [B, P, order]
+
+        # --------------------------------------------------------
+        # 7. inverse transform (UNCHANGED dependency)
+        # --------------------------------------------------------
+        preds_all_time = self.orth_transformer.inverse(v_pred)
+        preds = preds_all_time[:, -1, :]   # [B, P]
+
+        # ========================================================
+        # 8. REPLACED: NO MORE P×P EINSUM
+        # ========================================================
+        # OLD:
+        # coeffs_time = torch.einsum('bph,bqh->bpq', cond, cond)
+
+        # NEW: low-rank factorization (O(P²) memory removed)
+        q = self.q_proj(cond)   # [B, P, d]
+        k = self.k_proj(cond)   # [B, P, d]
+
+        coeffs_time = torch.matmul(q, k.transpose(-1, -2))  # [B, P, P]
+
+        # stabilize instead of tanh explosion
+        coeffs_time = torch.tanh(coeffs_time)
+
+        # --------------------------------------------------------
+        # 9. temporal expansion (safe repeat)
+        # --------------------------------------------------------
+        coeffs_time = coeffs_time.unsqueeze(1).repeat(1, O_curr, 1, 1)
+
+        # --------------------------------------------------------
+        # 10. frequency view (cheap slice)
+        # --------------------------------------------------------
+        coeffs_freq = coeffs_time[:, 0, :, :]
+
+        return preds, coeffs_time, coeffs_freq
