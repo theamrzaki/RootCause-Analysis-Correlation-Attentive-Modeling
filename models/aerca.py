@@ -1092,7 +1092,20 @@ class AERCA(nn.Module):
         # Add a hyperparameter to control the weight of velocity
         lambda_velocity = self.options.get("lambda_velocity", 0.1)
 
-
+        #lets visualize the imp losses (loss_recon, loss_encoder_coeffs, loss_decoder_coeffs, loss_prev_coeffs, loss_encoder_smooth, loss_decoder_smooth, loss_prev_smooth, loss_kl)
+        losses_to_log = {
+            "loss_recon": loss_recon.item(),
+            "loss_encoder_coeffs": loss_encoder_coeffs.item(),
+            "loss_decoder_coeffs": loss_decoder_coeffs.item(),
+            "loss_prev_coeffs": loss_prev_coeffs.item(),
+            "loss_encoder_smooth": loss_encoder_smooth.item(),
+            "loss_decoder_smooth": loss_decoder_smooth.item(),
+            "loss_prev_smooth": loss_prev_smooth.item(),
+            "loss_kl": loss_kl.item(),
+        }
+        tensorboard_log = {f'training_step/{key}': value for key, value in losses_to_log.items()}
+        for key, value in tensorboard_log.items():
+            self.writer.add_scalar(key, value, self.current_epoch)
 
         # === Total loss ===
         loss = (loss_recon +
@@ -1228,17 +1241,93 @@ class AERCA(nn.Module):
         return modalities
 
     def _training(self, xs):
-        if self.options["dataset_name"] in ["msds","lotka_volterra","lorenz96","nonlinear"]:
+        if self.options["dataset_name"] in ["lotka_volterra","lorenz96","nonlinear"]:
             self._training_msds_lotka_swat_original(xs)
-        elif self.options["dataset_name"] in ["swat","smap","smd","wadi"]:
+        elif self.options["dataset_name"] in ["swat","smap","smd","wadi","msds"]:
             #if self.options["coeff_architecture"] == "deep_mlp":
             #    self._training_msds_lotka_swat_original(xs)
             #else:
                 self._training_batches_swat(xs)
         else:
             raise ValueError(f"Unknown dataset {self.options['dataset']} for training")
+        
+    def _training_batches_swat_new(self, xs, batch_size=1024):
+        """
+        Optimized training: Pre-loads data to GPU and uses index shuffling.
+        xs: list or array of windows, shape (N, 3, 10)
+        """
+        # 1. Pre-process data: Convert to single numpy array then to GPU Tensor
+        # Doing this once is 100x faster than doing it every batch
+        if isinstance(xs, list):
+            xs = np.array(xs)
+        
+        xs_tensor = torch.tensor(xs, dtype=torch.float32, device=self.device)
+        
+        # 2. Split into train and validation on the GPU
+        split_idx = int(0.8 * len(xs_tensor))
+        xs_train = xs_tensor[:split_idx]
+        xs_val = xs_tensor[split_idx:]
 
-    def _training_batches_swat(self, xs,batch_size=1000):
+        best_val_loss = np.inf
+        stop_counter = 0
+
+        for epoch in tqdm(range(self.epochs), desc='Epoch'):
+            self.train()
+            epoch_loss = 0
+            
+            # 3. Fast Shuffling: Generate random indices on GPU
+            indices = torch.randperm(len(xs_train), device=self.device)
+            
+            # --- Training loop ---
+            for i in range(0, len(xs_train), batch_size):
+                batch_idx = indices[i : i + batch_size]
+                x_batch = xs_train[batch_idx] # Instant slicing on VRAM
+
+                self.optimizer.zero_grad()
+                loss, _ = self._training_step(x_batch)
+                loss.backward()
+                self.optimizer.step()
+                
+                epoch_loss += loss.item()
+
+            # --- Validation loop (No gradients, no shuffling) ---
+            self.eval()
+            val_loss = 0
+            losses_dict_validation = defaultdict(float)
+            
+            with torch.no_grad():
+                for i in range(0, len(xs_val), batch_size):
+                    x_batch = xs_val[i : i + batch_size]
+                    batch_l, losses_dict = self._training_step(x_batch)
+                    val_loss += batch_l.item()
+                    for k, v in losses_dict.items():
+                        losses_dict_validation[k] += v
+
+            # Logging & Metrics
+            self.writer.add_scalar('Loss/train', epoch_loss, epoch)
+            self.writer.add_scalar('Loss/val', val_loss, epoch)
+            for k, v in losses_dict_validation.items():
+                self.writer.add_scalar(f'val/{k}', v, epoch)
+
+            logging.info('Epoch val loss: %s', val_loss)
+            # --- Early stopping logic ---
+            if val_loss < best_val_loss:
+                count = 0
+                logging.info(f'Saving model at epoch {epoch + 1}')
+                if self.options["early_stopping"]: #AERCA paper style early stopping
+                    best_val_loss = val_loss
+                torch.save(self.state_dict(), os.path.join(self.save_dir, f'{self.model_name}.pt'))
+            if count >= 20:
+                print('Early stopping')
+                break
+            if epoch % 5 == 0:
+                self.writer.flush()
+
+        # Load best weights
+        self.load_state_dict(torch.load(os.path.join(self.save_dir, f'{self.model_name}.pt'), map_location=self.device))
+        logging.info('Training complete')
+
+    def _training_batches_swat(self, xs,batch_size=1024):
         """
         xs: list of windows, each of shape (window_size+1, num_vars)
         batch_size: number of windows per batch
@@ -1346,8 +1435,6 @@ class AERCA(nn.Module):
         #self._get_recon_threshold(xs_val)
         #self._get_root_cause_threshold_encoder(xs_val)
         #self._get_root_cause_threshold_decoder(xs_val)
-
-
 
     def _testing_step(self, x, label=None, add_u=True):
         nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us, attn_weights = self.forward(x, add_u=add_u)
