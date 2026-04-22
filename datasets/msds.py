@@ -148,9 +148,15 @@ class MSDS:
         percentages = {u: (c / total) * 100 for u, c in zip(unique, counts)}
         """
         x_n_list = []
-        for i in range(0, len(df_normal), 10000):
-            if i + 10000 < len(df_normal):
-                x_n_list.append(df_normal[i:i + 10000])
+        #for i in range(0, len(df_normal), 10000):
+        #    if i + 10000 < len(df_normal):
+        #        x_n_list.append(df_normal[i:i + 10000])
+        # To match the test window size of 3 * window_size:
+        step = self.window_size 
+        chunk_size = 3 * self.window_size 
+
+        for i in range(0, len(df_normal) - chunk_size, step):
+            x_n_list.append(df_normal[i:i + chunk_size])
         test_x_lst = []
         label_lst = []
 
@@ -222,4 +228,4 @@ class MSDS:
         orth_matrix_dir = os.path.join(self.data_dir, 'orth_transform_meta')
         
         device = 'cpu'
-        return None#self.apply_orthogonal_transform(save_path=orth_matrix_dir, device=device)
+        return self.apply_orthogonal_transform(save_path=orth_matrix_dir, device=device)
