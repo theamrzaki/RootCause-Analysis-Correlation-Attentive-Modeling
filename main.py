@@ -4,8 +4,8 @@ import logging
 import argparse
 import numpy as np
 
-from datasets import linear, lotka_volterra, lorenz96, swat, nonlinear, msds, smd, wadi
-from args import linear_args, lotka_volterra_args, lorenz96_args, swat_args, msds_args, nonlinear_args, sock_args, smd_args, wadi_args
+from datasets import linear, lotka_volterra, lorenz96, swat, nonlinear, msds, smd, wadi, aiops
+from args import linear_args, lotka_volterra_args, lorenz96_args, swat_args, msds_args, nonlinear_args, sock_args, smd_args, wadi_args, aiops_args
 from models import aerca, iTransformer, FEDformer
 from utils import utils
 import warnings
@@ -87,6 +87,12 @@ def main(argv):
             "log_file": "wadi.log",
             "use_slice": False
         },
+        "aiops": {
+            "args": aiops_args.create_arg_parser,
+            "dataset_class": aiops.aiops,
+            "log_file": "aiops.log",
+            "use_slice": False
+        }
     }
 
     # Ensure the specified dataset is recognized.

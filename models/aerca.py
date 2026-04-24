@@ -44,6 +44,14 @@ class AERCA(nn.Module):
         self.num_vars_mod = num_vars // self.num_modalities  # integer division
         self.hidden_size = hidden_layer_size  # latent size from each encoder
         self.total_params =0
+
+
+        # Initialize log variances to 0 (which means initial weight is 1.0)
+        self.log_var_recon = nn.Parameter(torch.zeros(1))
+        self.log_var_sparse = nn.Parameter(torch.zeros(1))
+        self.log_var_sdi = nn.Parameter(torch.zeros(1))
+        self.log_var_smooth = nn.Parameter(torch.zeros(1))
+
         """
         # One encoder per modality
         self.encoders = nn.ModuleList([
@@ -64,8 +72,8 @@ class AERCA(nn.Module):
         # For nexts: (B, num_vars)
         self.nexts_proj = nn.Linear(self.num_modalities * self.num_vars_mod, self.num_vars).to(device)
 
-
-        if(self.options["coeff_architecture"] == "GVAR"):
+        self.models_encoder_only = ["GVAR","vlinear"] 
+        if(self.options["coeff_architecture"] in self.models_encoder_only):
             self._log_and_print('Number of parameters in encoder: {}', self._count_parameters(self.encoder))
             self.total_params = (self._count_parameters(self.encoder)  )
 
@@ -79,7 +87,7 @@ class AERCA(nn.Module):
                                  self._count_parameters(self.decoder) +
                                  self._count_parameters(self.decoder_prev)  )
             
-        elif(self.options["coeff_architecture"] in ["TemporalGNN_Attention", "TemporalGNN_Attention_fourier", "TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced","cuts_mlp","cuts_lstm","vlinear"]):
+        elif(self.options["coeff_architecture"] in ["TemporalGNN_Attention", "TemporalGNN_Attention_fourier", "TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced","cuts_mlp","cuts_lstm"]):
             # --- Efficient attention-based decoder layers ---
             hidden_dim_small = min(hidden_layer_size, 64)  # smaller hidden dim to reduce parameters
             self.rank = 8                 # low-rank for coefficient matrices
@@ -182,6 +190,19 @@ class AERCA(nn.Module):
         self.log_lambda_corr = nn.Parameter(torch.tensor(0.0))   # log of lambda_corr
         self.log_lambda_mmd = nn.Parameter(torch.tensor(0.0))     # log of lambda_mmd    
         self.alpha_param = nn.Parameter(torch.tensor(0.0))    
+        
+
+        # Initialize
+        self.log_var_recon = nn.Parameter(torch.zeros(1))
+        self.log_var_sparse = nn.Parameter(torch.zeros(1))
+        self.log_var_sdi = nn.Parameter(torch.zeros(1))
+        self.log_var_smooth = nn.Parameter(torch.zeros(1))
+
+        # If your class has self.device defined:
+        self.log_var_recon.to(self.device)
+        self.log_var_sparse.to(self.device)
+        self.log_var_sdi.to(self.device)
+        self.log_var_smooth.to(self.device)
         self.optimizer = torch.optim.Adam(self.parameters(), lr=lr)
         self.encoder.to(self.device)
         #self.decoder.to(self.device)
@@ -268,6 +289,8 @@ class AERCA(nn.Module):
                 pass
             else:
                 xs = xs.cpu().numpy()
+            #for SMD
+            #(188,1000,38)
             windows = self.encoding_batch(xs)
             winds = windows[:, 0, :-1, :]  # only the first window as it is much faster and enough to be trained upon
             nexts = windows[:, 0, -1, :]
@@ -300,7 +323,7 @@ class AERCA(nn.Module):
         winds[:-self.window_size].shape
             torch.Size([998, 1, 51])
         """
-        if self.options["coeff_architecture"] == "GVAR":
+        if self.options["coeff_architecture"] in self.models_encoder_only:
             return us, coeffs, nexts, winds[:-self.window_size], attn_weights, preds
         else:
             return us, coeffs, nexts[self.window_size:], winds[:-self.window_size], attn_weights, preds
@@ -817,7 +840,7 @@ class AERCA(nn.Module):
             # as attnn_weights contains both the attn_weights and aux vars used by the decoder
             nexts_hat, decoder_coeffs, prev_coeffs = self.decoding(us, winds, add_u=add_u,aux_vars=attn_weights[1])
             attn_weights = attn_weights[0]
-        elif self.options["coeff_architecture"] == "GVAR":
+        elif self.options["coeff_architecture"] in self.models_encoder_only:
             #no decoder, so return empty tensors
             nexts_hat = preds 
             decoder_coeffs = torch.tensor([])
@@ -961,17 +984,16 @@ class AERCA(nn.Module):
 
         # === Sparsity losses ===
         loss_encoder_coeffs = self._sparsity_loss(encoder_coeffs, self.encoder_alpha)
-        loss_decoder_coeffs = self._sparsity_loss(decoder_coeffs, self.decoder_alpha) if self.options["coeff_architecture"] != "GVAR" else torch.tensor(0.0)
-        loss_prev_coeffs    = self._sparsity_loss(prev_coeffs, self.decoder_alpha) if self.options["coeff_architecture"] != "GVAR" else torch.tensor(0.0)   
+        loss_decoder_coeffs = self._sparsity_loss(decoder_coeffs, self.decoder_alpha) if self.options["coeff_architecture"] not in self.models_encoder_only else torch.tensor(0.0)
+        loss_prev_coeffs    = self._sparsity_loss(prev_coeffs, self.decoder_alpha) if self.options["coeff_architecture"] not in self.models_encoder_only else torch.tensor(0.0)   
 
         # === Smoothness losses ===
         loss_encoder_smooth = self._smoothness_loss(encoder_coeffs)
-        loss_decoder_smooth = self._smoothness_loss(decoder_coeffs) if self.options["coeff_architecture"] != "GVAR" else torch.tensor(0.0)
-        loss_prev_smooth    = self._smoothness_loss(prev_coeffs) if self.options["coeff_architecture"] != "GVAR" else torch.tensor(0.0) 
+        loss_decoder_smooth = self._smoothness_loss(decoder_coeffs) if self.options["coeff_architecture"] not in self.models_encoder_only else torch.tensor(0.0)
+        loss_prev_smooth    = self._smoothness_loss(prev_coeffs) if self.options["coeff_architecture"] not in self.models_encoder_only else torch.tensor(0.0) 
 
         # === KL divergence loss ===
-        loss_kl = kl_div if self.options["coeff_architecture"] != "GVAR" else torch.tensor(0.0)
-
+        loss_kl = kl_div if self.options["coeff_architecture"] not in self.models_encoder_only else torch.tensor(0.0)
         # === Regularization ===
         reg_lambda = 0.01 * (self.log_lambda_indep ** 2 + self.log_lambda_corr ** 2)
 
@@ -1092,6 +1114,14 @@ class AERCA(nn.Module):
         # Add a hyperparameter to control the weight of velocity
         lambda_velocity = self.options.get("lambda_velocity", 0.1)
 
+        # 1. Compute Precisions (Weights)
+        # Using exp(-log_var) ensures weights are always positive
+        w_recon = torch.exp(-self.log_var_recon)
+        w_sparse = torch.exp(-self.log_var_sparse)
+        w_sdi = torch.exp(-self.log_var_sdi)
+        w_smooth = torch.exp(-self.log_var_smooth)
+
+
         #lets visualize the imp losses (loss_recon, loss_encoder_coeffs, loss_decoder_coeffs, loss_prev_coeffs, loss_encoder_smooth, loss_decoder_smooth, loss_prev_smooth, loss_kl)
         losses_to_log = {
             "loss_recon": loss_recon.item(),
@@ -1102,11 +1132,17 @@ class AERCA(nn.Module):
             "loss_decoder_smooth": loss_decoder_smooth.item(),
             "loss_prev_smooth": loss_prev_smooth.item(),
             "loss_kl": loss_kl.item(),
+
+            "w_recon": w_recon.item(),
+            "w_sparse": w_sparse.item(),
+            "w_sdi": w_sdi.item(),
+            "w_smooth": w_smooth.item(),
         }
         tensorboard_log = {f'training_step/{key}': value for key, value in losses_to_log.items()}
         for key, value in tensorboard_log.items():
             self.writer.add_scalar(key, value, self.current_epoch)
-
+        #make w_recon in the same deiv as loss_recon
+        w_recon = w_recon.to(loss_recon.device)
         # === Total loss ===
         loss = (loss_recon +
                 self.encoder_lambda * loss_encoder_coeffs +
@@ -1122,7 +1158,12 @@ class AERCA(nn.Module):
                 lambda_per_var * per_var_loss+
                 0.1 * poisson_nll+
                 loss_aug_total) 
-        
+        #loss = (
+        #    w_recon.to(loss_recon.device) * loss_recon + self.log_var_recon.to(loss_recon.device) +
+        #    w_sparse.to(loss_encoder_coeffs.device) * (self.encoder_lambda * loss_encoder_coeffs) + self.log_var_sparse.to(loss_encoder_coeffs.device) +
+        #    w_sdi.to(loss_sdi_modular.device) * (self.options.get("lambda_sdi", 1.0) * loss_sdi_modular) + self.log_var_sdi.to(loss_sdi_modular.device) +
+        #    w_smooth.to(loss_encoder_smooth.device) * (self.encoder_gamma * loss_encoder_smooth) + self.log_var_smooth.to(loss_encoder_smooth.device)
+        #)
         # === Logging all losses ===
         losses_dict = {
             "loss_full_recon": loss_full_recon.item(),
@@ -1243,7 +1284,7 @@ class AERCA(nn.Module):
     def _training(self, xs):
         if self.options["dataset_name"] in ["lotka_volterra","lorenz96","nonlinear"]:
             self._training_msds_lotka_swat_original(xs)
-        elif self.options["dataset_name"] in ["swat","smap","smd","wadi","msds"]:
+        elif self.options["dataset_name"] in ["swat","smap","smd","wadi","msds","aiops"]:
             #if self.options["coeff_architecture"] == "deep_mlp":
             #    self._training_msds_lotka_swat_original(xs)
             #else:
@@ -1980,10 +2021,30 @@ class AERCA(nn.Module):
                 z_scores = alpha * z_scores + (1 - alpha) * attn_importance
             else:
                 z_scores = z_scores
-            k_lst = topk(z_scores, labels[i][self.window_size * 2:], us_all_z_score_pot)
-            k_at_step = topk_at_step(z_scores, labels[i][self.window_size * 2:])
-            k_all.append(k_lst)
-            k_at_step_all.append(k_at_step)
+            try:
+                k_lst = topk(z_scores, labels[i][self.window_size * 2:], us_all_z_score_pot)
+                k_at_step = topk_at_step(z_scores, labels[i][self.window_size * 2:])
+                k_all.append(k_lst)
+                k_at_step_all.append(k_at_step)
+            except Exception as e:
+                self._log_and_print("Error occurred while computing top-k statistics for sample {}: {}", i, str(e))
+                continue
+            
+
+        # Aggregate results
+        # so the size of k_all where it contained the errors is 
+        # Aggregate results
+        valid_samples = len(k_all)
+        total_samples = len(xs)
+        coverage_pct = (valid_samples / total_samples) * 100 if total_samples > 0 else 0
+        
+        self._log_and_print("Root Cause Analysis Coverage: {}/{} samples ({:.2f}%)", 
+                            valid_samples, total_samples, coverage_pct)
+        
+        if valid_samples == 0:
+            self._log_and_print("Warning: No anomalies found in the ground truth for this subset.")
+            return
+        
         k_all = np.array(k_all).mean(axis=0)
         k_at_step_all = np.array(k_at_step_all).mean(axis=0)
         ac_at = [k_at_step_all[0], k_at_step_all[2], k_at_step_all[4], k_at_step_all[9]]

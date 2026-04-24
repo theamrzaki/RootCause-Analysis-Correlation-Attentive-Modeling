@@ -177,12 +177,12 @@ class Model(nn.Module):
     def _training(self, xs):
         if self.configs.options["dataset_name"] in ["msds","lotka_volterra","nonlinear"]:
             self._training_msds_lotka(xs)
-        elif self.configs.options["dataset_name"] in ["swat","smd","wadi"]:
+        elif self.configs.options["dataset_name"] in ["swat","smd","wadi","aiops"]:
             self._training_batches_swat(xs)
         else:
             raise ValueError(f"Unknown dataset {self.configs.options['dataset']} for training")
 
-    def _training_batches_swat(self, xs,batch_size=1000):
+    def _training_batches_swat(self, xs,batch_size=512):
         """
         xs: list of windows, each of shape (window_size+1, num_vars)
         batch_size: number of windows per batch
@@ -431,10 +431,28 @@ class Model(nn.Module):
                     z_scores_all = z_scores_all[:min_len, :]
 
                 # Compute top-k metrics
-                k_all.append(topk(z_scores_all, sample_labels_trimmed, threshold=threshold))
-                k_at_step_all.append(topk_at_step(z_scores_all, sample_labels_trimmed))
+                try:
+                    k_all.append(topk(z_scores_all, sample_labels_trimmed, threshold=threshold))
+                    k_at_step_all.append(topk_at_step(z_scores_all, sample_labels_trimmed))
+                except Exception as e:
+                    self._log_and_print("Error occurred while computing top-k statistics for sample {}: {}", i, str(e))
+                    continue
+                #
 
         # Aggregate results
+        # so the size of k_all where it contained the errors is 
+        # Aggregate results
+        valid_samples = len(k_all)
+        total_samples = len(xs)
+        coverage_pct = (valid_samples / total_samples) * 100 if total_samples > 0 else 0
+        
+        self._log_and_print("Root Cause Analysis Coverage: {}/{} samples ({:.2f}%)", 
+                            valid_samples, total_samples, coverage_pct)
+        
+        if valid_samples == 0:
+            self._log_and_print("Warning: No anomalies found in the ground truth for this subset.")
+            return
+
         k_all = np.array(k_all).mean(axis=0)
         k_at_step_all = np.array(k_at_step_all).mean(axis=0)
 
