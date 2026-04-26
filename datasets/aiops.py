@@ -5,7 +5,10 @@ import pandas as pd
 import numpy as np
 from glob import glob
 from tqdm import tqdm
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, RobustScaler
+import numpy as np
+import pandas as pd
+from scipy.signal import welch
 from layers.vlinear_arch import OrthTransform 
 
 class aiops:
@@ -26,12 +29,67 @@ class aiops:
             node -->	load_1m, disk_io_time, mem_available (The infrastructure).
             istio -->	request_duration, tcp_sent_bytes (The communication).
         """
-        self.metric_types = ['container']#, 'istio', 'jvm', 'node', 'service']
-        self.essential_keywords = [
-            'cpu_system', 'cpu_usage', 'mem_usage', 'heap_used', 
-            'latency', 'error_count', 'throughput', 'gc_time',
-            'load_1m', 'network_receive', 'request_duration'
-        ]
+        self.metric_types = ['container', 'istio', 'jvm', 'node', 'service']
+        #self.essential_keywords = [
+        #    'cpu_system', 'cpu_usage', 'mem_usage', 'heap_used', 
+        #    'latency', 'error_count', 'throughput', 'gc_time',
+        #    'load_1m', 'network_receive', 'request_duration'
+        #]
+
+    def predict_best_sampling_rate(self, df, current_interval_sec=60):
+        """
+        Analyzes the wide table to suggest an optimal sampling interval.
+        
+        Args:
+            df: The wide table (full_df) from get_wide_table()
+            current_interval_sec: The existing time delta between rows (default 60s)
+            
+        Returns:
+            Suggested interval in seconds and a rationale.
+        """
+        # 1. Variance Check: Identify "Fast" vs "Slow" columns
+        # We look at the Power Spectral Density (PSD)
+        sampling_recommendations = []
+        
+        # We sample a subset of columns to save time
+        sample_cols = df.columns[np.random.choice(len(df.columns), min(20, len(df.columns)))]
+        
+        for col in sample_cols:
+            series = df[col].values
+            # Compute the frequency components
+            freqs, psd = welch(series, fs=1/current_interval_sec)
+            
+            # Find the frequency below which 90% of the power resides
+            cumulative_psd = np.cumsum(psd)
+            total_power = cumulative_psd[-1]
+            if total_power == 0: continue
+            
+            # Nyquist frequency needed for this specific metric
+            idx_90 = np.where(cumulative_psd >= 0.90 * total_power)[0][0]
+            f_max = freqs[idx_90]
+            
+            # Sampling interval = 1 / (2 * f_max)
+            if f_max > 0:
+                sampling_recommendations.append(1 / (2 * f_max))
+
+        if not sampling_recommendations:
+            return current_interval_sec, "Insufficient variance to determine rate."
+
+        avg_suggested_interval = np.median(sampling_recommendations)
+        
+        # Logic-based clamping
+        if avg_suggested_interval < current_interval_sec:
+            reason = "High-frequency noise/spikes detected. Consider higher resolution if available."
+        elif avg_suggested_interval > current_interval_sec * 2:
+            reason = "Data is redundant. You can downsample to save memory."
+        else:
+            reason = "Current sampling rate is optimal for the signal-to-noise ratio."
+
+        return round(avg_suggested_interval), reason
+
+    # Integration snippet:
+    # suggested_rate, reason = predict_best_sampling_rate(full_df)
+    # print(f"Suggested Interval: {suggested_rate}s | Reason: {reason}")
 
     def get_wide_table(self):
         """
@@ -58,18 +116,23 @@ class aiops:
                     # e.g., 'container_cpu_system'
                     metric_name = os.path.basename(f).replace(".csv", "").replace("kpi_", "")
                     # DIMENSIONALITY REDUCTION: Only keep essential metrics
-                    if not any(key in metric_name for key in self.essential_keywords):
-                        continue
+                    #if not any(key in metric_name for key in self.essential_keywords):
+                    #    continue
                     df = pd.read_csv(f)
                     
                     # Keep the first occurrence of each (timestamp, cmdb_id) pair
-                    df = df.drop_duplicates(subset=['timestamp', 'cmdb_id'], keep='first')
+                    df = df.drop_duplicates(keep='first')
 
                     # Core Logic: Pivot the data
                     # Original: [timestamp, cmdb_id, value]
                     # Pivoted: Index=timestamp, Columns=cmdb_id_metric_name
                     try:
-                        pivoted = df.pivot(index='timestamp', columns='cmdb_id', values='value')
+                        pivoted = df.pivot_table(
+                            index='timestamp', 
+                            columns='cmdb_id', 
+                            values='value', 
+                            aggfunc='max' 
+                        )
                         pivoted.columns = [f"{col}_{metric_name}" for col in pivoted.columns]
                         day_frames.append(pivoted)
                     except Exception as e:
@@ -122,12 +185,16 @@ class aiops:
     
     def generate_example(self):
         df = self.get_wide_table()
+        avg_suggested_interval, reason = self.predict_best_sampling_rate(df)  # Optional: Get sampling rate suggestions based on the data
         
+        ###df = df.iloc[::(avg_suggested_interval/2) // 60, :]  # Resample the data based on the suggested interval (assuming original is 1 minute)
+        print(f"Data resampled to every {avg_suggested_interval} seconds. Reason: {reason}")
         # 1. Drop Zero-Variance
         df = df.loc[:, (df.std() > 1e-6)]
         
         # 2. Top-K Volatility (Coefficient of Variation)
         volatility = df.std() / (df.mean() + 1e-6)
+        print(f"Total metrics after filtering: {volatility.sort_values(ascending=False).head(20)}")
         important_cols = volatility.sort_values(ascending=False).head(self.num_vars).index
         df_subset = df[important_cols]
         
@@ -140,7 +207,17 @@ class aiops:
         split = int(len(data) * 0.8)
         
         # Scaling
-        scaler = StandardScaler()
+        #scaler = StandardScaler()
+        #train_data_raw = data[:split]
+        #test_data_raw = data[split:]
+        #test_labels_raw = label_matrix[split:]
+        # 1. Log Transform metrics that can have massive spikes (Latency/Throughput)
+        # Identify columns that aren't binary
+        #non_binary_cols = [c for c in range(data.shape[1]) if self.binary_flags[c] == 0]
+        #data[:, non_binary_cols] = np.log1p(data[:, non_binary_cols])
+
+        # 2. Use RobustScaler instead of StandardScaler
+        scaler = RobustScaler() 
         train_data_raw = data[:split]
         test_data_raw = data[split:]
         test_labels_raw = label_matrix[split:]
@@ -152,8 +229,8 @@ class aiops:
         # 4. Temporal Chunking (Normal/Train)
         # Using your suggested chunk_size and step
         x_n_list = []
-        step = self.window_size 
-        chunk_size = 30 * self.window_size # e.g., 300 timestamps per sample
+        step = 1
+        chunk_size = 10 * self.window_size # e.g., 300 timestamps per sample
         
         for i in range(0, len(train_scaled) - chunk_size, step):
             x_n_list.append(train_scaled[i : i + chunk_size])
@@ -228,5 +305,5 @@ if __name__ == "__main__":
         'window_size': 10,
         'shuffle': True
     }
-    dataset = AIOps22Preprocessor(options)
-    dataset.generate_datasets()
+    dataset = aiops(options)
+    dataset.generate_example()

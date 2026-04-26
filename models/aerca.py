@@ -959,8 +959,8 @@ class AERCA(nn.Module):
         loss_sdi_modular = (p_comp * per_var_deterioration).sum(dim=-1).mean()
 
         # Replace your old loss_recon with this causal-aware signal
-        loss_full_recon = loss_causal_signal + self.options.get("lambda_sdi", 1.0) * loss_sdi_modular
-
+        #loss_full_recon = loss_causal_signal + self.options.get("lambda_sdi", 1.0) * loss_sdi_modular
+        loss_full_recon = self.mse_loss(nexts_hat, nexts)
         #loss_full_recon = self.mse_loss(nexts_hat, nexts)
         #logging.info('Reconstruction loss (full): %s', loss_full_recon.item())
 
@@ -1919,7 +1919,7 @@ class AERCA(nn.Module):
         us_sample_list = []
         attn_list = []
         with torch.no_grad():
-            for i in range(len(xs)):
+            for i in tqdm(range(len(xs))):
                 x = xs[i]
                 label = labels[i]
                 loss, nexts_hat, nexts, encoder_coeffs, decoder_coeffs, kl_div, preprocessed_label, us, attn_weights = self._testing_step(x, label, add_u=False)
@@ -1954,7 +1954,7 @@ class AERCA(nn.Module):
         self._log_and_print('=' * 50)
         us_all_z_score = (-(us_all - self.us_mean_encoder) / self.us_std_encoder)
         us_all_z_score_pot = []
-        for i in range(self.num_vars):
+        for i in tqdm(range(self.num_vars)):
             col_data = us_all_z_score[:, i]
             col_data = col_data[~np.isnan(col_data)]           # remove NaNs
             col_data = col_data[np.isfinite(col_data)]        # remove infs
@@ -1985,7 +1985,7 @@ class AERCA(nn.Module):
         # Compute top-k statistics for each sample using the computed POT thresholds.
         k_all = []
         k_at_step_all = []
-        for i in range(len(xs)):
+        for i in tqdm(range(len(xs))):
             us_sample = us_sample_list[i]
             z_scores = (-(us_sample - self.us_mean_encoder) / self.us_std_encoder)
             if use_attention_fusion:
