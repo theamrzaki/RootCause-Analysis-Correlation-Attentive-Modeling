@@ -24,7 +24,7 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "SWAT - AERCA-based",
+            "name": "AIOps - iTransformer",
             "type": "debugpy",
             "request": "launch",
             "program": "main.py",
@@ -41,24 +41,25 @@
                 "--decoder_lambda", "0.5",
                 "--beta", "0.5",
 
-                "--main_model", "FEDformer",
-                "--time_freq_representation", "mag_phase",
+                "--main_model", "aerca_based",
+                "--coeff_architecture", "vlinear",
+                "--time_freq_representation", "vlinear",
 
                 "--lr", "1e-4",
                 "--seed", "7",
-                "--dataset", "msds",
-                "--window_size", "1",
+                "--dataset", "aiops",
+                "--window_size", "20",
 
                 "--training_aerca", "1",
-                "--epochs", "1000",
+                "--epochs", "200",
                 "--early_stopping", "0",
                 "--preprocessing_data", "0",
-                "--results_csv", "RQ_1_msds.csv",
+                "--results_csv", "RQ_1_aiops.csv",
 
-                "--attention_dim", "16",
+                "--attention_dim", "256",
                 "--num_attention_heads", "2",
                 "--outer_heads_num", "2",
-                "--outer_hidden_dim", "16"
+                "--outer_hidden_dim", "256"
             ]
 ,
             "console": "integratedTerminal"

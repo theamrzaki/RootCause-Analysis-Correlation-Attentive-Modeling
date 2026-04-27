@@ -221,7 +221,7 @@ class OrthTransform(nn.Module):
         # x: [Batch, Window, Channels] (e.g., 20, 36, 51)
         target_len = self.Q.shape[0] # 1000
         current_len = x.shape[1]    # 36
-        disable_orth = False
+        disable_orth = True 
         if disable_orth:
             # IDENTITY MODE: Pure temporal pass-through
             # No spectral mixing happens here.
@@ -240,7 +240,7 @@ class OrthTransform(nn.Module):
         return out[:, -current_len:, :].transpose(1, 2)
 
     def inverse(self, x_orth, disable_orth=False):
-        disable_orth = False
+        disable_orth = True
         # x_orth: [Batch, Channels, Current_W]
         if disable_orth:
             return x_orth.transpose(1, 2)
