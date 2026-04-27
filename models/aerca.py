@@ -292,19 +292,32 @@ class AERCA(nn.Module):
             #for SMD
             #(188,1000,38)
             windows = self.encoding_batch(xs)
-            winds = windows[:, 0, :-1, :]  # only the first window as it is much faster and enough to be trained upon
-            nexts = windows[:, 0, -1, :]
+            #winds = windows[:, 0, :-1, :]  # only the first window as it is much faster and enough to be trained upon
+            #nexts = windows[:, 0, -1, :]
+            winds = xs[:, :-1, :] 
+            nexts = xs[:, -1, :]
             """
             windows = self.encoding_batch(xs)
             winds = windows[:, :-1, :]               # (B - window_size, window_size, F)
             nexts = windows[:, -1, :]                # (B - window_size, F)
             """
         except:
+            # if xs is numpy convert to tensor and then back to numpy
+            if isinstance(xs, np.ndarray):
+                xs = torch.tensor(xs).float().to(self.device)
+            if xs.dim() == 2:
+                xs = xs.unsqueeze(0) # [25, 30] -> [1, 25, 30]
+
+            # 3. Direct Slice (No sliding_window_view needed!)
+            # winds: [B, 24, 30]
+            # nexts: [B, 30]
+            winds = xs[:, :-1, :] 
+            nexts = xs[:, -1, :]
             #when testing & for lotka volterra training
             # (3, 38)
-            windows = sliding_window_view(xs, (self.window_size + 1, self.num_vars))[:, 0, :, :]
-            winds = windows[:, :-1, :]
-            nexts = windows[:, -1, :]
+            #windows = sliding_window_view(xs, (self.window_size + 1, self.num_vars))[:, 0, :, :]
+            #winds = windows[:, :-1, :]
+            #nexts = windows[:, -1, :]
         winds = torch.tensor(winds).float().to(self.device)
         nexts = torch.tensor(nexts).float().to(self.device)
         preds, coeffs, attn_weights = self.encoder(winds)
@@ -915,214 +928,40 @@ class AERCA(nn.Module):
         else:
             return attn_kl
 
-
-    def _training_step(self, x,add_u=True):
-        # Forward pass
+    def _training_step(self, x, add_u=True):
         nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us, attns = self.forward(x, add_u=add_u)
+        loss_recon = self.mse_loss(nexts_hat, nexts)
+        logging.info('Reconstruction loss: %s', loss_recon.item())
 
-        # === Full reconstruction loss ===
-        # 2. Compute "Deterioration" (Per-Variable surprise)
-        # Instead of just MSE, we treat this as the deterioration from Phase 1.
-        # If your model was pre-trained on normal data, this MSE represents 
-        # the 'likelihood deterioration' the paper mentions.
-        per_var_deterioration = (nexts_hat - nexts).pow(2) # [Batch, Vars]
-        
-        # 3. Predict the Intervention Target (The Paper's Heuristic)
-        # We find the variable Xi showing the greatest deterioration
-        with torch.no_grad():
-            # Mean deterioration across the batch to find the 'Winner'
-            # target_prob shape: [Vars]
-            target_scores = per_var_deterioration.mean(dim=0)
-            tau_ident = self.options.get("sdi_temperature", 0.1)
-            # Softmax identifies the root cause index (AC@1 focus)
-            target_identity = torch.softmax(target_scores / tau_ident, dim=-1)
-            predicted_root_cause = torch.argmax(target_identity)
+        loss_encoder_coeffs = self._sparsity_loss(encoder_coeffs, self.encoder_alpha) 
+        logging.info('Encoder coeffs loss: %s', loss_encoder_coeffs.item())
 
-        # 4. Masked Causal Loss (The REPLACEMENT for loss_full_recon)
-        # "The contribution to the total log-likelihood of a sample coming from 
-        # the intervened variable Xi is masked."
-        
-        # Create a binary mask that is 0 for the root cause and 1 for everyone else
-        mask = torch.ones_like(per_var_deterioration)
-        mask[:, predicted_root_cause] = 0.0
-        
-        # The new loss signal: Minimize the error of the *rest* of the system 
-        # given the intervention on the target.
-        loss_causal_signal = (per_var_deterioration * mask).sum(dim=-1).mean()
-        
-        # 5. SDI Competition Penalty (From the paper's Phase 2 scoring)
-        # This forces the encoder_coeffs to align with the deterioration
-        p_comp = encoder_coeffs[-per_var_deterioration.size(0):, -1, :, :].sum(dim=-1)
-        p_comp = torch.softmax(p_comp / tau_ident, dim=-1)
-        
-        # Modular alignment: The model's attribution (p_comp) must match the deterioration
-        loss_sdi_modular = (p_comp * per_var_deterioration).sum(dim=-1).mean()
-
-        # Replace your old loss_recon with this causal-aware signal
-        #loss_full_recon = loss_causal_signal + self.options.get("lambda_sdi", 1.0) * loss_sdi_modular
-        loss_full_recon = self.mse_loss(nexts_hat, nexts)
-        #loss_full_recon = self.mse_loss(nexts_hat, nexts)
-        #logging.info('Reconstruction loss (full): %s', loss_full_recon.item())
-
-        # === Mean/Std reconstruction loss (optional) ===
-        if self.options.get("mean_std_recon_loss", False):
-            mean_target = nexts.mean(dim=1, keepdim=True)
-            std_target  = nexts.std(dim=1, keepdim=True)
-            mean_hat = nexts_hat.mean(dim=1, keepdim=True)
-            std_hat  = nexts_hat.std(dim=1, keepdim=True)
-            loss_mean = self.mse_loss(mean_hat, mean_target)
-            loss_std  = self.mse_loss(std_hat, std_target)
-            loss_stats_recon = loss_mean + loss_std
-            logging.info('Reconstruction loss (mean+std): %s', loss_stats_recon.item())
-            alpha = torch.sigmoid(self.alpha_param)
-            loss_recon = alpha * loss_full_recon + (1 - alpha) * loss_stats_recon
-            logging.info('Blended reconstruction loss: %s (alpha=%.4f)' % (loss_recon.item(), alpha.item()))
-        else:
-            loss_recon = loss_full_recon
-            loss_stats_recon = torch.tensor(0.0)
-            alpha = torch.tensor(0.0)
-
-        # === Sparsity losses ===
-        loss_encoder_coeffs = self._sparsity_loss(encoder_coeffs, self.encoder_alpha)
         loss_decoder_coeffs = self._sparsity_loss(decoder_coeffs, self.decoder_alpha) if self.options["coeff_architecture"] not in self.models_encoder_only else torch.tensor(0.0)
-        loss_prev_coeffs    = self._sparsity_loss(prev_coeffs, self.decoder_alpha) if self.options["coeff_architecture"] not in self.models_encoder_only else torch.tensor(0.0)   
+        logging.info('Decoder coeffs loss: %s', loss_decoder_coeffs.item())
 
-        # === Smoothness losses ===
+        loss_prev_coeffs = self._sparsity_loss(prev_coeffs, self.decoder_alpha) if self.options["coeff_architecture"] not in self.models_encoder_only else torch.tensor(0.0)
+        logging.info('Prev coeffs loss: %s', loss_prev_coeffs.item())
+
         loss_encoder_smooth = self._smoothness_loss(encoder_coeffs)
+        logging.info('Encoder smooth loss: %s', loss_encoder_smooth.item())
+
         loss_decoder_smooth = self._smoothness_loss(decoder_coeffs) if self.options["coeff_architecture"] not in self.models_encoder_only else torch.tensor(0.0)
-        loss_prev_smooth    = self._smoothness_loss(prev_coeffs) if self.options["coeff_architecture"] not in self.models_encoder_only else torch.tensor(0.0) 
+        logging.info('Decoder smooth loss: %s', loss_decoder_smooth.item())
 
-        # === KL divergence loss ===
+        loss_prev_smooth = self._smoothness_loss(prev_coeffs) if self.options["coeff_architecture"] not in self.models_encoder_only else torch.tensor(0.0)
+        logging.info('Prev smooth loss: %s', loss_prev_smooth.item())
+
         loss_kl = kl_div if self.options["coeff_architecture"] not in self.models_encoder_only else torch.tensor(0.0)
-        # === Regularization ===
-        reg_lambda = 0.01 * (self.log_lambda_indep ** 2 + self.log_lambda_corr ** 2)
+        logging.info('KL loss: %s', loss_kl.item())
 
-        # === Latent AMOC loss (optional) ===
-        if self.options.get("AMOC_Loss", False):
-            diffs = (us[1:, :] - us[:-1, :]).pow(2).mean(dim=-1)
-            latent_disc_loss = (diffs.sum() - diffs.max()) / diffs.shape[0]
-            lambda_amoc = self.options.get("lambda_amoc", 0.1)
-        else:
-            latent_disc_loss = torch.tensor(0.0)
-            lambda_amoc = 0.0
+        loss = (loss_recon +
+                self.encoder_lambda * loss_encoder_coeffs +
+                self.decoder_lambda * (loss_decoder_coeffs + loss_prev_coeffs) +
+                self.encoder_gamma * loss_encoder_smooth +
+                self.decoder_gamma * (loss_decoder_smooth + loss_prev_smooth) +
+                self.beta * loss_kl)
+        logging.info('Total loss: %s', loss.item())
 
-        if self.options.get("loglikelihood_loss", False):
-            # === Log-likelihood loss ===
-            eps = 1e-8
-            lambda_hat = torch.relu(nexts_hat)
-
-            # event term: encourage high intensity at actual events
-            log_event_term = (torch.log(lambda_hat + eps) * nexts).sum()
-
-            # integral term: penalize overpredicting
-            integral_term = lambda_hat.sum()
-
-            nll_loss = -(log_event_term - integral_term) / nexts.size(0)
-        else:
-            nll_loss = torch.tensor(0.0)
-
-
-        # === Attribution Sparsity Loss ===
-        if self.options.get("attribution_sparsity_loss", False):
-            """
-            Encourage that anomalies map to sparse sets of root causes.
-            Example: penalize entropy of attention/coefficients so the model highlights a few variables instead of diffusing blame.
-            """
-            C = encoder_coeffs.squeeze(1)
-            p = C.softmax(dim=-1)
-            loss_rca_sparsity = -(p * torch.log(p + 1e-8)).sum(dim=-1).mean()
-        else:
-            loss_rca_sparsity = torch.tensor(0.0, device=self.device)
-
-        # === Causal Consistency Loss ===
-        if self.options.get("causal_consistency_loss", False):
-            """
-            If variable i strongly explains variable j, then anomaly at j should be traceable back to i.
-            Encourage symmetry or consistency between encoder and decoder attribution matrices.
-            """
-            C = encoder_coeffs.squeeze(1)
-            loss_causal_consistency = torch.norm(C - C.transpose(-1, -2), p=1) / C.numel()
-        else:
-            loss_causal_consistency = torch.tensor(0.0, device=self.device)
-
-        # === Per-variable reconstruction error (SWaT-friendly) ===
-        # shape: (num_vars,)
-        per_var_error = ((nexts_hat - nexts) ** 2).mean(dim=(0, 1))
-        per_var_loss = per_var_error.mean()   # equal weight per variable
-
-        if self.options.get("per_var_loss", False):
-            lambda_per_var = self.options.get("lambda_per_var", 0.05)
-        else:
-            lambda_per_var = 0.0
-
-
-        # === Poisson NLL loss (for SWaT / anomaly detection) ===
-        if self.options.get("poisson_nll_loss", False):
-            eps = 1e-8
-            # Ensure non-negative predicted rates
-            lambda_hat = torch.relu(nexts_hat) + eps  
-
-            # Poisson log-likelihood per-element
-            # NLL = λ - k*log(λ) + log(k!) but log(k!) can be ignored for optimization
-            poisson_nll = (lambda_hat - nexts * torch.log(lambda_hat)).mean()
-
-            logging.info('Poisson NLL loss: %s', poisson_nll.item())
-        else:
-            poisson_nll = torch.tensor(0.0, device=self.device)
-
-
-        if self.options.get("diffusion_for_pred", False):
-            coeffs_flat = encoder_coeffs.view(encoder_coeffs.size(0), -1)  # condition
-            t = torch.randint(0, self.diffusion_model.timesteps, (coeffs_flat.size(0),), device=self.device)
-            xt, noise = self.diffusion_model.forward_diffusion(nexts, t)
-            eps_hat = self.diffusion_model.predict_noise(xt, coeffs_flat, t)
-            diffusion_loss = F.mse_loss(eps_hat, noise)
-        else:
-            diffusion_loss = torch.tensor(0.0, device=self.device)
-
-        if self.options.get("2graphs", False):
-            coeffs_time_seq = encoder_coeffs 
-            coeffs_freq_seq = attns
-
-            # Augment at loss time
-            aug_time_1 = self.encoder.coeff_net._augment_graph(coeffs_time_seq)
-            aug_time_2 = self.encoder.coeff_net._augment_graph(coeffs_time_seq)
-            aug_freq_1 = self.encoder.coeff_net._augment_graph(coeffs_freq_seq)  
-            aug_freq_2 = self.encoder.coeff_net._augment_graph(coeffs_freq_seq)  
-
-            # Compute MSE reconstruction losses
-            loss_time_aug = F.mse_loss(aug_time_1, aug_time_2)
-            loss_freq_aug = F.mse_loss(aug_freq_1, aug_freq_2)
-
-            # Total augmentation loss (weighted if needed)
-            loss_aug_total = 0.5 * loss_time_aug + 0.5 * loss_freq_aug
-        else:
-            loss_aug_total = torch.tensor(0.0, device=self.device)
-
-
-        # --- Velocity (Derivative) Loss ---
-        # nexts: [B, P] (current actual)
-        # winds[:, -1, :]: [B, P] (previous actual)
-        # nexts_hat: [B, P] (predicted)
-        #winds = attns #TODO clearn it afterwards
-        #actual_velocity = nexts - winds[:, -1, :].squeeze(1) 
-        #predicted_velocity = nexts_hat - winds[:, -1, :].squeeze(1)
-
-        #loss_velocity = self.mse_loss(predicted_velocity, actual_velocity)
-        #logging.info('Velocity reconstruction loss: %s', loss_velocity.item())
-
-        # Add a hyperparameter to control the weight of velocity
-        lambda_velocity = self.options.get("lambda_velocity", 0.1)
-
-        # 1. Compute Precisions (Weights)
-        # Using exp(-log_var) ensures weights are always positive
-        w_recon = torch.exp(-self.log_var_recon)
-        w_sparse = torch.exp(-self.log_var_sparse)
-        w_sdi = torch.exp(-self.log_var_sdi)
-        w_smooth = torch.exp(-self.log_var_smooth)
-
-
-        #lets visualize the imp losses (loss_recon, loss_encoder_coeffs, loss_decoder_coeffs, loss_prev_coeffs, loss_encoder_smooth, loss_decoder_smooth, loss_prev_smooth, loss_kl)
         losses_to_log = {
             "loss_recon": loss_recon.item(),
             "loss_encoder_coeffs": loss_encoder_coeffs.item(),
@@ -1132,56 +971,13 @@ class AERCA(nn.Module):
             "loss_decoder_smooth": loss_decoder_smooth.item(),
             "loss_prev_smooth": loss_prev_smooth.item(),
             "loss_kl": loss_kl.item(),
-
-            "w_recon": w_recon.item(),
-            "w_sparse": w_sparse.item(),
-            "w_sdi": w_sdi.item(),
-            "w_smooth": w_smooth.item(),
         }
         tensorboard_log = {f'training_step/{key}': value for key, value in losses_to_log.items()}
         for key, value in tensorboard_log.items():
             self.writer.add_scalar(key, value, self.current_epoch)
-        #make w_recon in the same deiv as loss_recon
-        w_recon = w_recon.to(loss_recon.device)
-        # === Total loss ===
-        loss = (loss_recon +
-                self.encoder_lambda * loss_encoder_coeffs +
-                self.decoder_lambda * (loss_decoder_coeffs + loss_prev_coeffs) +
-                self.encoder_gamma * loss_encoder_smooth +
-                self.decoder_gamma * (loss_decoder_smooth + loss_prev_smooth) +
-                self.beta * loss_kl +
-                reg_lambda +
-                lambda_amoc * latent_disc_loss +
-                0.1 * nll_loss +
-                0.1 * loss_rca_sparsity +
-                0.1 * loss_causal_consistency+
-                lambda_per_var * per_var_loss+
-                0.1 * poisson_nll+
-                loss_aug_total) 
-        #loss = (
-        #    w_recon.to(loss_recon.device) * loss_recon + self.log_var_recon.to(loss_recon.device) +
-        #    w_sparse.to(loss_encoder_coeffs.device) * (self.encoder_lambda * loss_encoder_coeffs) + self.log_var_sparse.to(loss_encoder_coeffs.device) +
-        #    w_sdi.to(loss_sdi_modular.device) * (self.options.get("lambda_sdi", 1.0) * loss_sdi_modular) + self.log_var_sdi.to(loss_sdi_modular.device) +
-        #    w_smooth.to(loss_encoder_smooth.device) * (self.encoder_gamma * loss_encoder_smooth) + self.log_var_smooth.to(loss_encoder_smooth.device)
-        #)
-        # === Logging all losses ===
-        losses_dict = {
-            "loss_full_recon": loss_full_recon.item(),
-            "loss_stats_recon": loss_stats_recon.item(),
-            "alpha": alpha.item(),
-            "loss_encoder_coeffs": loss_encoder_coeffs.item(),
-            "loss_decoder_coeffs": loss_decoder_coeffs.item(),
-            "loss_prev_coeffs": loss_prev_coeffs.item(),
-            "loss_encoder_smooth": loss_encoder_smooth.item(),
-            "loss_decoder_smooth": loss_decoder_smooth.item(),
-            "loss_prev_smooth": loss_prev_smooth.item(),
-            "loss_kl": loss_kl.item(),
-            "reg_lambda": reg_lambda.item(),
-            "latent_disc_loss": latent_disc_loss.item()
-        }
 
-        return loss, losses_dict
-
+        return loss, losses_to_log
+    
     def _training_msds_lotka_swat_original(self, xs):
         if len(xs) == 1:
             xs_train = xs[:, :int(0.8 * len(xs[0]))]
@@ -1292,7 +1088,7 @@ class AERCA(nn.Module):
         else:
             raise ValueError(f"Unknown dataset {self.options['dataset']} for training")
         
-    def _training_batches_swat_new(self, xs, batch_size=1024):
+    def _training_batches_swat_new(self, xs, batch_size=64):
         """
         Optimized training: Pre-loads data to GPU and uses index shuffling.
         xs: list or array of windows, shape (N, 3, 10)
@@ -1368,7 +1164,7 @@ class AERCA(nn.Module):
         self.load_state_dict(torch.load(os.path.join(self.save_dir, f'{self.model_name}.pt'), map_location=self.device))
         logging.info('Training complete')
 
-    def _training_batches_swat(self, xs,batch_size=1024):
+    def _training_batches_swat(self, xs,batch_size=64):
         """
         xs: list of windows, each of shape (window_size+1, num_vars)
         batch_size: number of windows per batch
@@ -1480,10 +1276,22 @@ class AERCA(nn.Module):
     def _testing_step(self, x, label=None, add_u=True):
         nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us, attn_weights = self.forward(x, add_u=add_u)
 
+        #if label is not None:
+        #    preprocessed_label = sliding_window_view(label, (self.window_size + 1, self.num_vars))[self.window_size:, 0, :-1, :]
+        #else:
+        #    preprocessed_label = None
+        # 2. LABEL ALIGNMENT FIX:
+        # If x is [25, 30], label is also [25, 30].
+        # We don't need a sliding window. We just need the label for the target step.
         if label is not None:
-            preprocessed_label = sliding_window_view(label, (self.window_size + 1, self.num_vars))[self.window_size:, 0, :-1, :]
+            # If label is [25, 30], we take the last timestamp to match 'nexts'
+            if torch.is_tensor(label):
+                preprocessed_label = label[-1:, :] 
+            else:
+                preprocessed_label = label[-1:]
         else:
             preprocessed_label = None
+
 
         loss_recon = self.mse_loss(nexts_hat, nexts)
         logging.info('Reconstruction loss: %s', loss_recon.item())
@@ -1895,239 +1703,120 @@ class AERCA(nn.Module):
         plt.savefig(f"results/case_study_heatmap({dataset_name})({coeff_architecture}).pdf")
         plt.show()
 
-
-    def _testing_root_cause(self, xs, labels,alpha: float = 0.5, use_attention_fusion: bool = False):
+    def _testing_root_cause(self, xs, labels, alpha: float = 0.5, use_attention_fusion: bool = False):
         coeff_architecture = self.options["coeff_architecture"]
+        
+        # 1. Baseline check
         if coeff_architecture == "rcd":
-            # Run RCD baseline
             rcd_result = self._evaluate_rcd(xs, labels, bins=None, gamma=5)
-            self._log_and_print('=' * 50)
-            self._log_and_print("RCD Root Causes: {}", rcd_result["root_cause"])
-            self._log_and_print("RCD #Tests: {}", rcd_result["num_tests"])
-            self._log_and_print("RCD Time: {:.4f}s", rcd_result["time"])
             return rcd_result
 
-        # Load model and only the encoder-related parameters required for the POT computations.
-        self.load_state_dict(torch.load(os.path.join(self.save_dir, f'{self.model_name}.pt'),
-                                        map_location=self.device))
+        # 2. Model Loading & Setup
+        self.load_state_dict(torch.load(os.path.join(self.save_dir, f'{self.model_name}.pt'), map_location=self.device))
         self.eval()
+        
+        # Load normalization stats
         self.us_mean_encoder = np.load(os.path.join(self.save_dir, f'{self.model_name}_us_mean_encoder.npy'))
         self.us_std_encoder = np.load(os.path.join(self.save_dir, f'{self.model_name}_us_std_encoder.npy'))
 
-        # Collect the latent representations from each sample.
-        us_list = []
-        us_sample_list = []
+        us_list = []        # For global POT threshold
+        us_sample_list = [] # For individual sample evaluation
         attn_list = []
+        
+        # 3. Inference Loop
         with torch.no_grad():
-            for i in tqdm(range(len(xs))):
-                x = xs[i]
+            for i in tqdm(range(len(xs)), desc="Inference"):
+                x = xs[i] # Current window: [25, 30]
                 label = labels[i]
-                loss, nexts_hat, nexts, encoder_coeffs, decoder_coeffs, kl_div, preprocessed_label, us, attn_weights = self._testing_step(x, label, add_u=False)
-                us_sample_list.append(us[self.window_size:].cpu().numpy())
-                us_list.append(us.cpu().numpy())
+                
+                # Forward pass - encoding handles unsqueeze and slicing
+                _, _, _, _, _, _, _, us, attn_weights = self._testing_step(x, label, add_u=False)
+                
+                # PRECISION FIX: us is [1, 30], we take the whole thing
+                # No more [self.window_size:] slicing which resulted in empty arrays
+                u_numpy = us.cpu().numpy() # [1, 30]
+                us_sample_list.append(u_numpy)
+                us_list.append(u_numpy)
+                
                 if use_attention_fusion:
-                    # aggregate attention over time (mean across timesteps)
-                    attn_mean = attn_weights.mean(dim=0).cpu().numpy()  # shape [num_vars]
+                    attn_mean = attn_weights.mean(dim=0).cpu().numpy()
                     attn_list.append(attn_mean)
-                if self.options.get("plot_case_study", False) and i == 0:  # only plot first sample
-                    z_scores_sample = (-(us[self.window_size:].cpu().numpy() - self.us_mean_encoder) / self.us_std_encoder)
-                    try:
-                        
-                        self.plot_case_study(
-                            z_scores=(-(us[self.window_size:].cpu().numpy() - self.us_mean_encoder) / self.us_std_encoder),
-                            labels=labels[i][self.window_size*2:],  # ground truth for this sample
-                            attn_importance=attn_weights.cpu().numpy(),  # shape (1, O, P, P) or (1, P, P)
-                            mlp_scores=None,  # optional baseline if available
-                            num_vars=self.num_vars
-                        )
-                    except Exception as e:
-                        self.plot_case_study(
-                            z_scores=(-(us[self.window_size:].cpu().numpy() - self.us_mean_encoder) / self.us_std_encoder),
-                            labels=labels[i][self.window_size*2:],  # ground truth for this sample
-                            attn_importance=None,  # shape (1, O, P, P) or (1, P, P)
-                            mlp_scores=None,  # optional baseline if available
-                            num_vars=self.num_vars
-                        )
 
-        # Combine all latent representations for POT threshold computation.
-        us_all = np.concatenate(us_list, axis=0).reshape(-1, self.num_vars)
-        self._log_and_print('=' * 50)
+        # 4. Global POT Threshold Calculation
+        us_all = np.concatenate(us_list, axis=0) # [Total_Windows, num_vars]
         us_all_z_score = (-(us_all - self.us_mean_encoder) / self.us_std_encoder)
+        
         us_all_z_score_pot = []
-        for i in tqdm(range(self.num_vars)):
+        for i in range(self.num_vars):
             col_data = us_all_z_score[:, i]
-            col_data = col_data[~np.isnan(col_data)]           # remove NaNs
-            col_data = col_data[np.isfinite(col_data)]        # remove infs
-
+            col_data = col_data[np.isfinite(col_data)]
+            
             if col_data.size == 0:
-                # no valid data in this column
-                self._log_and_print("POT skipped for variable {}: no valid data", i)
-                pot_val = 0.0
-            else:
-                try:
-                    pot_val, _ = pot(col_data, self.risk, self.initial_level, self.num_candidates)
-                except Exception as e:
-                    self._log_and_print("POT failed for variable {}: {}", i, str(e))
-                    #pot_val = np.percentile(col_data, 99.9)  # fallback
-                    # 3. SMART FALLBACK: 3-Sigma
-                    # This is more robust than a 99.9 percentile because it creates a gap
-                    mu = np.mean(col_data)
-                    sigma = np.std(col_data)
-                    
-                    # Use 3-sigma or a minimum 'noise floor' to avoid triggering on zeros
-                    pot_val = mu + max(3 * sigma, 1e-3)
-
+                us_all_z_score_pot.append(0.0)
+                continue
+                
+            try:
+                pot_val, _ = pot(col_data, self.risk, self.initial_level, self.num_candidates)
+            except:
+                # Robust fallback: 3-Sigma
+                pot_val = np.mean(col_data) + 3 * np.std(col_data)
             us_all_z_score_pot.append(pot_val)
-
+        
         us_all_z_score_pot = np.array(us_all_z_score_pot)
 
-
-        # Compute top-k statistics for each sample using the computed POT thresholds.
+        # 5. Top-K Evaluation
         k_all = []
         k_at_step_all = []
-        for i in tqdm(range(len(xs))):
-            us_sample = us_sample_list[i]
+        
+        for i in tqdm(range(len(xs)), desc="Top-K Evaluation"):
+            us_sample = us_sample_list[i] # [1, 30]
             z_scores = (-(us_sample - self.us_mean_encoder) / self.us_std_encoder)
+            
             if use_attention_fusion:
-                # broadcast attn to match z_scores shape [T, num_vars]
-                #attn_importance = attn_list[i].mean(axis=(0, 1))  # mean over lags and “from” vars → shape (P,)
-                #attn_importance = np.expand_dims(attn_importance, axis=0).repeat(z_scores.shape[0], axis=0)  # (T, P)
-                # attn_seq: shape (O, P, P) -> (lags, to_vars, from_vars)
-                # mean over the "from" dimension → importance per "to" variable per lag
-                attn_per_lag = attn_list[i].mean(axis=2)  # shape (O, P)
-
-                # Then mean over lags
-                attn_importance = attn_per_lag.mean(axis=0)  # shape (P,)
-
-                # Broadcast to match z_scores (T, P)
+                attn_per_lag = attn_list[i].mean(axis=2)
+                attn_importance = attn_per_lag.mean(axis=0)
                 attn_importance = np.expand_dims(attn_importance, axis=0).repeat(z_scores.shape[0], axis=0)
-                """
-                # Assume z_scores[0] and attn_importance[0] are lists of length P
-                z_scores_list = z_scores[0].tolist()
-                attn_list = attn_importance[0].tolist()
-
-                # Sort descending and keep track of indices
-                z_scores_sorted = sorted(enumerate(z_scores_list), key=lambda x: x[1], reverse=True)
-                attn_sorted = sorted(enumerate(attn_list), key=lambda x: x[1], reverse=True)
-
-                print("Top variables by z_scores:")
-                for idx, val in z_scores_sorted[:10]:  # top 10
-                    print(f"Var {idx}: {val:.4f}")
-
-                print("\nTop variables by attention:")
-                for idx, val in attn_sorted[:10]:  # top 10
-                    print(f"Var {idx}: {val:.4f}")
-                """
                 z_scores = alpha * z_scores + (1 - alpha) * attn_importance
-            else:
-                z_scores = z_scores
+
+            # LABEL ALIGNMENT FIX:
+            # We are predicting the very last step of the input window i.
+            # Therefore, we compare z_scores [1, 30] with the LAST row of labels[i].
+            #current_labels = labels[i][-1:] # [1, 30]
+            # Change this: current_labels = labels[i][-1:]
+            # To this:
+            # This takes the max across the window. If ANY sensor is an anomaly 
+            # at ANY point in the 25-step window, we evaluate it.
+            current_labels = np.max(labels[i], axis=0, keepdims=True)
             try:
-                k_lst = topk(z_scores, labels[i][self.window_size * 2:], us_all_z_score_pot)
-                k_at_step = topk_at_step(z_scores, labels[i][self.window_size * 2:])
+                # TopK requires (Time, Vars) shapes. Both are [1, 30] here.
+                k_lst = topk(z_scores, current_labels, us_all_z_score_pot)
+                k_at_step = topk_at_step(z_scores, current_labels)
                 k_all.append(k_lst)
                 k_at_step_all.append(k_at_step)
             except Exception as e:
-                self._log_and_print("Error occurred while computing top-k statistics for sample {}: {}", i, str(e))
+                self._log_and_print("Error computing top-k for sample {}: {}", i, str(e))
                 continue
-            
 
-        # Aggregate results
-        # so the size of k_all where it contained the errors is 
-        # Aggregate results
+        # 6. Result Aggregation
         valid_samples = len(k_all)
         total_samples = len(xs)
-        coverage_pct = (valid_samples / total_samples) * 100 if total_samples > 0 else 0
         
-        self._log_and_print("Root Cause Analysis Coverage: {}/{} samples ({:.2f}%)", 
-                            valid_samples, total_samples, coverage_pct)
+        self._log_and_print("RCA Coverage: {}/{} ({:.2f}%)", valid_samples, total_samples, (valid_samples/total_samples)*100)
         
-        if valid_samples == 0:
-            self._log_and_print("Warning: No anomalies found in the ground truth for this subset.")
-            return
-        
-        k_all = np.array(k_all).mean(axis=0)
-        k_at_step_all = np.array(k_at_step_all).mean(axis=0)
-        ac_at = [k_at_step_all[0], k_at_step_all[2], k_at_step_all[4], k_at_step_all[9]]
-        self._log_and_print('Root cause analysis AC@1: {:.5f}', ac_at[0])
-        self._log_and_print('Root cause analysis AC@3: {:.5f}', ac_at[1])
-        self._log_and_print('Root cause analysis AC@5: {:.5f}', ac_at[2])
-        self._log_and_print('Root cause analysis AC@10: {:.5f}', ac_at[3])
-        self._log_and_print('Root cause analysis Avg@10: {:.5f}', np.mean(k_at_step_all))
-
-        ac_star_at = [k_all[0], k_all[9], k_all[99], k_all[499]]
-        self._log_and_print('Root cause analysis AC*@1: {:.5f}', ac_star_at[0])
-        self._log_and_print('Root cause analysis AC*@10: {:.5f}', ac_star_at[1])
-        self._log_and_print('Root cause analysis AC*@100: {:.5f}', ac_star_at[2])
-        self._log_and_print('Root cause analysis AC*@500: {:.5f}', ac_star_at[3])
-        self._log_and_print('Root cause analysis Avg*@500: {:.5f}', np.mean(k_all))
-
-        if self.options.get("plot_case_study", False):
-            # Find any sample with at least one true root cause
-            sample_idx_for_plot = None
-            for i in range(len(labels)):
-                shifted = labels[i][self.window_size * 2:]
-                if shifted.sum() > 0:   # at least one true anomaly
-                    sample_idx_for_plot = i
-                    break
-            us_sample = us_sample_list[sample_idx_for_plot]
-            z_scores_sample = (-(us_sample - self.us_mean_encoder) / self.us_std_encoder)
-            labels_shifted = labels[sample_idx_for_plot][self.window_size * 2:]
-            print("labels_shifted shape:", labels_shifted.shape)
-
-            if len(labels_shifted.shape) == 1:
-                print("⚠ No variable-level root cause info. Cannot draw red box.")
-            else:
-                # pick a timestep with root cause
-                candidate = np.where(labels_shifted.sum(axis=1) > 0)[0]
-                if len(candidate) == 0:
-                    print("⚠ Sample has no variable-level root cause after shifting.")
-                else:
-                    t_idx = candidate[0]
-                    print("Selected timestep:", t_idx)
-                    self.plot_case(z_scores_sample, labels_shifted, t_idx=t_idx)
-
-        if self.options.get("plot_case_study_heatmap", False):
-
-            sample_idx = None
-            for i in range(len(labels)):
-                shifted = labels[i][self.window_size * 2:]
-                if shifted.sum() > 0:
-                    sample_idx = i
-                    break
-
-            us_sample = us_sample_list[sample_idx]
-            z_scores_sample = (-(us_sample - self.us_mean_encoder) / self.us_std_encoder)
-            labels_shifted = labels[sample_idx][self.window_size * 2:]
-
-            # Find the first timestep with a root cause
-            rc_times = np.where(labels_shifted.sum(axis=1) > 0)[0]
-            if len(rc_times) == 0:
-                print("⚠ No root cause found after shifting.")
-            else:
-                t_start = rc_times[0] - 2  # put window BEFORE the anomaly
-                t_start = max(t_start, 0)
-
-                window = self.options.get("case_window", 3)
-
-                self.plot_case_heatmap(
-                    z_scores=z_scores_sample,
-                    labels=labels_shifted,
-                    t_start=t_start,
-                    window=window
-                )
-
-        if self.options.get("plot_latent_clusters", False):
-            print("Plotting latent space clustering...")
-            self.plot_latent_clusters_3d(
-                latent_list=us_sample_list,
-                labels_list=labels,
-                method=self.options.get("latent_reduction", "PCA")
-            )
-
-        write_results(self.options, self.local_model_name, ac_at, k_at_step_all, self.total_params,
-                            self.options.get("results_csv"))
-        
-
+        if valid_samples > 0:
+            k_all = np.array(k_all).mean(axis=0)
+            k_at_step_all = np.array(k_at_step_all).mean(axis=0)
+            
+            self._log_and_print('Root cause analysis AC@1: {:.5f}', k_at_step_all[0])
+            self._log_and_print('Root cause analysis AC@3: {:.5f}', k_at_step_all[2])
+            self._log_and_print('Root cause analysis AC@5: {:.5f}', k_at_step_all[4])
+            self._log_and_print('Root cause analysis AC@10: {:.5f}', k_at_step_all[9])
+            
+            # Save results
+            write_results(self.options, self.local_model_name, [k_at_step_all[0], k_at_step_all[2], k_at_step_all[4], k_at_step_all[9]], 
+                          k_at_step_all, self.total_params, self.options.get("results_csv"))
+        else:
+            self._log_and_print("Zero valid samples found. Check if labels[i][-1] contains any anomalies.")
 
     def plot_case(self,z_scores, labels, t_idx=None):
         """

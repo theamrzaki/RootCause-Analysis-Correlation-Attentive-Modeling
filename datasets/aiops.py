@@ -183,6 +183,20 @@ class aiops:
                     
         return label_matrix
     
+    def get_binary_flags(self, df):
+        """
+        Returns a numpy array of flags (1 for binary/static, 0 for continuous).
+        A column is 'binary' if it has 2 or fewer unique values.
+        """
+        flags = []
+        for col in df.columns:
+            unique_count = df[col].nunique()
+            if unique_count <= 2:
+                flags.append(1)
+            else:
+                flags.append(0)
+        return np.array(flags)
+
     def generate_example(self):
         df = self.get_wide_table()
         avg_suggested_interval, reason = self.predict_best_sampling_rate(df)  # Optional: Get sampling rate suggestions based on the data
@@ -193,11 +207,44 @@ class aiops:
         df = df.loc[:, (df.std() > 1e-6)]
         
         # 2. Top-K Volatility (Coefficient of Variation)
+        # 1. Calculate volatility as usual
         volatility = df.std() / (df.mean() + 1e-6)
+        
+                # 2. Identify which columns are binary/categorical (2 or fewer unique values)
+        """
+        unique_metrics = []
+        seen_roots = set()
+        for col in volatility.sort_values(ascending=False).index:
+            # Create a 'root' name by stripping units
+            root = col.replace('_MB', '').replace('_bytes', '').replace('_total', '')
+            if root not in seen_roots:
+                unique_metrics.append(col)
+                seen_roots.add(root)
+            if len(unique_metrics) >= 100: # Get a large enough pool
+                break
+
+        is_binary = df.apply(lambda x: x.nunique() <= 2)
+        unique_volatility = volatility[unique_metrics]
+        # 3. Split the pools
+        continuous_vol = unique_volatility[~is_binary]
+        binary_vol = unique_volatility[is_binary]
+
+        # 4. Set a Quota (e.g., 25 Continuous, 5 Binary)
+        # Adjust these numbers to ensure you keep your 84% coverage!
+        num_continuous = 25 
+        num_binary = self.num_vars - num_continuous
+
+        # 5. Combine the best of both worlds
+        important_cols = []
+        important_cols.extend(continuous_vol.sort_values(ascending=False).head(num_continuous).index)
+        important_cols.extend(binary_vol.sort_values(ascending=False).head(num_binary).index)
+        """
         print(f"Total metrics after filtering: {volatility.sort_values(ascending=False).head(20)}")
         important_cols = volatility.sort_values(ascending=False).head(self.num_vars).index
+
         df_subset = df[important_cols]
-        
+        print(f"Total metrics after filtering: {important_cols}", len(important_cols))
+
         print(f"Final wide table shape: {df_subset.shape}")
         
         # 3. Label Processing
@@ -216,6 +263,22 @@ class aiops:
         #non_binary_cols = [c for c in range(data.shape[1]) if self.binary_flags[c] == 0]
         #data[:, non_binary_cols] = np.log1p(data[:, non_binary_cols])
 
+        ## 2. Identify Binary vs Continuous 
+        ## Do this BEFORE any transformations
+        #self.binary_flags = self.get_binary_flags(df_subset)
+        #print(f"Binary flags (1 for binary/static, 0 for continuous): {self.binary_flags}")
+#
+        ## 3. Apply Log Transform to Continuous Variables
+        ## This prevents 'Massive Spikes' from drowning out the causal signal
+        #data = df_subset.values
+        #continuous_cols = np.where(self.binary_flags == 0)[0]
+        #
+        ## We only log metrics that have a significant range (> 1.0)
+        ## to avoid squashing metrics that are already small.
+        #for col_idx in continuous_cols:
+        #    if data[:, col_idx].max() > 1.0:
+        #        data[:, col_idx] = np.sqrt(data[:, col_idx])
+
         # 2. Use RobustScaler instead of StandardScaler
         scaler = RobustScaler() 
         train_data_raw = data[:split]
@@ -230,7 +293,7 @@ class aiops:
         # Using your suggested chunk_size and step
         x_n_list = []
         step = 1
-        chunk_size = 10 * self.window_size # e.g., 300 timestamps per sample
+        chunk_size = 1 * self.window_size # e.g., 300 timestamps per sample
         
         for i in range(0, len(train_scaled) - chunk_size, step):
             x_n_list.append(train_scaled[i : i + chunk_size])

@@ -221,7 +221,7 @@ class OrthTransform(nn.Module):
         # x: [Batch, Window, Channels] (e.g., 20, 36, 51)
         target_len = self.Q.shape[0] # 1000
         current_len = x.shape[1]    # 36
-        disable_orth = True
+        disable_orth = False
         if disable_orth:
             # IDENTITY MODE: Pure temporal pass-through
             # No spectral mixing happens here.
@@ -240,7 +240,7 @@ class OrthTransform(nn.Module):
         return out[:, -current_len:, :].transpose(1, 2)
 
     def inverse(self, x_orth, disable_orth=False):
-        disable_orth = True
+        disable_orth = False
         # x_orth: [Batch, Channels, Current_W]
         if disable_orth:
             return x_orth.transpose(1, 2)
@@ -289,7 +289,7 @@ class vlinear(nn.Module):
     def __init__(self, num_vars, order, hidden_dim=256, device="cpu", options=None):
         super().__init__()
         self.num_vars = num_vars  
-        self.order = order        
+        self.order = order*1  -1      
         self.device = device
         
         self.orth_transformer = options.get('orth_transformer') 
@@ -321,87 +321,6 @@ class vlinear(nn.Module):
         )
         #self.revin = RevIN(num_vars)
 
-    def forward_temporal_smear(self, inputs: torch.Tensor):
-        B, O_curr, P = inputs.shape
-        
-        # --- 1. Step into Orthogonal Domain ---
-        #inputs = self.revin(inputs, mode='norm')
-        if self.orth_transformer is None:
-            x_orth = inputs.transpose(1, 2) # [B, P, O_curr] -> [B, O_curr, P]
-        else:
-            x_orth = self.orth_transformer(inputs) # [B, P, 1000]
-        
-        # --- 2. Apply Delta1 Bias ---
-        # We unsqueeze to [B, P, 1, 1000] to match Model's 4D logic
-        # This bias helps overcome the "zero-padding" dilution
-        x_orth_biased = x_orth.unsqueeze(-2) + self.delta1
-        
-        # --- 3. vecTrans Latent Generation ---
-        # Flatten back to 3D for the Linear layer
-
-        #z = self.temporal_proj(x_orth_biased.squeeze(-2)) # [B, P, H]
-
-
-       
-        z = self.temporal_proj(x_orth_biased.squeeze(-2))
-        
-        # Step 1: weights
-        #w = torch.sigmoid(self.a)
-        #τ < 1 → sharper distribution
-        #try τ = 0.3 or 0.1
-        ###tau = 0.1
-        ###w = torch.softmax(self.a / tau, dim=0)
-        ###w = w / (w.sum() + 1e-8)   # L1 normalize
-####
-        ##### Step 2: aggregation
-        #####s = torch.einsum('p,bph->bh', w, z)   # [B, H]
-        ###vec = w[None, :, None] * z
-        ###vec = vec.sum(dim=1, keepdim=True).expand_as(z)
-        ##### Step 3: broadcast
-        #####vec = s.unsqueeze(1).repeat(1, self.num_vars, 1)  # [B, P, H]
-####
-        ##### Residual-style combination (IMPORTANT)
-        ###cond = self.ln(z + vec)
-        cond = z * self.embeddings # [B, P, H]
-        # --- 4. Prediction with Delta2 ---
-        v_pred = self.vf(cond).unsqueeze(-2) + self.delta2
-        v_pred = v_pred.squeeze(-2) # [B, P, 1000]
-        
-        # --- 5. Return to Time Domain ---
-        if self.orth_transformer is None:
-            preds_all_time = v_pred.transpose(1, 2) # [B, P, O_curr] -> [B, O_curr, P]
-        else:
-            preds_all_time = self.orth_transformer.inverse(v_pred)
-        preds = preds_all_time[:, -1, :] 
-        #preds_all_time = self.revin(preds_all_time, mode='denorm')
-        #preds = preds_all_time[:, -1, :]
-
-        # AERCA Coefficients
-        coeffs_time = torch.einsum('bph,bqh->bpq', cond, cond)
-        coeffs_time = coeffs_time.unsqueeze(1).repeat(1, O_curr, 1, 1)
-
-        # Split into heads to capture different temporal "frequencies"
-        #z_heads = z.view(B, P, self.num_heads, self.head_dim)
-
-        ## Calculate causal coefficients per head
-        ## This mimics the "ModuleList" of GVAR but stays in the Orthogonal domain
-        #z_q = self.query_proj(z_heads)
-        #z_k = self.key_proj(z_heads)
-#
-        ## Generate the A matrix using the heads
-        ## 3. Generate the A matrix using the heads [B, P, P]
-        #coeffs_spatial = torch.einsum('bphd, bqhd -> bpq', z_q, z_k)
-        #coeffs_spatial = torch.tanh(coeffs_spatial) 
-#
-        ## 4. RESTORE THE SHAPE: [B, P, P] -> [B, O_curr, P, P]
-        ## This makes it compatible with the AERCA/GVAR evaluation logic
-        #coeffs_time = coeffs_spatial.unsqueeze(1).repeat(1, O_curr, 1, 1)
-
-        # 5. Frequency representation (usually just a slice or the same matrix)
-        coeffs_freq = coeffs_time[:, 0, :, :]
-
-        return preds, coeffs_time, coeffs_freq
-    
     def forward(self, inputs: torch.Tensor):
         B, O_curr, P = inputs.shape # [B, 20, 51]
         
@@ -434,7 +353,7 @@ class vlinear(nn.Module):
         # --- 5. Prediction (Forecasting) ---
         # We aggregate the temporal info for the final forecast.
         # You can use the last step or a mean across the window.
-        z_final = cond.mean(dim=1) # [B, P, H] #lets try to return back to the best results
+        z_final, _ = torch.max(cond, dim=1) # [B, P, H] #lets try to return back to the best results
         #z_final = cond[:, -1, :] # still low perf
         v_pred = self.vf(z_final).unsqueeze(-2) + self.delta2
         v_pred = v_pred.squeeze(-2) 
