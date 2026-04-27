@@ -1,3 +1,4 @@
+import json
 import os
 from models.senn import SENNGC
 import torch.nn as nn
@@ -89,41 +90,31 @@ class AERCA(nn.Module):
             
         elif(self.options["coeff_architecture"] in ["TemporalGNN_Attention", "TemporalGNN_Attention_fourier", "TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced","cuts_mlp","cuts_lstm"]):
             # --- Efficient attention-based decoder layers ---
-            hidden_dim_small = min(hidden_layer_size, 64)  # smaller hidden dim to reduce parameters
-            self.rank = 8                 # low-rank for coefficient matrices
-
-            #self.decoding_attn = nn.MultiheadAttention(
-            #    embed_dim=hidden_dim_small, num_heads=2, batch_first=True
-            #).to(device)
+            hidden_dim_small = 256
+            # INCREASE RANK: 8 is too low for 30-50 vars. Try 16 to allow more complex interactions.
+            self.rank = 16                 
 
             self.decoding_norm = nn.LayerNorm(hidden_dim_small).to(device)
 
-            #self.temporal_attn_decoder = nn.MultiheadAttention(
-            #    embed_dim=hidden_dim_small, num_heads=1, batch_first=True
-            #).to(device)
-
+            # FIX 1: Map hidden state back to EVERY sensor (num_vars), not just 1.
             self.decoding_output_proj = nn.Linear(hidden_dim_small, num_vars).to(device)
 
+            # Coeff Projections
             self.decoding_coeff_proj = nn.Linear(hidden_dim_small, 2 * num_vars * self.rank).to(device)  
-
-
-            # produces U and V for low-rank coeffs
-
             self.coeff_proj_decoder = nn.Linear(hidden_dim_small, 2 * num_vars * self.rank).to(device)   
-            # for prev_coeffs
 
-            order = window_size
-            self.orth_transformer = options.get('orth_transformer') 
+            # Input Projection: Needs to handle the dual residuals (2 * num_vars)
+            # or just num_vars depending on your 'us' shape
+            self.decoding_input_proj = nn.Linear(num_vars, hidden_dim_small).to(device)
+
+            # FIX 2: Use the Orthogonal Basis (vf) correctly
+            # If window is 25, order should be 25 or 1 depending on basis type
+            order = window_size 
             self.vf = nn.Sequential(
                 nn.Linear(hidden_dim_small, hidden_dim_small * 2),
                 nn.ReLU(),
                 nn.Linear(hidden_dim_small * 2, order) 
             ).to(device)
-            # 'order' is the size of the orthogonal coefficients (in your case, 1)
-            self.decoding_input_proj = nn.Linear(num_vars, hidden_dim_small).to(device)
-
-            # This projects the hidden representation back to 1 value per sensor
-            self.decoding_output_proj = nn.Linear(hidden_dim_small, 1).to(device)
 
             #self._log_and_print('Number of parameters in encoder: {}', self._count_parameters(self.encoder))
             self._log_and_print('Number of parameters in decoding_input_proj: {}', self._count_parameters(self.decoding_input_proj))
@@ -230,16 +221,7 @@ class AERCA(nn.Module):
 
         self.local_model_name =family_of_exp + datetime_str+ f"{str(window_size)}_{str(lr)}_{str(self.options['seed'])}_window_{str(self.window_size)}" 
         self.writer = SummaryWriter(log_dir=os.path.join(self.save_dir, "runs", self.local_model_name))
-        
-        # if total_params > 100 million stop training and go to write_results function
-        #if self.total_params > 100_000_000:
-        #    self._log_and_print('Total parameters exceed 100 million, stopping training.')
-        #    ac_at = [0, 0, 0, 0]
-        #    k_at_step_all = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-        #    write_results(self.options, self.local_model_name, ac_at, k_at_step_all, self.total_params, self.options.get("results_csv", #'RQ_swat_windows.csv'))
-        #    #stop the whole python program
-        #    os._exit(1)
-        
+                
     def _count_parameters(self, model):
         num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
         # view it with commas
@@ -257,383 +239,67 @@ class AERCA(nn.Module):
         return (1 - alpha) * norm2 + alpha * norm1
 
     def _smoothness_loss(self, coeffs):
+        # coeffs shape: [Batch, Sensors, Sensors] -> [64, 30, 30]
+        if coeffs.dim() == 3:
+            # Subtract the coefficient matrix of sample 'j' from sample 'j+1'
+            # This represents the change in sensor relationships over 1 timestep
+            diff = coeffs[1:, :, :] - coeffs[:-1, :, :]
+            
+            # Calculate the norm and mean
+            return torch.norm(diff, dim=(1, 2)).mean()
+        
+        # Fallback for 4D if you ever switch back
         return torch.norm(coeffs[:, 1:, :, :] - coeffs[:, :-1, :, :], dim=1).mean()
 
-    def encoding_batch(self, xs):  # xs shape: (batch, T, num_vars)
-        batch_windows = []
-        for x in xs:  # each x: (T, num_vars)
-            windows = sliding_window_view(x, (self.window_size + 1, self.num_vars))[:, 0, :, :]
-            batch_windows.append(windows)
-        return np.stack(batch_windows)  
-        # shape: (batch, T - window_size, window_size+1, num_vars)
-    def encoding_batch___(self, xs):  # xs: (B, num_vars)
-        """
-        Create sliding windows for a 2D input.
-        Returns tensor of shape: (B - window_size, window_size+1, num_vars)
-        """
-        B, F = xs.shape
-        if B < self.window_size + 1:
-            raise ValueError(f"Sequence too short: {B} < window_size+1={self.window_size+1}")
-        
-        # Use as_strided to create sliding windows
-        stride0, stride1 = xs.stride()
-        new_shape = (B - self.window_size, self.window_size + 1, F)
-        new_stride = (stride0, stride0, stride1)
-        windows = xs.as_strided(size=new_shape, stride=new_stride)
-        return windows  # (B - window_size, window_size+1, num_vars)
-
     def encoding(self, xs):
-        #
-        try:
-            if type(xs) == np.ndarray:
-                pass
-            else:
-                xs = xs.cpu().numpy()
-            #for SMD
-            #(188,1000,38)
-            windows = self.encoding_batch(xs)
-            #winds = windows[:, 0, :-1, :]  # only the first window as it is much faster and enough to be trained upon
-            #nexts = windows[:, 0, -1, :]
-            winds = xs[:, :-1, :] 
-            nexts = xs[:, -1, :]
-            """
-            windows = self.encoding_batch(xs)
-            winds = windows[:, :-1, :]               # (B - window_size, window_size, F)
-            nexts = windows[:, -1, :]                # (B - window_size, F)
-            """
-        except:
-            # if xs is numpy convert to tensor and then back to numpy
-            if isinstance(xs, np.ndarray):
-                xs = torch.tensor(xs).float().to(self.device)
-            if xs.dim() == 2:
-                xs = xs.unsqueeze(0) # [25, 30] -> [1, 25, 30]
+        if isinstance(xs, np.ndarray):
+            xs = torch.tensor(xs).float().to(self.device)
+        if xs.dim() == 2: # for testing, where we test with single sample, we need to add batch dimension
+            xs = xs.unsqueeze(0) 
 
-            # 3. Direct Slice (No sliding_window_view needed!)
-            # winds: [B, 24, 30]
-            # nexts: [B, 30]
-            winds = xs[:, :-1, :] 
-            nexts = xs[:, -1, :]
-            #when testing & for lotka volterra training
-            # (3, 38)
-            #windows = sliding_window_view(xs, (self.window_size + 1, self.num_vars))[:, 0, :, :]
-            #winds = windows[:, :-1, :]
-            #nexts = windows[:, -1, :]
+        winds = xs[:, :-1, :] # input is all but last time step
+        nexts = xs[:, -1, :] # target is the last time step
+
         winds = torch.tensor(winds).float().to(self.device)
         nexts = torch.tensor(nexts).float().to(self.device)
         preds, coeffs, attn_weights = self.encoder(winds)
         us = preds - nexts                    # shape: (B, hidden_size)
-        """
-        us.shape
-            torch.Size([999, 51])
-        coeffs.shape
-            torch.Size([999, 1, 51, 51])
-        nexts.shape
-            torch.Size([999, 51])
-        nexts[self.window_size:].shape
-            torch.Size([998, 51])
-        winds.shape
-            torch.Size([999, 1, 51])
-        winds[:-self.window_size].shape
-            torch.Size([998, 1, 51])
-        """
+
         if self.options["coeff_architecture"] in self.models_encoder_only:
             return us, coeffs, nexts, winds[:-self.window_size], attn_weights, preds
         else:
-            return us, coeffs, nexts[self.window_size:], winds[:-self.window_size], attn_weights, preds
+            return us, coeffs, nexts, winds, attn_weights, preds
 
-    def encoding_new(self, xs):
-        # Split features into modalities
-        modalities = self.split_by_clusters(xs)
-        
-        us_list, coeff_list = [], []
-        winds_list, nexts_list = [], []
-
-        for i, x_mod in enumerate(modalities):
-            # Sliding window
-            windows = sliding_window_view(x_mod.cpu().numpy(), (self.window_size + 1, x_mod.shape[1]))[:, 0, :, :]
-            winds = torch.tensor(windows[:, :-1, :]).float().to(self.device)
-            nexts = torch.tensor(windows[:, -1, :]).float().to(self.device)
-
-            preds, coeffs = self.encoders[i](winds)
-            us = preds - nexts
-
-            us_list.append(us)
-            coeff_list.append(coeffs)
-            winds_list.append(winds)
-            nexts_list.append(nexts)
-
-        # --- Combine modalities ---
-        us = torch.cat(us_list, dim=-1)
-        # coeff_list: list of (B, 1, vars_mod, vars_mod), e.g. 3 × [999, 1, 17, 17]
-        B, C, _, _ = coeff_list[0].shape
-        num_blocks = len(coeff_list)
-        vars_mod = coeff_list[0].shape[-1]
-        total_vars = num_blocks * vars_mod
-
-        # Initialize empty block matrix
-        coeffs = coeff_list[0].new_zeros((B, C, total_vars, total_vars))
-
-        # Fill diagonal blocks
-        for i, block in enumerate(coeff_list):
-            start = i * vars_mod
-            end = (i + 1) * vars_mod
-            coeffs[:, :, start:end, start:end] = block
-
-        winds_flat = torch.cat(winds_list, dim=-1)
-        winds = self.winds_proj(winds_flat)
-
-        nexts_flat = torch.cat(nexts_list, dim=-1)
-        nexts = self.nexts_proj(nexts_flat)
-
-        # Return shapes compatible with previous code
-        return us, coeffs, nexts[self.window_size:], winds[:-self.window_size]
-
-    def decoding_1decoder_norm2(self, us, winds, add_u=True, attn_dropout=0.1, residual_alpha=0.9):
-        """
-        Attention-based decoding replacing dual decoders.
-        us: latent states (B, T, num_vars)
-        winds: original windows (B, T, num_vars)
-        """
+    def decoding_1decoder(self, us, winds, add_u=True):
+        # us shape: (B, p) -> [64, 30]
+        # winds shape: (B, T, p) -> [64, 25, 30]
         batch_size, p = us.shape
-        rank = self.decoding_coeff_proj.out_features // (2 * p)  # dynamically recover rank
+        rank = self.rank
 
-        # --- Sliding windows ---
-        u_windows = sliding_window_view_torch(us, self.window_size + 1)
-        u_winds = u_windows[:, :-1, :]  # (B, window, p)
-        u_next = u_windows[:, -1, :]    # (B, p)
-
-        # --- Project and attend ---
-        u_proj = self.decoding_input_proj(u_winds)   # (B, window, hidden_dim)
-        attn_out, _ = self.decoding_attn(u_proj, u_proj, u_proj)  # (B, window, hidden_dim)
-        attn_out = F.dropout(attn_out, p=attn_dropout, training=self.training)
-
-        # Residual + norm
-        u_proj_resid = attn_out + residual_alpha * u_proj
-        attn_norm = self.decoding_norm(u_proj_resid)
-
-        query = attn_norm[:, -1:, :]   # (B, 1, hidden_dim)
-        temp_out, _ = self.temporal_attn_decoder(query, attn_norm, attn_norm)  # (B, 1, hidden_dim)
-
-        # Residual + norm again
-        temp_out = temp_out + residual_alpha * query
-        temp_out = self.decoding_norm(temp_out)
-
-        # --- Predictions ---
-        preds = self.decoding_output_proj(temp_out).squeeze(1)  # (B, p)
-
-        # --- Low-rank coefficient reconstruction ---
-        coeff_flat = self.decoding_coeff_proj(temp_out)  # (B, 1, 2 * p * rank)
-        U, V = torch.split(coeff_flat, p * rank, dim=-1)
-        U = U.view(-1, 1, p, rank)
-        V = V.view(-1, 1, p, rank)
-        coeffs = torch.matmul(U, V.transpose(-2, -1))   # (B, 1, p, p)
-
-        # --- Previous coefficients from winds ---
-        winds_proj = self.decoding_input_proj(winds)
-        winds_attn, _ = self.decoding_attn(winds_proj, winds_proj, winds_proj)
-        winds_attn = F.dropout(winds_attn, p=attn_dropout, training=self.training)
-
-        winds_resid = winds_attn + residual_alpha * winds_proj
-        winds_norm = self.decoding_norm(winds_resid)
-
-        winds_temp, _ = self.temporal_attn_decoder(winds_norm[:, -1:, :], winds_norm, winds_norm)
-        winds_temp = winds_temp + residual_alpha * winds_norm[:, -1:, :]
-        winds_temp = self.decoding_norm(winds_temp)
-
-        prev_flat = self.coeff_proj_decoder(winds_temp)  # (B, 1, 2 * p * rank)
-        U_prev, V_prev = torch.split(prev_flat, p * rank, dim=-1)
-        U_prev = U_prev.view(-1, 1, p, rank)
-        V_prev = V_prev.view(-1, 1, p, rank)
-        prev_coeffs = torch.matmul(U_prev, V_prev.transpose(-2, -1))  # (B, 1, p, p)
-
-        prev_preds = self.decoding_output_proj(winds_temp).squeeze(1)  # (B, p)
-
-        # --- Final next-step prediction ---
-        nexts_hat = preds + u_next + prev_preds if add_u else preds + prev_preds
-
-        return nexts_hat, coeffs, prev_coeffs
-
-    def decoding_1decoder___(self, us, winds, add_u=True, attn_dropout=0.1, residual_alpha=0.9):
-        """
-        Attention-based decoding replacing dual decoders.
-        us: latent states (B, T, num_vars)
-        winds: original windows (B, T, num_vars)
-        """
-        batch_size, p = us.shape
-        rank = self.decoding_coeff_proj.out_features // (2 * p)  # dynamically recover rank
-
-        # --- Sliding windows ---
-        ##us = self.orth_transformer(us.unsqueeze(1)) 
-        u_windows = sliding_window_view_torch(us, self.window_size + 1)
-        u_winds = u_windows[:, :-1, :]  # (B, window, p)
-        u_next = u_windows[:, -1, :]    # (B, p)
-
-        # --- Project and attend ---
-        u_proj = self.decoding_input_proj(u_winds)                   # (B, window, hidden_dim)
-        #attn_out, _ = self.decoding_attn(u_proj, u_proj, u_proj)    # (B, window, hidden_dim)
-        #attn_norm = self.decoding_norm(attn_out)
-        attn_norm = self.decoding_norm(u_proj)
-
-        query = attn_norm[:, -1:, :]                                   # (B, 1, hidden_dim)
-        #replace temporal attn decoder with simple max pooling over the window dimension
-        #temp_out, _ = self.temporal_attn_decoder(query, attn_norm, attn_norm)  # (B, 1, hidden_dim)
-        temp_out = torch.max(attn_norm, dim=1, keepdim=True)[0]  # (B, 1, hidden_dim)
-
-        # --- Predictions ---
-        preds = self.decoding_output_proj(temp_out).squeeze(1)        # (B, p)
-
-        # --- Low-rank coefficient reconstruction ---
-        coeff_flat = self.decoding_coeff_proj(temp_out)               # (B, 1, 2 * p * rank)
-        U, V = torch.split(coeff_flat, p * rank, dim=-1)
-        U = U.view(-1, 1, p, rank)
-        V = V.view(-1, 1, p, rank)
-        coeffs = torch.matmul(U, V.transpose(-2, -1))
-
-        # --- Previous coefficients from winds ---
-        winds_proj = self.decoding_input_proj(winds)
-        #winds_attn, _ = self.decoding_attn(winds_proj, winds_proj, winds_proj)
-        #winds_norm = self.decoding_norm(winds_attn)
-        winds_norm = self.decoding_norm(winds_proj)
-        # replace temporal attn decoder with simple max pooling over the window dimension
-        #winds_temp, _ = self.temporal_attn_decoder(winds_norm[:, -1:, :], winds_norm, winds_norm)
-        winds_temp = torch.max(winds_norm, dim=1, keepdim=True)[0]  # (B, 1, hidden_dim)
-
-        prev_flat = self.coeff_proj_decoder(winds_temp)              # (B, 1, 2 * p * rank)
-        U_prev, V_prev = torch.split(prev_flat, p * rank, dim=-1)
-        U_prev = U_prev.view(-1, 1, p, rank)
-        V_prev = V_prev.view(-1, 1, p, rank)
-        prev_coeffs = torch.matmul(U_prev, V_prev.transpose(-2, -1)) # (B, 1, p, p)
-        prev_preds = self.decoding_output_proj(winds_temp).squeeze(1) # (B, p)
-
-        # --- Final next-step prediction ---
-        nexts_hat = preds + u_next + prev_preds if add_u else preds + prev_preds
-
-        return nexts_hat, coeffs, prev_coeffs
-    
-    def decoding_1decoder(self, us, winds, add_u=True, attn_dropout=0.1, residual_alpha=0.9):
-        # us: (B, 2*p) -> [residuals, surprise]
-        # winds: (B, T, p)
+        # 1. Project the residual directly (No temporal dimension here)
+        # us is (B, p), so u_proj becomes (B, hidden)
+        u_proj = self.decoding_input_proj(us) 
+        current_state = self.decoding_norm(u_proj)
         
-        batch_size, dual_p = us.shape
-        p = self.num_vars # 51
-        # Recover rank based on actual p (51), not dual_p (102)
-        rank = self.decoding_coeff_proj.out_features // (2 * p) 
+        # 2. Sensor-wise predictions (B, p)
+        # This matches your observed torch.Size([64, 30])
+        preds = self.decoding_output_proj(current_state) 
 
-        # --- Sliding windows ---
-        u_windows = sliding_window_view_torch(us, self.window_size + 1)
-        u_winds = u_windows[:, :-1, :]  # (B, window, 102)
-        
-        # --- MINIMUM CHANGE 1: Slice u_next to get only the 51 residuals ---
-        # We add only the 'physics' back to nexts_hat, not the 'surprise'
-        u_next = u_windows[:, -1, :][:, :p] # (B, p)
-
-        # --- Project and attend ---
-        # Note: self.decoding_input_proj MUST be nn.Linear(102, hidden_dim)
-        u_proj = self.decoding_input_proj(u_winds) 
-        attn_norm = self.decoding_norm(u_proj)
-        temp_out = torch.max(attn_norm, dim=1, keepdim=True)[0] 
-
-        # --- Predictions ---
-        preds = self.decoding_output_proj(temp_out).squeeze(1) 
-
-        # --- Low-rank coefficient reconstruction ---
-        coeff_flat = self.decoding_coeff_proj(temp_out) 
+        # 3. Low-rank Coefficients (The VLinear interaction)
+        coeff_flat = self.decoding_coeff_proj(current_state)
         U, V = torch.split(coeff_flat, p * rank, dim=-1)
-        U = U.view(-1, 1, p, rank)
-        V = V.view(-1, 1, p, rank)
-        coeffs = torch.matmul(U, V.transpose(-2, -1))
-
-        # --- Previous coefficients from winds ---
-        # --- MINIMUM CHANGE 2: Ensure winds_proj uses the correct weights ---
-        # Since self.decoding_input_proj is now 102-dim, we must pad or 
-        # use a separate projection for the 51-dim 'winds'.
-        # Easiest way: zero-pad winds to 102 to match the projection layer
-        #winds_padded = torch.cat([winds, torch.zeros_like(winds)], dim=-1)
-        #winds_proj = self.decoding_input_proj(winds_padded)
-        winds_proj = self.decoding_input_proj(winds)
         
-        winds_norm = self.decoding_norm(winds_proj)
-        winds_temp = torch.max(winds_norm, dim=1, keepdim=True)[0] 
+        # Reshape for matrix multiplication
+        U = U.view(batch_size, p, rank)
+        V = V.view(batch_size, rank, p)
+        coeffs = torch.matmul(U, V) # (B, p, p)
 
-        prev_flat = self.coeff_proj_decoder(winds_temp) 
-        U_prev, V_prev = torch.split(prev_flat, p * rank, dim=-1)
-        U_prev = U_prev.view(-1, 1, p, rank)
-        V_prev = V_prev.view(-1, 1, p, rank)
-        prev_coeffs = torch.matmul(U_prev, V_prev.transpose(-2, -1)) 
-        prev_preds = self.decoding_output_proj(winds_temp).squeeze(1) 
+        # 4. Final next-step prediction
+        # nexts_hat = Linear Prediction + The Surprise (us)
+        nexts_hat = preds + us if add_u else preds
 
-        # --- Final next-step prediction ---
-        nexts_hat = preds + u_next + prev_preds if add_u else preds + prev_preds
-
-        return nexts_hat, coeffs, prev_coeffs
-
-    def decoding_causalrca__(self, us, winds, add_u=True, aux_vars=None):
-        """
-        MLP-based CausalRCA decoding.
-        us:    latent states from encoder (B, T, p)
-        winds: original sliding windows (B, T, p)
-        add_u: residual addition flag
-        aux_vars: dict containing encoder graph outputs:
-                {
-                    "adj_A1",
-                    "adj_A",
-                    "adj_A_tilt",
-                    "logits",
-                    "enc_x",
-                    "Wa",
-                    "z",
-                    "z_positive"
-                }
-        Returns:
-            nexts_hat:   (B, p)
-            decoder_coeffs:  mat_z from causal RCA  (B, p)
-            prev_coeffs:     zeros placeholder to match 1decoder signature
-        """
-
-        if aux_vars is None:
-            raise ValueError("decoding_causalrca requires aux_vars from causalrca encoder.")
-
-        B, p = us.shape
-
-        # ----------------------
-        # Extract encoder aux vars
-        # ----------------------
-        origin_A   = aux_vars["adj_A1"]       # sinh(3A)
-        adj_A_tilt = aux_vars["adj_A_tilt"]   # I - A^T
-        Wa         = aux_vars["Wa"]           # learnable param
-        input_z    = aux_vars["logits"]       # graph-weighted latent (B, n_out)
-
-        # ----------------------
-        # Next-step latent for residual
-        # ----------------------
-        u_next = us    # (B, p)
-
-        # ----------------------
-        # Run the MLPDecoder
-        # ----------------------
-        # inputs=None, since your MLPDecoder doesn't use it
-        mat_z, preds, _ = self.decoder(
-            inputs=None,
-            input_z=input_z,      # NOTE: logits from encoder
-            n_in_node=p,
-            origin_A=origin_A,
-            adj_A_tilt=adj_A_tilt,
-            Wa=Wa
-        )
-
-        # ----------------------
-        # Final prediction
-        # ----------------------
-        nexts_hat = preds.squeeze(-1) + u_next if add_u else preds
-
-        # ----------------------
-        # For compatibility with decoding_1decoder():
-        # return a placeholder for prev_coeffs
-        # ----------------------
-        decoder_coeffs = mat_z                # (B, p)
-        prev_coeffs = torch.zeros(B, 1, p, p, device=us.device)
-
-        return nexts_hat, decoder_coeffs, prev_coeffs
+        # Return None for prev_coeffs if you aren't using them in this mode
+        return nexts_hat, coeffs, torch.zeros_like(coeffs)
 
     def decoding_causalrca(self, us, winds, add_u=True, aux_vars=None):
         """
@@ -721,133 +387,23 @@ class AERCA(nn.Module):
             nexts_hat = preds + prev_preds
         return nexts_hat, coeffs, prev_coeffs
 
-
-    def decoding_norm_residual(self, us, winds, add_u=True):
-        """
-        Attention-based decoding replacing dual decoders.
-        us: latent states (B, T, num_vars)
-        winds: original windows (B, T, num_vars)
-        """
-        _, p = us.shape
-        attn_dropout = 0.1  # dropout for attention layers
-        rank = self.decoding_coeff_proj.out_features // (2 * p)  # dynamically recover rank
-
-        # --- Sliding windows ---
-        u_windows = sliding_window_view_torch(us, self.window_size + 1)
-        u_winds = u_windows[:, :-1, :]  # (B, window, p)
-        u_next = u_windows[:, -1, :]    # (B, p)
-
-        # --- Project and attend ---
-        u_proj = self.decoding_input_proj(u_winds)                   # (B, window, hidden_dim)
-        attn_out, _ = self.decoding_attn(u_proj, u_proj, u_proj)    
-        attn_out = F.dropout(attn_out, p=attn_dropout, training=self.training)
-        attn_norm = self.decoding_norm(attn_out)
-
-        # --- Temporal attention with residual scaling ---
-        query = attn_norm[:, -1:, :]
-        temp_out, _ = self.temporal_attn_decoder(query, attn_norm, attn_norm)
-        alpha = 0.9
-        temp_out = temp_out + alpha * query  # residual connection
-        temp_out = F.layer_norm(temp_out, temp_out.shape[-1:])
-
-        # --- Predictions ---
-        preds = self.decoding_output_proj(temp_out).squeeze(1)
-
-        # --- Low-rank coefficient reconstruction ---
-        coeff_flat = self.decoding_coeff_proj(temp_out)
-        U, V = torch.split(coeff_flat, p * rank, dim=-1)
-        U = U.view(-1, 1, p, rank)
-        V = V.view(-1, 1, p, rank)
-        coeffs = torch.matmul(U, V.transpose(-2, -1))
-
-        # --- Previous coefficients from winds ---
-        winds_proj = self.decoding_input_proj(winds)
-        winds_attn, _ = self.decoding_attn(winds_proj, winds_proj, winds_proj)
-        winds_attn = F.dropout(winds_attn, p=attn_dropout, training=self.training)
-        winds_norm = self.decoding_norm(winds_attn)
-
-        winds_temp, _ = self.temporal_attn_decoder(winds_norm[:, -1:, :], winds_norm, winds_norm)
-        winds_temp = winds_temp + alpha * winds_norm[:, -1:, :]
-        winds_temp = F.layer_norm(winds_temp, winds_temp.shape[-1:])
-
-        prev_flat = self.coeff_proj_decoder(winds_temp)
-        U_prev, V_prev = torch.split(prev_flat, p * rank, dim=-1)
-        U_prev = U_prev.view(-1, 1, p, rank)
-        V_prev = V_prev.view(-1, 1, p, rank)
-        prev_coeffs = torch.matmul(U_prev, V_prev.transpose(-2, -1))
-        prev_preds = self.decoding_output_proj(winds_temp).squeeze(1)
-
-        # --- Final next-step prediction ---
-        nexts_hat = preds + u_next + prev_preds if add_u else preds + prev_preds
-
-        return nexts_hat, coeffs, prev_coeffs
-
     def decoding(self, us, winds, add_u=True,aux_vars=None):
         if self.options["coeff_architecture"] in ["deep_mlp"]:
             return self.decoding_2decoders(us, winds, add_u=add_u)
-        elif self.options["coeff_architecture"] in ["TemporalGNN_Attention", "TemporalGNN_Attention_fourier", "TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced","cuts_mlp","cuts_lstm","vlinear"]:
+        elif self.options["coeff_architecture"] in ["TemporalGNN_Attention", "TemporalGNN_Attention_fourier", "TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced","cuts_mlp","cuts_lstm"]:
             return self.decoding_1decoder(us, winds, add_u=add_u)
         elif self.options["coeff_architecture"] == "causalrca":
             return self.decoding_causalrca(us, winds, add_u=add_u, aux_vars=aux_vars)
 
-    def decoding_batch(self, us, winds, add_u=True):
-        # us: (B, P)
-        us_seq = us.unsqueeze(1)  # shape -> (B, 1, P)
-
-        preds, coeffs = self.decoder(us_seq)           # next-step prediction from latent
-        prev_preds, prev_coeffs = self.decoder_prev(winds)
-
-        if add_u:
-            nexts_hat = preds + us + prev_preds
-        else:
-            nexts_hat = preds + prev_preds
-
-        return nexts_hat, coeffs, prev_coeffs
-
     def forward(self, x,add_u=True):
         us, encoder_coeffs, nexts, winds, attn_weights, preds = self.encoding(x)
-        #if(self.options["correlated_KL"] == 1):
-        #    kl_indep = compute_kl_divergence(us,self.device)  
-        #    latent_dim = us.shape[1]
-        #    split = latent_dim // 2
-#
-        #    lambda_indep = torch.exp(self.log_lambda_indep)
-        #    lambda_corr = torch.exp(self.log_lambda_corr)
-        #    lambda_mmd = torch.exp(self.log_lambda_mmd)
-        #    shrinkage=self.options["shrinkage"]
-#
-        #    kl_corr = compute_correlated_kl(us, shrinkage=shrinkage)
-        #    # Weighted combination
-        #    s = (us[:, 0] > us[:, 0].median()).long()
-#
-        #    us_0 = us[s == 0]
-        #    us_1 = us[s == 1]
-#
-        #    #fair_loss = compute_mmd(us_0, us_1)  # MMD loss between the two groups
-#
-        #    kl_div = lambda_indep * kl_indep + lambda_corr * kl_corr
-        #    #kl_div = kl_div + lambda_mmd * fair_loss
-        #else:
-        #    # --- KL divergence with independent prior ---
-        #    kl_div = compute_kl_divergence(us, self.device)
-
-        if self.options["correlated_KL"] == 1:
-            kl_indep = compute_kl_divergence(us, self.device)
-            # NEW: attention-weighted KL
-            attn_kl = self.compute_attention_weighted_kl(us, attn_weights, self.device)
-
-            lambda_indep = torch.exp(self.log_lambda_indep)
-            lambda_attn = torch.exp(self.log_lambda_corr)  
-
-            kl_div = (                    lambda_attn * attn_kl)
-        else:
-            try:
-                kl_div = compute_kl_divergence(us, self.device)
-            except Exception as e:
-                # In case of error, like when KL cannot be computed due to numerical issues, 
-                # sometimes happens when lr is high (0.0005 for SWAT) instead of 0.0001
-                print(f"Error computing KL divergence: {e}")
-                kl_div = torch.tensor(0.0, device=self.device)
+        try:
+            kl_div = compute_kl_divergence(us, self.device)
+        except Exception as e:
+            # In case of error, like when KL cannot be computed due to numerical issues, 
+            # sometimes happens when lr is high (0.0005 for SWAT) instead of 0.0001
+            print(f"Error computing KL divergence: {e}")
+            kl_div = torch.tensor(0.0, device=self.device)
 
         if self.options["coeff_architecture"] == "causalrca":
             # as attnn_weights contains both the attn_weights and aux vars used by the decoder
@@ -859,75 +415,10 @@ class AERCA(nn.Module):
             decoder_coeffs = torch.tensor([])
             prev_coeffs = torch.tensor([])
         else:
-            # 1. Expand kl_div to [B, 51] so each sensor "knows" the global penalty
-            #kl_expanded = kl_div.view(-1, 1).expand(-1, self.num_vars) 
-
-            # 2. Concatenate
-            #us_causal = torch.cat([us, kl_expanded], dim=-1) # [B, 102]
-
-            u_surprise = torch.pow(us, 2) # Per-element KL signal
-            us_causal = torch.cat([us, u_surprise], dim=-1) # [B, 102]
-
-            #nexts_hat, decoder_coeffs, prev_coeffs = self.decoding(us_causal, winds, add_u=add_u)
             nexts_hat, decoder_coeffs, prev_coeffs = self.decoding(us, winds, add_u=add_u)
         attn_weights = winds #TODO, clean it afterwards
         return nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us, attn_weights
     
-    
-    def compute_attention_weighted_kl(self,us: torch.Tensor, attn_weights: torch.Tensor, device: torch.device, eps: float = 1e-6, return_per_sample: bool = False):
-        """
-        Compute attention-weighted KL divergence between correlated latent variables and independent prior.
-
-        Args:
-            us: [B, D] - latent variables
-            attn_weights: [B, T, D, D] - spatial attention per sample and timestep
-            device: torch.device
-            eps: small number for numerical stability
-            return_per_sample: if True, return per-sample KL [B]
-
-        Returns:
-            attn_kl: scalar tensor - attention-weighted KL divergence
-            (optional) attn_kl_per_sample: [B] per-sample KL
-        """
-        B, D = us.shape
-        _, T, _, _ = attn_weights.shape
-
-        # --- Step 1: Compute latent correlation across batch ---
-        H = us - us.mean(dim=0, keepdim=True)         # [B, D]
-        cov = (H.t() @ H) / (B - 1 + eps)            # [D, D]
-        std = torch.sqrt(torch.diag(cov) + eps)      # [D]
-        corr = cov / (std[:, None] * std[None, :] + eps)
-        corr = corr.clamp(-0.999, 0.999)
-        kl_mat = -0.5 * torch.log(1 - corr**2 + eps)  # [D, D]
-
-        # --- Step 2: Normalize and symmetrize attention ---
-        A = 0.5 * (attn_weights + attn_weights.transpose(-2, -1))  # [B, T, D, D]
-
-        # Global normalization per matrix
-        A_min = A.view(B, T, -1).min(dim=-1, keepdim=True)[0].unsqueeze(-1)
-        A_max = A.view(B, T, -1).max(dim=-1, keepdim=True)[0].unsqueeze(-1)
-        A = (A - A_min) / (A_max - A_min + eps)
-
-        # Weight: low-attention → high KL penalty
-        W = 1.0 - A  # [B, T, D, D]
-
-        # --- Step 3: Mask diagonal ---
-        mask = ~torch.eye(D, dtype=torch.bool, device=device)  # [D, D]
-
-        # --- Step 4: Weighted KL per sample & timestep ---
-        attn_kl_per_sample_t = (W * kl_mat)[..., mask].view(B, T, D, D-1).mean(dim=(-1, -2))  # [B, T]
-
-        # --- Step 5: Reduce over timestep to get per-sample KL ---
-        attn_kl_per_sample = attn_kl_per_sample_t.mean(dim=1)  # [B]
-
-        # --- Step 6: Final scalar for loss ---
-        attn_kl = attn_kl_per_sample.mean()  # scalar
-
-        if return_per_sample:
-            return attn_kl, attn_kl_per_sample
-        else:
-            return attn_kl
-
     def _training_step(self, x, add_u=True):
         nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us, attns = self.forward(x, add_u=add_u)
         loss_recon = self.mse_loss(nexts_hat, nexts)
@@ -1039,44 +530,6 @@ class AERCA(nn.Module):
         #self._get_root_cause_threshold_encoder(xs_val)
         #self._get_root_cause_threshold_decoder(xs_val)
 
-    def cluster_modalities(self, xs, n_clusters=4, random_state=42):
-        """
-        Cluster metrics (columns) into modalities using KMeans.
-        
-        Args:
-            xs: np.ndarray of shape (num_samples, num_vars)
-            n_clusters: int, number of clusters/modalities
-            random_state: int, for reproducibility
-        
-        Returns:
-            cluster_assignments: np.ndarray of shape (num_vars,), mapping each metric to a cluster
-        """
-        # Transpose so that columns are "samples" for clustering
-        X_cols = xs.T  # shape: (num_vars, num_samples)
-        
-        kmeans = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10)
-        kmeans.fit(X_cols)
-        
-        cluster_assignments = kmeans.labels_  # shape: (num_vars,)
-        return cluster_assignments
-
-    def split_by_clusters(self, x):
-        """
-        Split features into fixed-size modalities.
-        x: (num_samples, num_vars) tensor or ndarray
-        Returns: list of tensors, one per modality
-        """
-        modalities = []
-        start = 0
-        for i in range(self.num_modalities):
-            end = start + self.num_vars_mod
-            modalities.append(x[:, start:end])
-            start = end
-        # Convert to tensor if needed
-        modalities = [m if isinstance(m, torch.Tensor) else torch.tensor(m).float().to(self.device)
-                    for m in modalities]
-        return modalities
-
     def _training(self, xs):
         if self.options["dataset_name"] in ["lotka_volterra","lorenz96","nonlinear"]:
             self._training_msds_lotka_swat_original(xs)
@@ -1088,82 +541,6 @@ class AERCA(nn.Module):
         else:
             raise ValueError(f"Unknown dataset {self.options['dataset']} for training")
         
-    def _training_batches_swat_new(self, xs, batch_size=64):
-        """
-        Optimized training: Pre-loads data to GPU and uses index shuffling.
-        xs: list or array of windows, shape (N, 3, 10)
-        """
-        # 1. Pre-process data: Convert to single numpy array then to GPU Tensor
-        # Doing this once is 100x faster than doing it every batch
-        if isinstance(xs, list):
-            xs = np.array(xs)
-        
-        xs_tensor = torch.tensor(xs, dtype=torch.float32, device=self.device)
-        
-        # 2. Split into train and validation on the GPU
-        split_idx = int(0.8 * len(xs_tensor))
-        xs_train = xs_tensor[:split_idx]
-        xs_val = xs_tensor[split_idx:]
-
-        best_val_loss = np.inf
-        stop_counter = 0
-
-        for epoch in tqdm(range(self.epochs), desc='Epoch'):
-            self.train()
-            epoch_loss = 0
-            
-            # 3. Fast Shuffling: Generate random indices on GPU
-            indices = torch.randperm(len(xs_train), device=self.device)
-            
-            # --- Training loop ---
-            for i in range(0, len(xs_train), batch_size):
-                batch_idx = indices[i : i + batch_size]
-                x_batch = xs_train[batch_idx] # Instant slicing on VRAM
-
-                self.optimizer.zero_grad()
-                loss, _ = self._training_step(x_batch)
-                loss.backward()
-                self.optimizer.step()
-                
-                epoch_loss += loss.item()
-
-            # --- Validation loop (No gradients, no shuffling) ---
-            self.eval()
-            val_loss = 0
-            losses_dict_validation = defaultdict(float)
-            
-            with torch.no_grad():
-                for i in range(0, len(xs_val), batch_size):
-                    x_batch = xs_val[i : i + batch_size]
-                    batch_l, losses_dict = self._training_step(x_batch)
-                    val_loss += batch_l.item()
-                    for k, v in losses_dict.items():
-                        losses_dict_validation[k] += v
-
-            # Logging & Metrics
-            self.writer.add_scalar('Loss/train', epoch_loss, epoch)
-            self.writer.add_scalar('Loss/val', val_loss, epoch)
-            for k, v in losses_dict_validation.items():
-                self.writer.add_scalar(f'val/{k}', v, epoch)
-
-            logging.info('Epoch val loss: %s', val_loss)
-            # --- Early stopping logic ---
-            if val_loss < best_val_loss:
-                count = 0
-                logging.info(f'Saving model at epoch {epoch + 1}')
-                if self.options["early_stopping"]: #AERCA paper style early stopping
-                    best_val_loss = val_loss
-                torch.save(self.state_dict(), os.path.join(self.save_dir, f'{self.model_name}.pt'))
-            if count >= 20:
-                print('Early stopping')
-                break
-            if epoch % 5 == 0:
-                self.writer.flush()
-
-        # Load best weights
-        self.load_state_dict(torch.load(os.path.join(self.save_dir, f'{self.model_name}.pt'), map_location=self.device))
-        logging.info('Training complete')
-
     def _training_batches_swat(self, xs,batch_size=64):
         """
         xs: list of windows, each of shape (window_size+1, num_vars)
@@ -1330,68 +707,6 @@ class AERCA(nn.Module):
 
         return loss, nexts_hat, nexts, encoder_coeffs, decoder_coeffs, kl_div, preprocessed_label, us, attn_weights
 
-    def _testing_step_(self, x, label=None, add_u=True):
-        # Forward pass
-        nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us, attn_weights = self.forward(x, add_u=add_u)
-        # Compute mean and std targets for anomaly detection
-        mean_target = nexts.mean(dim=1, keepdim=True)
-        std_target = nexts.std(dim=1, keepdim=True)
-
-        # Predict mean and std from the decoder output (assuming nexts_hat has same shape)
-        mean_hat = nexts_hat.mean(dim=1, keepdim=True)
-        std_hat = nexts_hat.std(dim=1, keepdim=True)
-
-        # Reconstruction loss on mean and std
-        loss_mean = self.mse_loss(mean_hat, mean_target)
-        loss_std = self.mse_loss(std_hat, std_target)
-        loss_recon = loss_mean + loss_std
-        logging.info('Reconstruction loss (mean+std): %s', loss_recon.item())
-
-        # KL divergence loss
-        #loss_kl = kl_div
-        #logging.info('KL loss: %s', loss_kl.item())
-
-        # Encoder/decoder coefficient losses and smoothness (for deep_mlp)
-        if self.options["coeff_architecture"] == "deep_mlp":
-            loss_encoder_coeffs = self._sparsity_loss(encoder_coeffs, self.encoder_alpha)
-            logging.info('Encoder coeffs loss: %s', loss_encoder_coeffs.item())
-
-            loss_decoder_coeffs = self._sparsity_loss(decoder_coeffs, self.decoder_alpha)
-            logging.info('Decoder coeffs loss: %s', loss_decoder_coeffs.item())
-
-            loss_prev_coeffs = self._sparsity_loss(prev_coeffs, self.decoder_alpha)
-            logging.info('Prev coeffs loss: %s', loss_prev_coeffs.item())
-
-            loss_encoder_smooth = self._smoothness_loss(encoder_coeffs)
-            logging.info('Encoder smooth loss: %s', loss_encoder_smooth.item())
-
-            loss_decoder_smooth = self._smoothness_loss(decoder_coeffs)
-            logging.info('Decoder smooth loss: %s', loss_decoder_smooth.item())
-
-            loss_prev_smooth = self._smoothness_loss(prev_coeffs)
-            logging.info('Prev smooth loss: %s', loss_prev_smooth.item())
-
-            loss = (loss_recon +
-                    self.encoder_lambda * loss_encoder_coeffs +
-                    self.decoder_lambda * (loss_decoder_coeffs + loss_prev_coeffs) +
-                    self.encoder_gamma * loss_encoder_smooth +
-                    self.decoder_gamma * (loss_decoder_smooth + loss_prev_smooth) 
-                    )
-        else:
-            # Simple reconstruction + KL loss
-            loss = loss_recon #+ self.beta * loss_kl
-            logging.info('Total loss: %s', loss.item())
-
-        # Keep preprocessed label for evaluation if needed
-        if label is not None:
-            preprocessed_label = sliding_window_view(label, (self.window_size + 1, self.num_vars))[self.window_size:, 0, :-1, :]
-        else:
-            preprocessed_label = None
-
-        return loss, nexts_hat, nexts, encoder_coeffs, decoder_coeffs, kl_div, preprocessed_label, us
-
-
-
     def _get_recon_threshold(self, xs):
         self.eval()#(1,10000,10)
         losses_list = []
@@ -1461,87 +776,6 @@ class AERCA(nn.Module):
         np.save(os.path.join(self.save_dir, f'{self.model_name}_recon_threshold.npy'), self.recon_threshold_value)
         np.save(os.path.join(self.save_dir, f'{self.model_name}_recon_mean.npy'), self.recon_mean)
         np.save(os.path.join(self.save_dir, f'{self.model_name}_recon_std.npy'), self.recon_std)
-
-
-    def _get_root_cause_threshold_encoder_batch(self, xs):
-        self.eval()
-        us_list = []
-        with torch.no_grad():
-            for x in xs:
-                x_batch = x.unsqueeze(0) if torch.is_tensor(x) else torch.tensor(x).unsqueeze(0).float().to(self.device)
-                us = self._testing_step(x_batch)[-1]  # latent residuals
-                us_list.append(us.cpu().numpy())
-        us_all = np.concatenate(us_list, axis=0)  # shape: (total_samples, P)
-        self.lower_encoder = np.quantile(us_all, (1 - self.root_cause_threshold_encoder) / 2, axis=0)
-        self.upper_encoder = np.quantile(us_all, 1 - (1 - self.root_cause_threshold_encoder) / 2, axis=0)
-        self.us_mean_encoder = np.median(us_all, axis=0)
-        self.us_std_encoder = np.std(us_all, axis=0)
-        np.save(os.path.join(self.save_dir, f'{self.model_name}_lower_encoder.npy'), self.lower_encoder)
-        np.save(os.path.join(self.save_dir, f'{self.model_name}_upper_encoder.npy'), self.upper_encoder)
-        np.save(os.path.join(self.save_dir, f'{self.model_name}_us_mean_encoder.npy'), self.us_mean_encoder)
-        np.save(os.path.join(self.save_dir, f'{self.model_name}_us_std_encoder.npy'), self.us_std_encoder)
-
-
-    def _get_root_cause_threshold_decoder_batch(self, xs):
-        self.eval()
-        diff_list = []
-        with torch.no_grad():
-            for x in xs:
-                x_batch = x.unsqueeze(0) if torch.is_tensor(x) else torch.tensor(x).unsqueeze(0).float().to(self.device)
-                _, nexts_hat, nexts, _, _, _, _, _ = self._testing_step(x_batch, add_u=False)
-                diff = (nexts - nexts_hat).cpu().numpy().ravel()
-                diff_list.append(diff)
-        us_all = np.concatenate(diff_list, axis=0)
-        self.lower_decoder = np.quantile(us_all, (1 - self.root_cause_threshold_decoder) / 2, axis=0)
-        self.upper_decoder = np.quantile(us_all, 1 - (1 - self.root_cause_threshold_decoder) / 2, axis=0)
-        self.us_mean_decoder = np.mean(us_all, axis=0)
-        self.us_std_decoder = np.std(us_all, axis=0)
-        np.save(os.path.join(self.save_dir, f'{self.model_name}_lower_decoder.npy'), self.lower_decoder)
-        np.save(os.path.join(self.save_dir, f'{self.model_name}_upper_decoder.npy'), self.upper_decoder)
-        np.save(os.path.join(self.save_dir, f'{self.model_name}_us_mean_decoder.npy'), self.us_mean_decoder)
-        np.save(os.path.join(self.save_dir, f'{self.model_name}_us_std_decoder.npy'), self.us_std_decoder)
-
-    def _evaluate_rcd_old(self, xs, labels, bins=None, gamma=5):
-        """
-        RCD baseline for root cause analysis.
-        - xs: ndarray of shape [N, T, P]  (N windows, T timesteps, P variables)
-        - labels: ndarray of shape [N, T, P] (0=normal, 1=anomalous)
-        """
-        import pandas as pd
-        from models.baselines.rcd import rca_with_rcd
-
-        # Flatten across N and T → [N*T, P]
-        X_all = xs.reshape(-1, xs.shape[-1])          # (N*T, P)
-        y_all = labels.reshape(-1, labels.shape[-1])  # (N*T, P)
-
-        # Build masks correctly
-        mask_normal = (y_all == 0).all(axis=-1)   # row is normal if all vars = 0
-        mask_anom   = (y_all == 1).any(axis=-1)   # row is anomalous if any var = 1
-
-        # Apply masks
-        normal_X = X_all[mask_normal, :]          # keep 2D shape (M, P)
-        anomalous_X = X_all[mask_anom, :]
-
-        # Convert to DataFrame
-        cols = [f"var{i}" for i in range(X_all.shape[1])]
-        normal_df = pd.DataFrame(normal_X, columns=cols)
-        anomalous_df = pd.DataFrame(anomalous_X, columns=cols)
-
-        # Run RCD
-        result = rca_with_rcd(
-            normal_df,
-            anomalous_df,
-            bins=bins,
-            gamma=gamma,
-            localized=False,
-            verbose=False
-        )
-
-        return {
-            "root_cause": result['root_cause'],
-            "num_tests": result['tests'],
-            "time": result['time']
-        }
 
     def _evaluate_rcd(self, xs, labels, bins=None, gamma=5, agg="mean"):
         """
@@ -1818,6 +1052,97 @@ class AERCA(nn.Module):
         else:
             self._log_and_print("Zero valid samples found. Check if labels[i][-1] contains any anomalies.")
 
+    def _testing_root_cause_services_metrics(self, xs, labels, alpha: float = 0.5, use_attention_fusion: bool = False):
+        with open('/home/db2003/Desktop/Amr/Tests/Medicine/dataset/aiops22-pre/初赛评分数据/idx_to_feature.json', 'r') as f:
+            self.idx_to_feature = json.load(f)
+
+        coeff_architecture = self.options["coeff_architecture"]
+        
+        # 1. Baseline check
+        if coeff_architecture == "rcd":
+            rcd_result = self._evaluate_rcd(xs, labels, bins=None, gamma=5)
+            return rcd_result
+
+        # 2. Model Loading & Setup
+        self.load_state_dict(torch.load(os.path.join(self.save_dir, f'{self.model_name}.pt'), map_location=self.device))
+        self.eval()
+        
+        # Load normalization stats
+        self.us_mean_encoder = np.load(os.path.join(self.save_dir, f'{self.model_name}_us_mean_encoder.npy'))
+        self.us_std_encoder = np.load(os.path.join(self.save_dir, f'{self.model_name}_us_std_encoder.npy'))
+
+        us_sample_list = [] 
+        
+        # 3. Inference Loop
+        with torch.no_grad():
+            for i in tqdm(range(len(xs)), desc="Inference"):
+                _, _, _, _, _, _, _, us, _ = self._testing_step(xs[i], labels[i], add_u=False)
+                us_sample_list.append(us.cpu().numpy())
+
+        # 4. Triple-Track Evaluation
+        feature_names = [self.idx_to_feature[str(i)] for i in range(self.num_vars)]
+        
+        results = {
+            "complete": {"top1": 0, "top3": 0, "top5": 0, "top10": 0}, # Full Column
+            "service": {"top1": 0, "top3": 0, "top5": 0, "top10": 0},  # Service Prefix
+            "metric": {"top1": 0, "top3": 0, "top5": 0, "top10": 0}    # Fault Type Suffix
+        }
+        
+        valid_samples = 0
+        for i in tqdm(range(len(xs)), desc="Top-K Evaluation"):
+            us_sample = us_sample_list[i]
+            z_scores = (-(us_sample - self.us_mean_encoder) / self.us_std_encoder)
+
+            # Ground Truth Processing
+            current_labels = np.max(labels[i], axis=0)
+            gt_indices = np.where(current_labels > 0)[0]
+            if len(gt_indices) == 0: continue
+            valid_samples += 1
+
+            # Extract GT Components
+            gt_completes = [feature_names[idx] for idx in gt_indices]
+            gt_services = list(set([m.split('-')[0] for m in gt_completes]))
+            gt_metrics = list(set(["-".join(m.split('-')[1:]) for m in gt_completes]))
+
+            # Rank Components
+            sorted_indices = np.argsort(z_scores[0])[::-1]
+            ranked_completes = [feature_names[idx] for idx in sorted_indices]
+            
+            # Service Ranking (order of first appearance)
+            seen_s, ranked_services = set(), []
+            for m in ranked_completes:
+                s = m.split('-')[0]
+                if s not in seen_s:
+                    ranked_services.append(s)
+                    seen_s.add(s)
+
+            # Metric/Fault Ranking (order of first appearance)
+            seen_m, ranked_metrics = set(), []
+            for m in ranked_completes:
+                metric_part = "-".join(m.split('-')[1:])
+                if metric_part not in seen_m:
+                    ranked_metrics.append(metric_part)
+                    seen_m.add(metric_part)
+
+            # Accumulate hits for AC@1, 3, 5, 10
+            for k in [1, 3, 5, 10]:
+                if any(m in gt_completes for m in ranked_completes[:k]):
+                    results["complete"][f"top{k}"] += 1
+                if any(s in gt_services for s in ranked_services[:k]):
+                    results["service"][f"top{k}"] += 1
+                if any(f in gt_metrics for f in ranked_metrics[:k]):
+                    results["metric"][f"top{k}"] += 1
+
+        # 5. Result Aggregation
+        if valid_samples > 0:
+            for track in ["service", "metric", "complete"]:
+                self._log_and_print(f"\n--- {track.upper()} LEVEL RCA ---")
+                for k in [1, 3, 5, 10]:
+                    acc = results[track][f"top{k}"] / valid_samples
+                    self._log_and_print(f'AC@{k}: {acc:.5f}')
+        else:
+            self._log_and_print("No anomalies found for evaluation.")
+
     def plot_case(self,z_scores, labels, t_idx=None):
         """
         z_scores: shape (T, P)
@@ -1936,166 +1261,6 @@ class AERCA(nn.Module):
             json.dump(data_json, f, indent=2)
 
         print(f"[✓] Heatmap + JSON saved for window {t_start}:{t_end}")
-
-    def plot_latent_clusters_3d(self, latent_list, labels_list, method="TSNE"):
-        """
-        Cluster latent space in 3D and visualize anomalies.
-
-        latent_list: list of np.arrays, each (T, latent_dim) per sample
-        labels_list: list of np.arrays, each (T, num_vars) per sample
-        method: "PCA" or "TSNE"
-        """
-        import numpy as np
-        import matplotlib.pyplot as plt
-        from sklearn.decomposition import PCA
-        from sklearn.manifold import TSNE
-        from mpl_toolkits.mplot3d import Axes3D  # needed for 3D projection
-        import json
-        import os
-
-        # Flatten all timesteps across samples
-        latent_all = np.concatenate(latent_list, axis=0)  # (total_timesteps, latent_dim)
-        labels_all = np.concatenate([l[self.window_size*2:] for l in labels_list], axis=0)
-        anomaly_mask = labels_all.sum(axis=1) > 0  # True if any variable is anomalous
-
-        # Dimensionality reduction
-        if method.upper() == "PCA":
-            reducer = PCA(n_components=3)
-        elif method.upper() == "TSNE":
-            reducer = TSNE(n_components=3, perplexity=30, random_state=42)
-        else:
-            raise ValueError("Unknown method: choose 'PCA' or 'TSNE'")
-
-        latent_3d = reducer.fit_transform(latent_all)
-
-        # 3D Plot
-        fig = plt.figure(figsize=(10,8))
-        ax = fig.add_subplot(111, projection='3d')
-
-        ax.scatter(latent_3d[~anomaly_mask, 0], latent_3d[~anomaly_mask, 1], latent_3d[~anomaly_mask, 2], 
-                s=10, alpha=0.5, label="Normal")
-        ax.scatter(latent_3d[anomaly_mask, 0], latent_3d[anomaly_mask, 1], latent_3d[anomaly_mask, 2], 
-                s=20, alpha=0.8, color='red', label="Anomalous")
-
-        ax.set_xlabel("Latent dim 1")
-        ax.set_ylabel("Latent dim 2")
-        ax.set_zlabel("Latent dim 3")
-        ax.set_title(f"3D Latent Space Clustering ({method})")
-        ax.legend()
-
-        os.makedirs("results/latent_clusters", exist_ok=True)
-        pdf_file = f"results/latent_clusters/latent_clusters_3d_{self.model_name}_{method}.pdf"
-        plt.savefig(pdf_file)
-        plt.close()
-        print(f"Saved 3D latent clusters plot → {pdf_file}")
-
-        # Save JSON for later inspection
-        data = {
-            "latent_3d": latent_3d.tolist(),
-            "anomaly_mask": anomaly_mask.astype(int).tolist()
-        }
-        json_file = f"results/latent_clusters/latent_clusters_3d_{self.model_name}_{method}.json"
-        with open(json_file, "w") as f:
-            json.dump(data, f, indent=2)
-        print(f"Saved 3D latent clusters JSON → {json_file}")
-
-
-    def _testing_root_cause_new(self, xs, labels, alphas=np.arange(0, 1.1, 0.1), use_attention_fusion=True, sample_idx_for_plot=0):
-        # Load model and encoder stats
-        self.load_state_dict(torch.load(os.path.join(self.save_dir, f'{self.model_name}.pt'),
-                                        map_location=self.device))
-        self.eval()
-        self.us_mean_encoder = np.load(os.path.join(self.save_dir, f'{self.model_name}_us_mean_encoder.npy'))
-        self.us_std_encoder = np.load(os.path.join(self.save_dir, f'{self.model_name}_us_std_encoder.npy'))
-
-        # Collect latent representations and attention weights
-        us_list = []
-        us_sample_list = []
-        attn_list = []
-
-        with torch.no_grad():
-            for i in range(len(xs)):
-                x = xs[i]
-                label = labels[i]
-                loss, nexts_hat, nexts, encoder_coeffs, decoder_coeffs, kl_div, preprocessed_label, us, attn_weights = self._testing_step(x, label, add_u=False)
-                us_sample_list.append(us[self.window_size:].cpu().numpy())
-                us_list.append(us.cpu().numpy())
-                if use_attention_fusion:
-                    attn_mean = attn_weights.mean(dim=0).cpu().numpy()  # shape [num_vars]
-                    attn_list.append(attn_mean)
-
-        # POT threshold computation
-        us_all = np.concatenate(us_list, axis=0).reshape(-1, self.num_vars)
-        us_all_z_score = (-(us_all - self.us_mean_encoder) / self.us_std_encoder)
-        us_all_z_score_pot = [pot(us_all_z_score[:, i], self.risk, self.initial_level, self.num_candidates)[0] for i in range(self.num_vars)]
-        us_all_z_score_pot = np.array(us_all_z_score_pot)
-
-        # Sweep over alphas
-        ac1_list, ac3_list, ac5_list, ac10_list = [], [], [], []
-
-        for alpha in alphas:
-            k_all = []
-            k_at_step_all = []
-            for i in range(len(xs)):
-                us_sample = us_sample_list[i]
-                z_scores = (-(us_sample - self.us_mean_encoder) / self.us_std_encoder)
-
-                if use_attention_fusion:
-                    attn_importance = attn_list[i]
-                    attn_importance = np.expand_dims(attn_importance, axis=0).repeat(z_scores.shape[0], axis=0)
-                    attn_importance = attn_importance.reshape(1, -1)  # (1, 51)
-                    z_scores = alpha * z_scores + (1 - alpha) * attn_importance
-
-                k_lst = topk(z_scores, labels[i][self.window_size*2:], us_all_z_score_pot)
-                k_at_step = topk_at_step(z_scores, labels[i][self.window_size*2:])
-                k_all.append(k_lst)
-                k_at_step_all.append(k_at_step)
-
-            k_all_mean = np.array(k_all).mean(axis=0)
-            k_at_step_mean = np.array(k_at_step_all).mean(axis=0)
-            ac1_list.append(k_at_step_mean[0])
-            ac3_list.append(k_at_step_mean[2])
-            ac5_list.append(k_at_step_mean[4])
-            ac10_list.append(k_at_step_mean[9])
-
-        # Plot AC@K vs alpha
-        plt.figure(figsize=(8,5))
-        plt.plot(alphas, ac1_list, '-o', label='AC@1')
-        plt.plot(alphas, ac3_list, '-o', label='AC@3')
-        plt.plot(alphas, ac5_list, '-o', label='AC@5')
-        plt.plot(alphas, ac10_list, '-o', label='AC@10')
-        plt.xlabel('Alpha (weight for z-score)')
-        plt.ylabel('AC@K')
-        plt.title(f'AC@K vs Alpha for {self.model_name}')
-        plt.legend()
-        plt.grid(True)
-        plt.show()
-
-        # Visualize variable-level fusion for a sample
-        latent_sample = (-(us_sample_list[sample_idx_for_plot] - self.us_mean_encoder) / self.us_std_encoder)
-        if use_attention_fusion:
-            attn_sample = attn_list[sample_idx_for_plot]
-            fused_sample = alpha * latent_sample + (1 - alpha) * np.expand_dims(attn_sample, axis=0).repeat(latent_sample.shape[0], axis=0)
-        else:
-            fused_sample = latent_sample
-            attn_sample = np.zeros_like(latent_sample[0])
-
-        def normalize(x):
-            x = np.array(x)
-            return (x - x.min()) / (x.max() - x.min() + 1e-8)
-        # Plot per-variable scores
-        plt.figure(figsize=(12,4))
-        plt.plot(normalize(latent_sample.mean(axis=0)), label='Latent z-score')
-        plt.plot(normalize(attn_sample), label='Attention importance')
-        plt.plot(normalize(fused_sample.mean(axis=0)), label='Fused score', linewidth=2)
-        plt.scatter(np.where(labels[sample_idx_for_plot][self.window_size*2:]==1)[0],
-                    normalize(fused_sample.mean(axis=0))[labels[sample_idx_for_plot][self.window_size*2:]==1],
-                    color='red', label='True anomalies')
-        plt.xlabel('Variable index')
-        plt.ylabel('Score')
-        plt.title(f'Variable-level latent vs attention vs fused for sample {sample_idx_for_plot}')
-        plt.legend()
-        plt.show()
 
     def _testing_root_cause_old(self, xs, labels, alpha: float = 0.5, use_attention_fusion: bool = False):
         coeff_architecture = self.options.get("coeff_architecture", "default").lower()
@@ -2301,42 +1466,3 @@ class AERCA(nn.Module):
         rca_end = time()    
 
         return datapath, rca_end-rca_start, sorted_scores
-
-
-    def _testing_causal_discover(self, xs, causal_struct_value):
-        self.load_state_dict(torch.load(os.path.join(self.save_dir, f'{self.model_name}.pt'),
-                                        map_location=self.device))
-        self.eval()
-        encoder_causal_list = []
-        with torch.no_grad():
-            for x in xs:
-                # Only the encoder coefficients are used for causal discovery
-                _, _, _, encoder_coeffs, _, _, _, _ = self._testing_step(x)
-                encoder_estimate = torch.max(torch.median(torch.abs(encoder_coeffs), dim=0)[0],
-                                             dim=0).values.cpu().numpy()
-                encoder_causal_list.append(encoder_estimate)
-        encoder_causal_struct_estimate_lst = np.stack(encoder_causal_list, axis=0)
-
-        encoder_auroc = []
-        encoder_auprc = []
-        encoder_hamming = []
-        encoder_f1 = []
-        for i in range(len(encoder_causal_struct_estimate_lst)):
-            encoder_auroc_temp, encoder_auprc_temp = eval_causal_structure(
-                a_true=causal_struct_value, a_pred=encoder_causal_struct_estimate_lst[i])
-            encoder_auroc.append(encoder_auroc_temp)
-            encoder_auprc.append(encoder_auprc_temp)
-            encoder_q = np.quantile(encoder_causal_struct_estimate_lst[i], q=self.causal_quantile)
-            encoder_a_hat_binary = (encoder_causal_struct_estimate_lst[i] >= encoder_q).astype(float)
-            _, _, _, _, ham_e = eval_causal_structure_binary(a_true=causal_struct_value,
-                                                             a_pred=encoder_a_hat_binary)
-            encoder_hamming.append(ham_e)
-            encoder_f1.append(f1_score(causal_struct_value.flatten(), encoder_a_hat_binary.flatten()))
-        self._log_and_print('Causal discovery F1: {:.5f} std: {:.5f}',
-                            np.mean(encoder_f1), np.std(encoder_f1))
-        self._log_and_print('Causal discovery AUROC: {:.5f} std: {:.5f}',
-                            np.mean(encoder_auroc), np.std(encoder_auroc))
-        self._log_and_print('Causal discovery AUPRC: {:.5f} std: {:.5f}',
-                            np.mean(encoder_auprc), np.std(encoder_auprc))
-        self._log_and_print('Causal discovery Hamming Distance: {:.5f} std: {:.5f}',
-                            np.mean(encoder_hamming), np.std(encoder_hamming))

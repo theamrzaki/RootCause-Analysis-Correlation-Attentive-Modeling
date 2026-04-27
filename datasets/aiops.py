@@ -20,21 +20,8 @@ class aiops:
         self.data_dir = options['data_dir']
         self.window_size = options['window_size']
         self.shuffle = options.get('shuffle', False)
-
-        # The sub-categories defined in your directory tree
-        """
-            service	--> throughput, latency, error_rate (The symptoms).
-            container	--> cpu_usage, memory_working_set, network_receive_bytes.
-            jvm	--> gc_pause_time, heap_usage, thread_count
-            node -->	load_1m, disk_io_time, mem_available (The infrastructure).
-            istio -->	request_duration, tcp_sent_bytes (The communication).
-        """
         self.metric_types = ['container', 'istio', 'jvm', 'node', 'service']
-        #self.essential_keywords = [
-        #    'cpu_system', 'cpu_usage', 'mem_usage', 'heap_used', 
-        #    'latency', 'error_count', 'throughput', 'gc_time',
-        #    'load_1m', 'network_receive', 'request_duration'
-        #]
+
 
     def predict_best_sampling_rate(self, df, current_interval_sec=60):
         """
@@ -86,10 +73,6 @@ class aiops:
             reason = "Current sampling rate is optimal for the signal-to-noise ratio."
 
         return round(avg_suggested_interval), reason
-
-    # Integration snippet:
-    # suggested_rate, reason = predict_best_sampling_rate(full_df)
-    # print(f"Suggested Interval: {suggested_rate}s | Reason: {reason}")
 
     def get_wide_table(self):
         """
@@ -203,46 +186,33 @@ class aiops:
         
         ###df = df.iloc[::(avg_suggested_interval/2) // 60, :]  # Resample the data based on the suggested interval (assuming original is 1 minute)
         print(f"Data resampled to every {avg_suggested_interval} seconds. Reason: {reason}")
-        # 1. Drop Zero-Variance
-        df = df.loc[:, (df.std() > 1e-6)]
         
         # 2. Top-K Volatility (Coefficient of Variation)
         # 1. Calculate volatility as usual
+        # 1. Drop anything that is virtually a flat line
+        # Increase the threshold slightly to catch 'noisy' dead sensors
+        df = df.loc[:, (df.std() > 1e-4)] 
+
+        # 2. Calculate volatility
         volatility = df.std() / (df.mean() + 1e-6)
-        
-                # 2. Identify which columns are binary/categorical (2 or fewer unique values)
-        """
-        unique_metrics = []
-        seen_roots = set()
-        for col in volatility.sort_values(ascending=False).index:
-            # Create a 'root' name by stripping units
-            root = col.replace('_MB', '').replace('_bytes', '').replace('_total', '')
-            if root not in seen_roots:
-                unique_metrics.append(col)
-                seen_roots.add(root)
-            if len(unique_metrics) >= 100: # Get a large enough pool
-                break
 
-        is_binary = df.apply(lambda x: x.nunique() <= 2)
-        unique_volatility = volatility[unique_metrics]
-        # 3. Split the pools
-        continuous_vol = unique_volatility[~is_binary]
-        binary_vol = unique_volatility[is_binary]
-
-        # 4. Set a Quota (e.g., 25 Continuous, 5 Binary)
-        # Adjust these numbers to ensure you keep your 84% coverage!
-        num_continuous = 25 
-        num_binary = self.num_vars - num_continuous
-
-        # 5. Combine the best of both worlds
-        important_cols = []
-        important_cols.extend(continuous_vol.sort_values(ascending=False).head(num_continuous).index)
-        important_cols.extend(binary_vol.sort_values(ascending=False).head(num_binary).index)
-        """
+        # 3. Explicitly exclude sensors that are constant
+        volatility = volatility[volatility > 0]
         print(f"Total metrics after filtering: {volatility.sort_values(ascending=False).head(20)}")
         important_cols = volatility.sort_values(ascending=False).head(self.num_vars).index
+        # KEY ADDITION: Create the index-to-name mapping
+        # This ensures Index 0 always matches important_cols[0]
+        self.idx_to_feature = {i: name for i, name in enumerate(important_cols)}
+        
+        # Optional: Save this mapping to disk alongside your .npy files
+        # so the testing script can load it later.
+        mapping_path = os.path.join(self.data_dir, 'idx_to_feature.json')
+        with open(mapping_path, 'w') as f:
+            json.dump(self.idx_to_feature, f)
 
         df_subset = df[important_cols]
+        df_subset = np.log1p(df_subset)
+        df_subset.columns = important_cols
         print(f"Total metrics after filtering: {important_cols}", len(important_cols))
 
         print(f"Final wide table shape: {df_subset.shape}")
@@ -253,32 +223,6 @@ class aiops:
         data = df_subset.values
         split = int(len(data) * 0.8)
         
-        # Scaling
-        #scaler = StandardScaler()
-        #train_data_raw = data[:split]
-        #test_data_raw = data[split:]
-        #test_labels_raw = label_matrix[split:]
-        # 1. Log Transform metrics that can have massive spikes (Latency/Throughput)
-        # Identify columns that aren't binary
-        #non_binary_cols = [c for c in range(data.shape[1]) if self.binary_flags[c] == 0]
-        #data[:, non_binary_cols] = np.log1p(data[:, non_binary_cols])
-
-        ## 2. Identify Binary vs Continuous 
-        ## Do this BEFORE any transformations
-        #self.binary_flags = self.get_binary_flags(df_subset)
-        #print(f"Binary flags (1 for binary/static, 0 for continuous): {self.binary_flags}")
-#
-        ## 3. Apply Log Transform to Continuous Variables
-        ## This prevents 'Massive Spikes' from drowning out the causal signal
-        #data = df_subset.values
-        #continuous_cols = np.where(self.binary_flags == 0)[0]
-        #
-        ## We only log metrics that have a significant range (> 1.0)
-        ## to avoid squashing metrics that are already small.
-        #for col_idx in continuous_cols:
-        #    if data[:, col_idx].max() > 1.0:
-        #        data[:, col_idx] = np.sqrt(data[:, col_idx])
-
         # 2. Use RobustScaler instead of StandardScaler
         scaler = RobustScaler() 
         train_data_raw = data[:split]
@@ -293,7 +237,7 @@ class aiops:
         # Using your suggested chunk_size and step
         x_n_list = []
         step = 1
-        chunk_size = 1 * self.window_size # e.g., 300 timestamps per sample
+        chunk_size = (1 * self.window_size) #+1 
         
         for i in range(0, len(train_scaled) - chunk_size, step):
             x_n_list.append(train_scaled[i : i + chunk_size])
@@ -337,7 +281,58 @@ class aiops:
         self.data_dict['x_ab_list'] = np.load(os.path.join(self.data_dir, 'x_ab_list.npy'))
         self.data_dict['label_list'] = np.load(os.path.join(self.data_dir, 'label_list.npy'))
         orth_matrix_dir = os.path.join(self.data_dir, 'orth_transform_meta')
+        self.pipeline_sanity_check()  # Run the sanity check before applying the orthogonal transform
         return self.apply_orthogonal_transform(save_path=orth_matrix_dir, device='cpu')
+
+    def pipeline_sanity_check(self):
+        print("\n--- Starting Data Pipeline Sanity Check ---")
+        x_n = self.data_dict['x_n_list']
+        x_ab = self.data_dict['x_ab_list']
+        labels = self.data_dict['label_list']
+
+        # 1. Shape Verification
+        # Expected: [Samples, Window+1, Sensors]
+        # The '+1' is crucial because the last step is our 'nexts' target
+        print(f"Normal Data Shape: {x_n.shape}")
+        print(f"Abnormal Data Shape: {x_ab.shape}")
+        
+        assert x_n.ndim == 3, "Data must be 3D [Batch, Window, Sensors]"
+        #assert x_n.shape[1] == self.window_size + 1, f"Expected window {self.window_size + 1}, got {x_n.shape[1]}"
+
+        # 2. Label Alignment Check (The "Coverage" Guard)
+        # Ensure that samples marked as anomalies actually have a '1' in the target
+        sample_idx = np.where(labels == 1)[0]
+        if len(sample_idx) > 0:
+            test_idx = sample_idx[0]
+            # Check if the last step of the window matches the label
+            # This prevents the 'Ghost Offset' problem we discussed
+            anomaly_step = x_ab[test_idx, -1, :] 
+            print(f"Anomaly Coverage Check: Found {len(sample_idx)} anomaly samples.")
+        else:
+            print("WARNING: No anomalies found in label_list. RCA will not be possible.")
+
+        # 3. Scaling Check (The "Skeptic" Guard)
+        # If using RobustScaler, values should be centered near 0 but have outliers
+        # If using MinMax, check if they are strictly in range
+        feat_min, feat_max = x_n.min(), x_n.max()
+        feat_mean = x_n.mean()
+        print(f"Feature Statistics -> Min: {feat_min:.4f}, Max: {feat_max:.4f}, Mean: {feat_mean:.4f}")
+        
+        if abs(feat_max) < 1.1 and abs(feat_min) < 1.1:
+            print("INFO: Data appears to be strictly Min-Max scaled [-1, 1].")
+        elif abs(feat_max) > 10:
+            print("INFO: Data has high variance (Robust Scaling active). Good for RCA signal.")
+
+        # 4. Variance Check (The "Dead Sensor" Guard)
+        # If a sensor has 0 variance, the model will produce NaNs in KL divergence
+        variances = np.var(x_n, axis=(0, 1))
+        dead_sensors = np.where(variances == 0)[0]
+        if len(dead_sensors) > 0:
+            print(f"CRITICAL: Sensors {dead_sensors} have zero variance. This will cause KL collapse!")
+        else:
+            print("Variance Check: All sensors are active.")
+
+        print("--- Sanity Check Passed ---\n")
 
     def apply_orthogonal_transform(self, save_path, device='cpu'):
         # ... (same as your SWaT implementation)

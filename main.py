@@ -236,7 +236,12 @@ def main(argv):
     if options['coeff_architecture'] in ['rcd', 'epsilon_diagnosis']:
         aerca_model._testing_root_cause_old(test_x_ab, test_label)
     else:
-        aerca_model._testing_root_cause(test_x_ab, test_label)
+        # dataset is aiops
+        if options['dataset_name'] == 'aiops':
+            aerca_model._testing_root_cause_services_metrics(test_x_ab, test_label)
+            #aerca_model._testing_root_cause(test_x_ab, test_label)
+        else:
+            aerca_model._testing_root_cause(test_x_ab, test_label)
     print('Done testing for root cause analysis')
 
 
