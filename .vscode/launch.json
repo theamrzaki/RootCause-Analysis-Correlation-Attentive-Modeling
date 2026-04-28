@@ -39,7 +39,7 @@
                 "--decoder_gamma", "0.5",
                 "--encoder_lambda", "0.5",
                 "--decoder_lambda", "0.5",
-                "--beta", "0.5",
+                "--beta", "0",//"0.7",
 
                 "--main_model", "aerca_based",
                 "--coeff_architecture", "vlinear",
@@ -48,12 +48,12 @@
                 "--lr", "1e-4",
                 "--seed", "7",
                 "--dataset", "aiops",
-                "--window_size", "20",
+                "--window_size", "30",
 
                 "--training_aerca", "1",
                 "--epochs", "200",
                 "--early_stopping", "0",
-                "--preprocessing_data", "0",
+                "--preprocessing_data", "1",
                 "--results_csv", "RQ_1_aiops.csv",
 
                 "--attention_dim", "256",

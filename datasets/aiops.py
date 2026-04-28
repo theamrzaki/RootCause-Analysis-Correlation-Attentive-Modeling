@@ -184,14 +184,14 @@ class aiops:
         df = self.get_wide_table()
         avg_suggested_interval, reason = self.predict_best_sampling_rate(df)  # Optional: Get sampling rate suggestions based on the data
         
-        ###df = df.iloc[::(avg_suggested_interval/2) // 60, :]  # Resample the data based on the suggested interval (assuming original is 1 minute)
+        df = df.iloc[::3, :]  # Resample the data based on the suggested interval (assuming original is 1 minute)
         print(f"Data resampled to every {avg_suggested_interval} seconds. Reason: {reason}")
         
         # 2. Top-K Volatility (Coefficient of Variation)
         # 1. Calculate volatility as usual
         # 1. Drop anything that is virtually a flat line
         # Increase the threshold slightly to catch 'noisy' dead sensors
-        df = df.loc[:, (df.std() > 1e-4)] 
+        df = df.loc[:, (df.std() > 1e-2)] 
 
         # 2. Calculate volatility
         volatility = df.std() / (df.mean() + 1e-6)

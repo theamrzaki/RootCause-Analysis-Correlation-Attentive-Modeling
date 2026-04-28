@@ -374,9 +374,9 @@ class AERCA(nn.Module):
 
     
     def decoding_2decoders(self, us, winds, add_u=True):
-        u_windows = sliding_window_view_torch(us, self.window_size + 1)
-        u_winds = u_windows[:, :-1, :]
-        u_next = u_windows[:, -1, :]
+        #u_windows = sliding_window_view_torch(us, self.window_size + 1)
+        u_winds = us[:, :-1, :]
+        u_next = us[:, -1, :]
 
         preds, coeffs,_ = self.decoder(u_winds)
         prev_preds, prev_coeffs,_ = self.decoder_prev(winds)
@@ -442,7 +442,7 @@ class AERCA(nn.Module):
         loss_prev_smooth = self._smoothness_loss(prev_coeffs) if self.options["coeff_architecture"] not in self.models_encoder_only else torch.tensor(0.0)
         logging.info('Prev smooth loss: %s', loss_prev_smooth.item())
 
-        loss_kl = kl_div if self.options["coeff_architecture"] not in self.models_encoder_only else torch.tensor(0.0)
+        loss_kl = kl_div# if self.options["coeff_architecture"] not in self.models_encoder_only else torch.tensor(0.0)
         logging.info('KL loss: %s', loss_kl.item())
 
         loss = (loss_recon +
