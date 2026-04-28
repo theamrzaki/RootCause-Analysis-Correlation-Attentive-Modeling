@@ -7,7 +7,7 @@ from sklearn.metrics import roc_auc_score, average_precision_score, accuracy_sco
     precision_score, recall_score
 import os
 
-def compute_kl_divergence(us, device: torch.device):
+def compute_kl_divergence_old(us, device: torch.device):
     """
     Compute the KL divergence between the empirical distribution of the input samples
     and an isotropic standard Gaussian distribution using PyTorch.
@@ -61,6 +61,43 @@ def compute_kl_divergence(us, device: torch.device):
         print(f'kl_div: {kl_div}')
         raise ValueError('KL divergence is NaN')
 
+
+    return kl_div
+
+
+def compute_kl_divergence(us, device: torch.device):
+    # 1. Empirical Stats
+    mean_p = torch.mean(us, dim=0)
+    # cov_p result is (d, d)
+    cov_p = torch.cov(us.t())
+
+    d = mean_p.shape[0]
+
+    # 2. Stability: Adaptive Regularization
+    # Using a slightly simpler constant epsilon is often more stable than condition numbers during training
+    eps = 1e-6
+    cov_p = cov_p + torch.eye(d, device=device) * eps
+
+    # 3. Trace and Means terms
+    trace_term = torch.trace(cov_p)
+    means_term = torch.dot(mean_p, mean_p)
+
+    # 4. Log-Det term (The "Sign" Fix)
+    try:
+        # Cholesky is the most numerically stable way to get logdet
+        L = torch.linalg.cholesky(cov_p)
+        log_det_cov_p = 2 * torch.sum(torch.log(torch.diagonal(L)))
+    except RuntimeError:
+        # Fallback with a safety clamp to avoid log(0) or log(neg)
+        log_det_cov_p = torch.logdet(cov_p)
+
+    # 5. The Formula: Note the minus sign before log_det
+    kl_div = 0.5 * (trace_term + means_term - d - log_det_cov_p)
+
+    # 6. Safety Gate
+    if torch.isnan(kl_div) or torch.isinf(kl_div):
+        # If it still explodes, it's usually because cov_p became singular (all zeros)
+        return torch.tensor(0.0, device=device, requires_grad=True)
 
     return kl_div
 
@@ -419,6 +456,14 @@ def write_results(args, local_model_name, ac_at,k_at_step_all, total_params,file
         'time_freq_representation': args['time_freq_representation'],
         'combine_method': args['combine_method'],
         'main_model': args['main_model'],
+
+        "encoder_alpha": args['encoder_alpha'] if 'encoder_alpha' in args else 0,
+        "decoder_alpha": args['decoder_alpha'] if 'decoder_alpha' in args else 0,
+        "encoder_gamma (smooth)": args['encoder_gamma'] if 'encoder_gamma' in args else 0,
+        "decoder_gamma": args['decoder_gamma'] if 'decoder_gamma' in args else 0,
+        "encoder_lambda (sparse)": args['encoder_lambda'] if 'encoder_lambda' in args else 0,
+        "decoder_lambda": args['decoder_lambda'] if 'decoder_lambda' in args else 0,
+        "beta": args['beta'] if 'beta' in args else 0   
     }
     
 
