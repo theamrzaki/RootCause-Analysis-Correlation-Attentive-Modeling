@@ -1052,8 +1052,10 @@ class AERCA(nn.Module):
         else:
             self._log_and_print("Zero valid samples found. Check if labels[i][-1] contains any anomalies.")
 
-    def _testing_root_cause_services_metrics(self, xs, labels, alpha: float = 0.5, use_attention_fusion: bool = False):
-        with open('/home/db2003/Desktop/Amr/Tests/Medicine/dataset/aiops22-pre/初赛评分数据/idx_to_feature.json', 'r') as f:
+    def _testing_root_cause_services_metrics_to_be_removed(self, xs, labels, alpha: float = 0.5, use_attention_fusion: bool = False):
+        # 0. Load Feature Mapping
+        mapping_path = '/home/db2003/Desktop/Amr/Tests/Medicine/dataset/aiops22-pre/初赛评分数据/idx_to_feature.json'
+        with open(mapping_path, 'r') as f:
             self.idx_to_feature = json.load(f)
 
         coeff_architecture = self.options["coeff_architecture"]
@@ -1071,60 +1073,107 @@ class AERCA(nn.Module):
         self.us_mean_encoder = np.load(os.path.join(self.save_dir, f'{self.model_name}_us_mean_encoder.npy'))
         self.us_std_encoder = np.load(os.path.join(self.save_dir, f'{self.model_name}_us_std_encoder.npy'))
 
-        us_sample_list = [] 
+        us_list = []        # For global POT threshold
+        us_sample_list = [] # For individual sample evaluation
+        attn_list = []
         
         # 3. Inference Loop
         with torch.no_grad():
             for i in tqdm(range(len(xs)), desc="Inference"):
-                _, _, _, _, _, _, _, us, _ = self._testing_step(xs[i], labels[i], add_u=False)
-                us_sample_list.append(us.cpu().numpy())
+                x = xs[i]
+                label = labels[i]
+                
+                # Forward pass
+                _, _, _, _, _, _, _, us, attn_weights = self._testing_step(x, label, add_u=False)
+                
+                u_numpy = us.cpu().numpy() 
+                us_sample_list.append(u_numpy)
+                us_list.append(u_numpy)
+                
+                if use_attention_fusion:
+                    attn_mean = attn_weights.mean(dim=0).cpu().numpy()
+                    attn_list.append(attn_mean)
 
-        # 4. Triple-Track Evaluation
+        # 4. POT Threshold Calculation (Critical for Tail-Heavy Anomalies)
+        us_all = np.concatenate(us_list, axis=0)
+        us_all_z_score = (-(us_all - self.us_mean_encoder) / self.us_std_encoder)
+        
+        us_all_z_score_pot = []
+        for i in range(self.num_vars):
+            col_data = us_all_z_score[:, i]
+            col_data = col_data[np.isfinite(col_data)]
+            if col_data.size == 0:
+                us_all_z_score_pot.append(0.0)
+                continue
+            try:
+                # Applying POT to find the extreme value threshold for each feature
+                pot_val, _ = pot(col_data, self.risk, self.initial_level, self.num_candidates)
+            except:
+                pot_val = np.mean(col_data) + 3 * np.std(col_data)
+            us_all_z_score_pot.append(pot_val)
+        
+        us_all_z_score_pot = np.array(us_all_z_score_pot)
+
+        # 5. Triple-Track Top-K Evaluation
         feature_names = [self.idx_to_feature[str(i)] for i in range(self.num_vars)]
         
         results = {
-            "complete": {"top1": 0, "top3": 0, "top5": 0, "top10": 0}, # Full Column
-            "service": {"top1": 0, "top3": 0, "top5": 0, "top10": 0},  # Service Prefix
-            "metric": {"top1": 0, "top3": 0, "top5": 0, "top10": 0}    # Fault Type Suffix
+            "complete": {"top1": 0, "top3": 0, "top5": 0, "top10": 0},
+            "service": {"top1": 0, "top3": 0, "top5": 0, "top10": 0},
+            "metric": {"top1": 0, "top3": 0, "top5": 0, "top10": 0},
+            "node": {"top1": 0, "top3": 0, "top5": 0, "top10": 0}
         }
         
         valid_samples = 0
         for i in tqdm(range(len(xs)), desc="Top-K Evaluation"):
             us_sample = us_sample_list[i]
             z_scores = (-(us_sample - self.us_mean_encoder) / self.us_std_encoder)
+            
+            if use_attention_fusion:
+                attn_per_lag = attn_list[i].mean(axis=2)
+                attn_importance = attn_per_lag.mean(axis=0)
+                attn_importance = np.expand_dims(attn_importance, axis=0).repeat(z_scores.shape[0], axis=0)
+                # Weighted blend of standardized residuals and attention weights
+                z_scores = alpha * z_scores + (1 - alpha) * attn_importance
 
             # Ground Truth Processing
-            current_labels = np.max(labels[i], axis=0)
+            current_labels = labels[i][-1:] # evaluate only the current anomaly state
             gt_indices = np.where(current_labels > 0)[0]
             if len(gt_indices) == 0: continue
             valid_samples += 1
 
-            # Extract GT Components
             gt_completes = [feature_names[idx] for idx in gt_indices]
-            gt_services = list(set([m.split('-')[0] for m in gt_completes]))
-            gt_metrics = list(set(["-".join(m.split('-')[1:]) for m in gt_completes]))
+            gt_services = list(set([m.split('.')[1].split("-")[0] for m in gt_completes]))
+            gt_metrics = list(set([m.split('-')[2][2:] for m in gt_completes[:-1]]))
+            gt_nodes = list(set([m.split('.')[0] for m in gt_completes]))
 
             # Rank Components
             sorted_indices = np.argsort(z_scores[0])[::-1]
             ranked_completes = [feature_names[idx] for idx in sorted_indices]
             
-            # Service Ranking (order of first appearance)
+            # Extract Service and Metric rankings from the ranked completes
             seen_s, ranked_services = set(), []
-            for m in ranked_completes:
-                s = m.split('-')[0]
-                if s not in seen_s:
-                    ranked_services.append(s)
-                    seen_s.add(s)
-
-            # Metric/Fault Ranking (order of first appearance)
             seen_m, ranked_metrics = set(), []
+            seen_n, ranked_nodes = set(), []
             for m in ranked_completes:
-                metric_part = "-".join(m.split('-')[1:])
+                service_part = m.split('.')[1].split("-")[0]
+                try:
+                    metric_part = m.split('-')[2][2:]
+                except:
+                    metric_part = ""
+                node_part = m.split('.')[0]
+
+                if service_part not in seen_s:
+                    ranked_services.append(service_part)
+                    seen_s.add(service_part)
                 if metric_part not in seen_m:
                     ranked_metrics.append(metric_part)
                     seen_m.add(metric_part)
+                if node_part not in seen_n:
+                    ranked_nodes.append(node_part)
+                    seen_n.add(node_part)
 
-            # Accumulate hits for AC@1, 3, 5, 10
+            # Score checks
             for k in [1, 3, 5, 10]:
                 if any(m in gt_completes for m in ranked_completes[:k]):
                     results["complete"][f"top{k}"] += 1
@@ -1132,16 +1181,172 @@ class AERCA(nn.Module):
                     results["service"][f"top{k}"] += 1
                 if any(f in gt_metrics for f in ranked_metrics[:k]):
                     results["metric"][f"top{k}"] += 1
+                if any(n in gt_nodes for n in ranked_nodes[:k]):
+                    results["node"][f"top{k}"] += 1
 
-        # 5. Result Aggregation
+        # 6. Final Logging
         if valid_samples > 0:
-            for track in ["service", "metric", "complete"]:
+            for track in ["service", "metric", "complete", "node"]:
                 self._log_and_print(f"\n--- {track.upper()} LEVEL RCA ---")
                 for k in [1, 3, 5, 10]:
                     acc = results[track][f"top{k}"] / valid_samples
                     self._log_and_print(f'AC@{k}: {acc:.5f}')
         else:
-            self._log_and_print("No anomalies found for evaluation.")
+            self._log_and_print("Zero valid samples found.")
+
+    def _testing_root_cause_services_metrics(self, xs, labels, alpha: float = 0.5, use_attention_fusion: bool = False):
+        # 0. Feature Mapping Setup
+        mapping_path = '/home/db2003/Desktop/Amr/Tests/Medicine/dataset/aiops22-pre/初赛评分数据/idx_to_feature.json'
+        with open(mapping_path, 'r') as f:
+            self.idx_to_feature = json.load(f)
+        feature_names = [self.idx_to_feature[str(i)] for i in range(self.num_vars)]
+
+        coeff_architecture = self.options["coeff_architecture"]
+        
+        # 1. Baseline check
+        if coeff_architecture == "rcd":
+            rcd_result = self._evaluate_rcd(xs, labels, bins=None, gamma=5)
+            return rcd_result
+
+        # 2. Model Loading & Setup
+        self.load_state_dict(torch.load(os.path.join(self.save_dir, f'{self.model_name}.pt'), map_location=self.device))
+        self.eval()
+        
+        self.us_mean_encoder = np.load(os.path.join(self.save_dir, f'{self.model_name}_us_mean_encoder.npy'))
+        self.us_std_encoder = np.load(os.path.join(self.save_dir, f'{self.model_name}_us_std_encoder.npy'))
+
+        us_list = []        
+        us_sample_list = [] 
+        attn_list = []
+        
+        # 3. Inference Loop
+        with torch.no_grad():
+            for i in tqdm(range(len(xs)), desc="Inference"):
+                x = xs[i]
+                label = labels[i]
+                _, _, _, _, _, _, _, us, attn_weights = self._testing_step(x, label, add_u=False)
+                u_numpy = us.cpu().numpy() 
+                us_sample_list.append(u_numpy)
+                us_list.append(u_numpy)
+                if use_attention_fusion:
+                    attn_mean = attn_weights.mean(dim=0).cpu().numpy()
+                    attn_list.append(attn_mean)
+
+        # 4. Global POT Threshold Calculation
+        us_all = np.concatenate(us_list, axis=0) 
+        us_all_z_score = (-(us_all - self.us_mean_encoder) / self.us_std_encoder)
+        
+        us_all_z_score_pot = []
+        for i in range(self.num_vars):
+            col_data = us_all_z_score[:, i]
+            col_data = col_data[np.isfinite(col_data)]
+            if col_data.size == 0:
+                us_all_z_score_pot.append(0.0)
+                continue
+            try:
+                pot_val, _ = pot(col_data, self.risk, self.initial_level, self.num_candidates)
+            except:
+                pot_val = np.mean(col_data) + 3 * np.std(col_data)
+            us_all_z_score_pot.append(pot_val)
+        us_all_z_score_pot = np.array(us_all_z_score_pot)
+
+        # 5. Top-K Evaluation (Faithful to Original Loop)
+        k_all = []
+        k_at_step_all = []
+        
+        # Sub-level tracking
+        results = {
+            "service": {"top1": 0, "top3": 0, "top5": 0, "top10": 0},
+            "metric": {"top1": 0, "top3": 0, "top5": 0, "top10": 0},
+            "node": {"top1": 0, "top3": 0, "top5": 0, "top10": 0}
+        }
+        
+        valid_samples = 0
+        for i in tqdm(range(len(xs)), desc="Top-K Evaluation"):
+            us_sample = us_sample_list[i]
+            z_scores = (-(us_sample - self.us_mean_encoder) / self.us_std_encoder)
+            
+            if use_attention_fusion:
+                attn_per_lag = attn_list[i].mean(axis=2)
+                attn_importance = attn_per_lag.mean(axis=0)
+                attn_importance = np.expand_dims(attn_importance, axis=0).repeat(z_scores.shape[0], axis=0)
+                z_scores = alpha * z_scores + (1 - alpha) * attn_importance
+
+            current_labels = np.max(labels[i], axis=0, keepdims=True)
+            
+            # Ground Truth Check for valid_samples count
+            if np.sum(current_labels) == 0: continue
+            valid_samples += 1
+
+            try:
+                # Original Top-K Logic (Faithful)
+                k_lst = topk(z_scores, current_labels, us_all_z_score_pot)
+                k_at_step = topk_at_step(z_scores, current_labels)
+                k_all.append(k_lst)
+                k_at_step_all.append(k_at_step)
+
+                # --- Faithfully Integrated Multi-Level Logic ---
+                gt_indices = np.where(current_labels[0] > 0)[0]
+                gt_completes = [feature_names[idx] for idx in gt_indices]
+
+                # Parsing helper based on: node.service-id-metric
+                def parse(name):
+                    node = name.split('.')[0]
+                    service = name.split('.')[1].split("-")[0]
+                    metric = name.split('-')[-1]
+                    return node, service, metric
+
+                gt_nodes = set(parse(m)[0] for m in gt_completes)
+                gt_services = set(parse(m)[1] for m in gt_completes)
+                gt_metrics = set(parse(m)[2] for m in gt_completes)
+
+                sorted_indices = np.argsort(z_scores[0])[::-1]
+                ranked_completes = [feature_names[idx] for idx in sorted_indices]
+
+                # Ranked Sub-lists
+                seen_n, r_nodes = set(), []
+                seen_s, r_services = set(), []
+                seen_m, r_metrics = set(), []
+
+                for m in ranked_completes:
+                    n, s, met = parse(m)
+                    if n not in seen_n: r_nodes.append(n); seen_n.add(n)
+                    if s not in seen_s: r_services.append(s); seen_s.add(s)
+                    if met not in seen_m: r_metrics.append(met); seen_m.add(met)
+
+                for k in [1, 3, 5, 10]:
+                    if any(n in gt_nodes for n in r_nodes[:k]): results["node"][f"top{k}"] += 1
+                    if any(s in gt_services for s in r_services[:k]): results["service"][f"top{k}"] += 1
+                    if any(m in gt_metrics for m in r_metrics[:k]): results["metric"][f"top{k}"] += 1
+
+            except Exception as e:
+                self._log_and_print(f"Error for sample {i}: {str(e)}")
+                continue
+
+        # 6. Result Aggregation (Faithful Output)
+        self._log_and_print("RCA Coverage: {}/{} ({:.2f}%)", valid_samples, len(xs), (valid_samples/len(xs))*100)
+        
+        if valid_samples > 0:
+            k_at_step_all = np.array(k_at_step_all).mean(axis=0)
+            
+            # 6a. Original Logs
+            self._log_and_print('--- COMPLETE LEVEL RCA ---')
+            self._log_and_print('Root cause analysis AC@1: {:.5f}', k_at_step_all[0])
+            self._log_and_print('Root cause analysis AC@3: {:.5f}', k_at_step_all[2])
+            self._log_and_print('Root cause analysis AC@5: {:.5f}', k_at_step_all[4])
+            self._log_and_print('Root cause analysis AC@10: {:.5f}', k_at_step_all[9])
+
+            # 6b. New Sub-Level Logs
+            for track in ["node", "service", "metric"]:
+                self._log_and_print(f'\n--- {track.upper()} LEVEL RCA ---')
+                for k in [1, 3, 5, 10]:
+                    acc = results[track][f"top{k}"] / valid_samples
+                    self._log_and_print(f'AC@{k}: {acc:.5f}')
+            
+            write_results(self.options, self.local_model_name, [k_at_step_all[0], k_at_step_all[2], k_at_step_all[4], k_at_step_all[9]], 
+                          k_at_step_all, self.total_params, self.options.get("results_csv"))
+        else:
+            self._log_and_print("Zero valid samples found.")
 
     def plot_case(self,z_scores, labels, t_idx=None):
         """
