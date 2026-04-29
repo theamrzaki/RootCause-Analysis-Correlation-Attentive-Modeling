@@ -27,7 +27,7 @@ class SENNGC(nn.Module):
             self.coeff_nets = nn.ModuleList()
 
             ## Instantiate coefficient networks
-            for k in range(order):
+            for k in range(order-1):
                 modules = [nn.Sequential(nn.Linear(num_vars, hidden_layer_size), nn.ReLU())]
                 if num_hidden_layers > 1:
                     for j in range(num_hidden_layers - 1):
@@ -344,22 +344,24 @@ class SENNGC(nn.Module):
     # Forward propagation,
     # returns predictions and generalised coefficients corresponding to each prediction
     def forward_normal(self, inputs: torch.Tensor):
-        if inputs[0, :, :].shape != torch.Size([self.order, self.num_vars]):
-            print("WARNING: inputs should be of shape BS x K x p")
+        # Shape check using your preferred style
+        if inputs.shape[1] != (self.order - 1):
+            print(f"WARNING: Expected {self.order-1} steps, got {inputs.shape[1]}")
 
-        coeffs = None
-        preds = torch.zeros((inputs.shape[0], self.num_vars)).to(self.device)
-        for k in range(self.order):
-            coeff_net_k = self.coeff_nets[k]
-            coeffs_k = coeff_net_k(inputs[:, k, :])
-            coeffs_k = torch.reshape(coeffs_k, (inputs.shape[0], self.num_vars, self.num_vars))
-            if coeffs is None:
-                coeffs = torch.unsqueeze(coeffs_k, 1)
-            else:
-                coeffs = torch.cat((coeffs, torch.unsqueeze(coeffs_k, 1)), 1)
-            # coeffs[:, k, :, :] = coeffs_k
-            preds = preds + torch.matmul(coeffs_k, inputs[:, k, :].unsqueeze(dim=2)).squeeze()
-        return preds, coeffs, None
+        coeffs = [] # Using a list is faster than torch.cat in a loop
+        preds = torch.zeros((inputs.shape[0], self.num_vars), device=self.device)
+        
+        for k in range(self.order - 1):
+            coeffs_k = self.coeff_nets[k](inputs[:, k, :])
+            coeffs_k = coeffs_k.view(inputs.shape[0], self.num_vars, self.num_vars)
+            
+            coeffs.append(coeffs_k.unsqueeze(1))
+            
+            # Prediction: A_k * x_k
+            # Squeeze(2) ensures we go from [BS, 30, 1] back to [BS, 30]
+            preds += torch.matmul(coeffs_k, inputs[:, k, :].unsqueeze(2)).squeeze(2)
+
+        return preds, torch.cat(coeffs, dim=1), None
     
 
     def forward_gnn(self, inputs: torch.Tensor):
