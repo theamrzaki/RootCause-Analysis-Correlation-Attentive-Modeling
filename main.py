@@ -131,9 +131,19 @@ def main(argv):
         data_class.generate_example()
         data_class.save_data()
         orth_transformer = data_class.load_data()
+        import hashlib
+        sample_data = np.array(data_class.data_dict['x_n_list'][0])
+        data_hash = hashlib.md5(sample_data.tobytes()).hexdigest()
+        with open(os.path.join(logging_dir, 'data_hash.txt'), 'w') as f:
+            f.write(f"Data Hash for first sample: {data_hash}\n")
     else:
         print('Loading existing data...')
         orth_transformer = data_class.load_data()
+        import hashlib
+        sample_data = np.array(data_class.data_dict['x_n_list'][0])
+        data_hash = hashlib.md5(sample_data.tobytes()).hexdigest()
+        with open(os.path.join(logging_dir, 'data_hash.txt'), 'a') as f:
+            f.write(f"Data Hash for loading sample: {data_hash}\n")
 
     # Instantiate the iTransformer model using the common set of parameters.
     if options["main_model"] in ["iTransformer","FEDformer"]:

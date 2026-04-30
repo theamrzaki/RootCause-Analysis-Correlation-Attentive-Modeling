@@ -29,3 +29,4 @@ deep_mlp_(no mean)_normal_KL20_034823_12_0.0001_1_window_12,wadi,1,normal_KL,dee
 deep_mlp_(no mean)_normal_KL20_035209_12_0.0001_1_window_12,wadi,1,normal_KL,deep_mlp,256,2,0.0001,0.0,0.0,0.0,0.0,0.0,798476,12,0,1000,0,0,128,2,123,0,normal,gated,iTransformer
 wadiGVAR_(no mean)_normal_KL20_035510_12_0.0001_1_window_12,wadi,1,normal_KL,GVAR,256,2,0.0001,0.11458333333333333,0.19791666666666666,0.24999999999999997,0.34375,0.24479166666666666,23808300,12,0,1000,0,0,256,2,123,0,mag_phase,attention,aerca_based
 wadicausalrca_(no mean)_normal_KL20_041146_12_0.0001_1_window_12,wadi,1,normal_KL,causalrca,256,2,0.0001,0.16666666666666666,0.34375,0.4375,0.48958333333333337,0.3979166666666667,31798,12,0,1000,0,0,256,2,123,0,mag_phase,attention,aerca_based
+wadivlinear_(no mean)_normal_KL21_155822_1_0.0001_1_window_1,wadi,1,normal_KL,vlinear,16,2,0.0001,0.0,0.125,0.125,0.25,0.15,406164,1,0,1000,0,0,16,2,123,0,mag_phase,attention,aerca_based

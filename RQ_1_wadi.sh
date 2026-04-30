@@ -1,3 +1,6 @@
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate RCAEval
+
 seeds=(1)
 dataset="wadi"
 window_size=(1 5 7 10 12)

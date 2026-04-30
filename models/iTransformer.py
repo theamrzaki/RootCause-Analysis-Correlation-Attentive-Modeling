@@ -395,7 +395,7 @@ class Model(nn.Module):
         k_all, k_at_step_all = [], []
 
         with torch.no_grad():
-            for i in range(len(xs)):
+            for i in tqdm(range(len(xs))):
                 x, label = xs[i], labels[i]
 
                 # Create sliding windows: shape (num_windows, window_size+1, num_vars)

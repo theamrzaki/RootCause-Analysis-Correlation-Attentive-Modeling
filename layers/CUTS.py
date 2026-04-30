@@ -66,11 +66,18 @@ class CUTSEncoder(nn.Module):
             # Expand to CUTS input: (B, n_nodes, m, t, d) where m=d=1
             x_exp = x_chunk.unsqueeze(2).unsqueeze(-1)  # (B, P, 1, O, 1)
 
+            # --- Expand x ---
+            x_exp = x_chunk.unsqueeze(2).unsqueeze(-1)  # (B, P, 1, O, 1)
+
             # --- Sample graph ---
             sampled_graph = torch.sigmoid(self.graph)[None].expand(Bc, -1, -1, -1)  # (B, P, P, O)
 
+            # --- Apply graph aggregation ---
+            x_masked = torch.einsum("bnmtd,bnkt->bk m t d", x_exp, sampled_graph)  # (B, P, 1, O, 1)
+
             # --- Forward through fitting model ---
-            y_pred = self.fitting_model(x_exp, sampled_graph)  # (B, P, O, d)
+            y_pred = self.fitting_model(x_masked)  # (B, P, O, d)
+
             y_pred = y_pred.squeeze(-1)  # (B, P, O)
 
             # --- Aggregate prediction across time ---

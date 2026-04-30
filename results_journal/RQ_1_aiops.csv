@@ -163,3 +163,62 @@ AC@10: 0.77798
 Done testing for root cause analysis
 done
 AC@10: 0.74956aiopsvlinear_(no mean)_normal_KL27_195246_50_0.0001_7_window_50,aiops,7,normal_KL,vlinear,256,2,0.0001,0.20959147424511546,0.302545885139137,0.317229129662523,0.3569173080718397,0.31067812737883843,168395,50,0,200,0,0,256,2,30,0,vlinear,gated,aerca_based
+aiopsGVAR_(no mean)_normal_KL27_234744_50_0.0001_7_window_50,aiops,7,normal_KL,GVAR,256,2,0.0001,0.20426287744227353,0.224985198342214,0.24724689165186559,0.2874087231103219,0.24673961769432476,6692420,50,0,200,0,0,256,2,30,0,vlinear,gated,aerca_based
+
+with GVAR model
+RCA Coverage: 563/1390 (40.50%)
+--- COMPLETE LEVEL RCA ---
+Root cause analysis AC@1: 0.20426
+Root cause analysis AC@3: 0.22499
+Root cause analysis AC@5: 0.24725
+Root cause analysis AC@10: 0.28741
+
+--- NODE LEVEL RCA ---
+AC@1: 0.20426
+AC@3: 0.62345
+AC@5: 1.00000
+AC@10: 1.00000
+
+--- SERVICE LEVEL RCA ---
+AC@1: 0.50444
+AC@3: 0.70870
+AC@5: 0.76377
+AC@10: 1.00000
+
+--- METRIC LEVEL RCA ---
+AC@1: 0.39609
+AC@3: 0.66075
+AC@5: 0.68561
+AC@10: 0.72114
+aiopsGVAR_(no mean)_normal_KL28_000952_50_0.0001_7_window_50,aiops,7,normal_KL,GVAR,256,2,0.0001,0.20426287744227353,0.224985198342214,0.24724689165186559,0.2874087231103219,0.24673961769432476,6692420,50,0,200,0,0,256,2,30,0,vlinear,gated,aerca_based
+aiopsvlinear_(no mean)_normal_KL28_001326_30_0.0001_7_window_30 (5 sampling 30 window),aiops,7,normal_KL,vlinear,256,2,0.0001,0.26256983240223464,0.3389199255121045,0.23612662942271875,0.5508379888268148,0.3903154651059678,156935,30,0,200,0,0,256,2,30,0,vlinear,gated,aerca_based RCA Coverage: 179/258 (69.38%)
+aiopsvlinear_(no mean)_normal_KL28_001814_30_0.0001_7_window_30 (3 sampling 30 window),aiops,7,normal_KL,vlinear,256,2,0.0001,0.26717557251908397,0.41857506361323277,0.3484732824427491,0.5493865866957479,0.4217486065673094,156935,30,0,200,0,0,256,2,30,0,vlinear,gated,aerca_based RCA Coverage: 262/450 (58.22%)
+aiopsvlinear_(no mean)_normal_KL28_002208_30_0.0001_7_window_30 (3 sampling 30 window) (orth transform),aiops,7,normal_KL,vlinear,256,2,0.0001,0.2633587786259542,0.3829516539440212,0.31583969465648937,0.5383042529989106,0.401643341815098,156935,30,0,200,0,0,256,2,30,0,vlinear,gated,aerca_based
+aiopsvlinear_(no mean)_normal_KL28_003027_30_0.0001_7_window_30 (3 sampling 30 window) (no orht) (with 0.3 weights),aiops,7,normal_KL,vlinear,256,2,0.0001,0.24427480916030533,0.37531806615776175,0.33549618320610775,0.5370456197746283,0.40140055131467384,156935,30,0,200,0,0,256,2,30,0,vlinear,gated,aerca_based
+aiopsvlinear_(no mean)_normal_KL28_003548_30_0.0001_7_window_30 (3 sampling 30 window) (no orht) (with 0.5 weights) (variance 1e2) (KL loss),aiops,7,normal_KL,vlinear,256,2,0.0001,0.4847328244274809,0.24427480916030517,0.24790076335877853,0.5125136314067609,0.34586074760693064,156935,30,0,200,0,0,256,2,30,0,vlinear,gated,aerca_based
+aiopsvlinear_(no mean)_normal_KL28_004036_30_0.0001_7_window_30 (3 sampling 30 window) (no orht) (with 0.5 weights) (variance 1e4) (KL loss),aiops,7,normal_KL,vlinear,256,2,0.0001,0.22519083969465647,0.16412213740458004,0.24026717557251934,0.4300845147219204,0.2905069368714411,156935,30,0,200,0,0,256,2,30,0,vlinear,gated,aerca_based
+aiopsvlinear_(no mean)_normal_KL28_004629_30_0.0001_7_window_30 (3 sampling 30 window) (no orht) (with 0.5 weights) (variance 1e4) (0.7 KL loss),aiops,7,normal_KL,vlinear,256,2,0.0001,0.2480916030534351,0.16412213740458004,0.2746183206106872,0.4356324972737198,0.28993411486732124,156935,30,0,200,0,0,256,2,30,0,vlinear,gated,aerca_based
+--- COMPLETE LEVEL RCA ---
+Root cause analysis AC@1: 0.24809
+Root cause analysis AC@3: 0.16412
+Root cause analysis AC@5: 0.27462
+Root cause analysis AC@10: 0.43563
+
+--- NODE LEVEL RCA ---
+AC@1: 0.24809
+AC@3: 0.68321
+AC@5: 0.80534
+AC@10: 1.00000
+
+--- SERVICE LEVEL RCA ---
+AC@1: 0.24809
+AC@3: 0.37023
+AC@5: 0.72901
+AC@10: 0.80534
+
+--- METRIC LEVEL RCA ---
+AC@1: 0.37023
+AC@3: 0.59160
+AC@5: 0.92366
+AC@10: 0.99618
+aiopsvlinear_(no mean)_normal_KL28_005615_30_0.0001_7_window_30 (3 sampling 30 window) (no orht) (with 0.5 weights) (variance 1e2) (0 KL loss),aiops,7,normal_KL,vlinear,256,2,0.0001,0.1450381679389313,0.26972010178117095,0.23416030534351162,0.4526308615049075,0.30535820307766903,156935,30,0,200,0,0,256,2,30,0,vlinear,gated,aerca_based

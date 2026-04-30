@@ -31,7 +31,7 @@ class OrthTransform(nn.Module):
             
         self.register_buffer('Q', torch.from_numpy(q_mat.astype(np.float32)))
 
-    def _compute_q_matrix(self, train_data, time_lag, save_path):
+    def _compute_q_matrix___(self, train_data, time_lag, save_path):
         """
         Computes Q based on the pre-processed 'x_n_list' (Samples, Window, Vars)
         """
@@ -67,6 +67,67 @@ class OrthTransform(nn.Module):
         q_mat = np.flip(eigenvectors.T, axis=0)
         
         np.save(self.matrix_path, q_mat)
+        return q_mat
+
+    def _compute_q_matrix(self, train_data, time_lag, save_path):
+        """
+        Computes a GLOBAL temporal Q matrix using sliding windows
+        over 10k sequences (NOT tied to model window size).
+        """
+
+        if not os.path.exists(save_path):
+            os.makedirs(save_path)
+
+        S_chunks, W_total, V = train_data.shape
+
+        # IMPORTANT: decouple Q size from model window
+        W_q = min(1000, W_total)   # <<<<<<<<<< KEY FIX (NOT 5)
+        stride = W_q // 4
+
+        sigma_list = []
+
+        for feature_idx in range(V):
+
+            windows = []
+
+            for s in range(S_chunks):
+                seq = train_data[s, :, feature_idx]  # [10000]
+
+                # sliding windows over full temporal range
+                for i in range(0, W_total - W_q + 1, stride):
+                    windows.append(seq[i:i + W_q])
+
+            if len(windows) < 2:
+                continue
+
+            feat_windows = np.stack(windows, axis=0)  # [S_eff, W_q]
+
+            # center over time dimension
+            feat_windows = feat_windows - np.mean(feat_windows, axis=0, keepdims=True)
+
+            # covariance across temporal dimension
+            cov = (feat_windows.T @ feat_windows) / (feat_windows.shape[0] - 1)
+
+            diag = np.diag(cov)
+            if (diag < 1e-6).any():
+                continue
+
+            cov = cov / (np.sqrt(np.outer(diag, diag)) + 1e-9)
+
+            sigma_list.append(cov)
+
+        if not sigma_list:
+            raise ValueError("No valid features found for Q computation.")
+
+        sigma_mean = np.mean(sigma_list, axis=0)
+
+        eigenvalues, eigenvectors = eigh(sigma_mean)
+
+        # IMPORTANT: keep full informative basis
+        q_mat = np.flip(eigenvectors.T, axis=0)
+
+        np.save(self.matrix_path, q_mat)
+
         return q_mat
 
     def _compute_q_matrix_median(self, train_data, time_lag, save_path):
@@ -218,23 +279,24 @@ class OrthTransform(nn.Module):
         return out.transpose(1, 2)
     
     def forward(self, x, disable_orth=False):
-        # x: [Batch, Window, Channels] (e.g., 20, 36, 51)
-        target_len = self.Q.shape[0] # 1000
-        current_len = x.shape[1]    # 36
-        disable_orth = False 
+
         if disable_orth:
-            # IDENTITY MODE: Pure temporal pass-through
-            # No spectral mixing happens here.
             return x.transpose(1, 2)
-        
-        # --- ORTHOGONAL MODE ---
-        if current_len < target_len:
-            # Pad the temporal dimension to match the basis size
-            padding = (0, 0, target_len - current_len, 0)
-            x = torch.nn.functional.pad(x, padding, "constant", 0)
-        
-        # Apply basis projection: [B, W, C] * [W_new, W] -> [B, W_new, C]
-        out = torch.einsum('bwc, vw -> bvc', x, self.Q)
+
+        B, T, C = x.shape
+        W = self.Q.shape[0]
+
+        # ensure alignment
+        if T < W:
+            pad = W - T
+            x = torch.nn.functional.pad(x, (0, 0, pad, 0))
+
+        # take ONE projection over full sequence
+        seg = x[:, -W:, :]   # last W steps (important choice)
+
+        out = torch.einsum('bwc, vw -> bvc', seg, self.Q)
+
+        return out.transpose(1, 2)
         
         # Return the relevant window transposed to [Batch, Channels, Window]
         return out[:, -current_len:, :].transpose(1, 2)
@@ -243,6 +305,7 @@ class OrthTransform(nn.Module):
         disable_orth = False
         # x_orth: [Batch, Channels, Current_W]
         if disable_orth:
+            # IDENTITY MODE: Just return to time-major shape
             return x_orth.transpose(1, 2)
 
         # --- ORTHOGONAL MODE ---
@@ -289,7 +352,7 @@ class vlinear(nn.Module):
     def __init__(self, num_vars, order, hidden_dim=256, device="cpu", options=None):
         super().__init__()
         self.num_vars = num_vars  
-        self.order = order*1  -1      
+        self.order = 1000        
         self.device = device
         
         self.orth_transformer = options.get('orth_transformer') 
@@ -297,157 +360,67 @@ class vlinear(nn.Module):
         # 1. Delta Biases (Faithful to Model logic)
         # These act as "Learned Context" for the orthogonal domain
         # delta1: [1, Channels, 1, Lag]
-        self.delta_latent1 = nn.Parameter(torch.randn(1, num_vars, hidden_dim))
-        self.delta_latent2 = nn.Parameter(torch.randn(1, num_vars, hidden_dim))
-
-        # Projection to match the output 'order'
-        self.bias_proj = nn.Linear(hidden_dim, self.order)
-        
-        # 2. Updated Embeddings 
-        # In the Model code, embeddings are often 1D and expanded
-        #self.embeddings = nn.Parameter(torch.randn(1, hidden_dim))
-        self.embeddings = nn.Parameter(torch.randn(1, num_vars, 1, hidden_dim))
-        # 3. Projection matching the Model's logic
-        #self.temporal_proj = nn.Linear(self.order, hidden_dim)
-        self.temporal_proj = nn.Linear(1, hidden_dim)
-        #self.temporal_proj = nn.Sequential(
-        #    nn.Linear(1, hidden_dim // 2),
-        #    nn.GELU(),
-        #    nn.Linear(hidden_dim // 2, hidden_dim)
-        #)
-        self.a = nn.Parameter(torch.randn(num_vars))
-        self.ln = nn.LayerNorm(hidden_dim)
-        self.vf = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim*2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim*2, self.order) 
-        )
-        #self.revin = RevIN(num_vars)
-
-    def forward(self, inputs: torch.Tensor):
-        B, O_curr, P = inputs.shape # [B, Window, Sensors] e.g., [B, 2, 51]
-        
-        # --- 1. Step into Orthogonal Domain ---
-        if self.orth_transformer is None:
-            x_orth = inputs.transpose(1, 2) # [B, 51, 2]
-        else:
-            x_orth = self.orth_transformer(inputs) # [B, 51, 2]
-        
-        # --- 2. Apply Delta1 Latent Bias ---
-        # Project delta_latent1 [1, P, H] -> [1, P, Order]
-        # Then unsqueeze to [1, P, 1, Order] for broadcasting
-        d1 = self.bias_proj(self.delta_latent1).unsqueeze(-2) 
-        x_orth_biased = x_orth.unsqueeze(-2) + d1 # [B, P, 1, Order]
-        
-        # --- 3. Truly Dynamic Latent Generation ---
-        # [B, P, 1, Order] -> [B, Order, P, 1]
-        x_t = x_orth_biased.squeeze(-2).transpose(1, 2).unsqueeze(-1)
-        
-        # Project each sensor at each time step into H-space
-        # cond: [B, Order, P, H]
-        cond = self.temporal_proj(x_t) * self.embeddings.transpose(1, 2) 
-        
-        # --- 4. Dynamic AERCA Coefficients ---
-        # Creates a unique PxP matrix for every step in the window
-        coeffs_time = torch.einsum('btph, btqh -> btpq', cond, cond)
-        coeffs_time = torch.tanh(coeffs_time)
-
-        # --- 5. Prediction (Forecasting) ---
-        # Aggregate temporal info using max pooling (as per your best results)
-        z_final, _ = torch.max(cond, dim=1) # [B, P, H]
-        
-        # Apply the second Latent Bias to the forecast
-        # vf(z_final) -> [B, P, Order]
-        # d2 -> [1, P, Order]
-        d2 = self.bias_proj(self.delta_latent2)
-        v_pred = self.vf(z_final) + d2 # [B, P, Order]
-
-        if self.orth_transformer is None:
-            preds_all_time = v_pred.transpose(1, 2) # [B, Order, P]
-        else:
-            preds_all_time = self.orth_transformer.inverse(v_pred)
-        
-        # Final forecast is the last step of the predicted window
-        preds = preds_all_time[:, -1, :] 
-        coeffs_freq = coeffs_time[:, 0, :, :] # First step coefficients
-
-        return preds, coeffs_time, coeffs_freq
-    
-import math
-
-class vlinear_new(nn.Module):
-    def __init__(self, num_vars, order, hidden_dim=256, device="cpu", options=None):
-        super().__init__()
-        self.num_vars = num_vars  
-        self.order = order * 1 - 1       
-        self.device = device
-        self.orth_transformer = options.get('orth_transformer') 
-        
-        # 1. Delta Biases (Contextual Offsets)
         self.delta1 = nn.Parameter(torch.zeros(1, num_vars, 1, self.order))
         self.delta2 = nn.Parameter(torch.zeros(1, num_vars, 1, self.order))
 
-        # 2. Dynamic Latent Projections
-        self.embeddings = nn.Parameter(torch.randn(1, num_vars, 1, hidden_dim))
-        self.temporal_proj = nn.Linear(1, hidden_dim)
+        # 2. Updated Embeddings 
+        # In the Model code, embeddings are often 1D and expanded
+        self.embeddings = nn.Parameter(torch.randn(1, hidden_dim))
         
-        # --- NEW: Expressive Sensor Interaction (Q/K Projections) ---
-        # Instead of raw dot product, we project to a lower-dim space for interaction
-        self.q_proj = nn.Linear(hidden_dim, hidden_dim // 4)
-        self.k_proj = nn.Linear(hidden_dim, hidden_dim // 4)
-        
-        # --- NEW: Learned Temporal Gating ---
-        # Balance between the "Extreme" (Max) and "Recent" (Last step) signal
-        self.gate_layer = nn.Linear(hidden_dim, 1)
-
+        # 3. Projection matching the Model's logic
+        self.temporal_proj = nn.Linear(self.order, hidden_dim)
+        self.a = nn.Parameter(torch.randn(num_vars))
+        self.ln = nn.LayerNorm(hidden_dim)
         self.vf = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim * 2),
             nn.ReLU(),
             nn.Linear(hidden_dim * 2, self.order) 
         )
-
+        #self.revin = RevIN(num_vars)
     def forward(self, inputs: torch.Tensor):
-        B, O_curr, P = inputs.shape 
-        
-        # --- 1. Domain Transformation ---
-        if self.orth_transformer is None:
-            x_orth = inputs.transpose(1, 2) 
-        else:
-            x_orth = self.orth_transformer(inputs) 
-        
-        # --- 2. Feature Embedding ---
-        x_orth_biased = x_orth.unsqueeze(-2) + self.delta1
-        x_t = x_orth_biased.squeeze(-2).transpose(1, 2).unsqueeze(-1)
-        
-        # cond shape: [B, T, P, H]
-        cond = self.temporal_proj(x_t) * self.embeddings.transpose(1, 2) 
-        
-        # --- 3. Enhanced Dynamic Coefficients (Anti-Smear) ---
-        # Using Q/K interaction for more complex dependency modeling
-        q = self.q_proj(cond) # [B, T, P, H/4]
-        k = self.k_proj(cond) # [B, T, P, H/4]
-        coeffs_time = torch.einsum('btph, btqh -> btpq', q, k)
-        coeffs_time = torch.tanh(coeffs_time)
+        B, O_curr, P = inputs.shape
 
-        # --- 4. Adaptive Temporal Pooling ---
-        # Identify the most relevant temporal signal using a learned gate
-        z_max, _ = torch.max(cond, dim=1)  # [B, P, H]
-        z_last = cond[:, -1, :, :]         # [B, P, H]
-        
-        # Compute gate: [B, P, 1]
-        alpha = torch.sigmoid(self.gate_layer(z_last))
-        z_final = alpha * z_last + (1 - alpha) * z_max
+        # --------------------------------------------------
+        # 1. Adaptive Orthogonal Projection (robust version)
+        # --------------------------------------------------
+        x_orth = self.orth_transformer(inputs)  # [B, P, K]
 
-        # --- 5. Reconstruction/Forecasting ---
-        v_pred = self.vf(z_final).unsqueeze(-2) + self.delta2
-        v_pred = v_pred.squeeze(-2) 
+        # --------------------------------------------------
+        # 2. Stable biasing (no domination of signal)
+        # --------------------------------------------------
+        x_orth_biased = x_orth.unsqueeze(-2) + 0.01 * self.delta1
 
-        if self.orth_transformer is None:
-            preds_all_time = v_pred.transpose(1, 2)
-        else:
-            preds_all_time = self.orth_transformer.inverse(v_pred)
-        
-        preds = preds_all_time[:, -1, :] 
-        coeffs_freq = coeffs_time[:, 0, :, :] 
+        # --------------------------------------------------
+        # 3. Latent projection
+        # --------------------------------------------------
+        z = self.temporal_proj(x_orth_biased.squeeze(-2))
+
+        # --------------------------------------------------
+        # 4. Stable conditioning (FIX: no multiplicative gating)
+        # --------------------------------------------------
+        cond = self.ln(z + self.embeddings)  # additive instead of multiplicative
+
+        # --------------------------------------------------
+        # 5. Prediction in orth space
+        # --------------------------------------------------
+        v_pred = self.vf(cond).unsqueeze(-2) + 0.01 * self.delta2
+        v_pred = v_pred.squeeze(-2)  # [B, P, K]
+
+        # --------------------------------------------------
+        # 6. Return to time domain
+        # --------------------------------------------------
+        preds_all_time = self.orth_transformer.inverse(v_pred)
+
+        preds = preds_all_time[:, -1, :]  # last-step prediction
+
+        # --------------------------------------------------
+        # 7. Stable coefficient estimation (no explosion)
+        # --------------------------------------------------
+        cond_norm = F.normalize(cond, dim=-1)
+
+        coeffs_time = torch.einsum('bph,bqh->bpq', cond_norm, cond_norm)
+        coeffs_time = coeffs_time.unsqueeze(1).repeat(1, O_curr, 1, 1)
+
+        coeffs_freq = coeffs_time[:, 0, :, :]
 
         return preds, coeffs_time, coeffs_freq

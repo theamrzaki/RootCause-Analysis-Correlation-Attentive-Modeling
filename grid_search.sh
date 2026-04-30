@@ -15,7 +15,7 @@ WINDOW_SIZES=(6 8 10 20 30)
 GAMMA_VALS=(0.2)
 LAMBDA_VALS=(0.5)
 DATASET="smd"
-coeff_architecture=("vlinear" "GVAR")
+coeff_architecture=("vlinear")
 RESULTS_FILE="grid_search_results.csv"
 
 for win in "${WINDOW_SIZES[@]}"; do

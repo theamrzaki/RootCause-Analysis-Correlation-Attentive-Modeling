@@ -3,7 +3,7 @@ conda activate RCAEval
 
 seeds=(1)
 dataset="msds"
-window_size=(2 3 4 5)
+window_size=(20 25 30)
 lrs=("1e-4")
 
 #-------------------------------------------------------------------
@@ -45,9 +45,9 @@ run_vlinear() {
 
                                     --training_aerca=1 \
                                     --epochs=1000 \
-                                    --early_stopping=0 \
+                                    --early_stopping=1 \
                                     --combine_method="attention" \
-                                    --results_csv="RQ_1_msds_window_correct.csv" \
+                                    --results_csv="RQ_1_msds_windowdynamic_batches.csv" \
 
                                     --attention_dim="$attention_dim" \
                                     --num_attention_heads="$heads" \
@@ -92,7 +92,7 @@ run_deepmlp() {
                         --training_aerca=1 \
                         --epochs=1000 \
                         --early_stopping=1 \
-                        --results_csv=RQ_1_msds_window_correct.csv"
+                        --results_csv=RQ_1_msds_windowdynamic_batches.csv"
 
                     eval $cmd
 }
@@ -132,7 +132,7 @@ run_Fedformer() {
                                     --training_aerca=1 \
                                     --epochs=1000 \
                                     --early_stopping=0 \
-                                    --results_csv=RQ_1_msds_window_correct.csv"
+                                    --results_csv=RQ_1_msds_windowdynamic_batches.csv"
 
                                 eval $cmd
                         done
@@ -172,7 +172,7 @@ run_iTransformer() {
                                     --training_aerca=1 \
                                     --epochs=1000 \
                                     --early_stopping=0 \
-                                    --results_csv=RQ_1_msds_window_correct.csv"
+                                    --results_csv=RQ_1_msds_windowdynamic_batches.csv"
 
                                 eval $cmd
             
@@ -224,7 +224,7 @@ run_GVAR() {
                                     --early_stopping=0 \
                                     --preprocessing_data=$preprocessing_data \
                                     --combine_method="attention" \
-                                    --results_csv="RQ_1_msds_window_correct.csv" \
+                                    --results_csv="RQ_1_msds_windowdynamic_batches.csv" \
 
                                     --attention_dim="$attention_dim" \
                                     --num_attention_heads="$heads" \
@@ -281,7 +281,7 @@ run_causalrca() {
                                     --early_stopping=0 \
                                     --preprocessing_data=$preprocessing_data \
                                     --combine_method="attention" \
-                                    --results_csv="RQ_1_msds_window_correct.csv" \
+                                    --results_csv="RQ_1_msds_windowdynamic_batches.csv" \
 
                                     --attention_dim="$attention_dim" \
                                     --num_attention_heads="$heads" \
@@ -320,7 +320,7 @@ run_experiment_baselines() {
             --window_size=$window_size_item \
             --main_model=$main_model \
             --training_aerca=0 \
-            --results_csv=RQ_1_msds_window_correct.csv" # Removed the comment/backslash error here
+            --results_csv=RQ_1_msds_windowdynamic_batches.csv" # Removed the comment/backslash error here
 
         eval $cmd
     done
@@ -339,16 +339,17 @@ for window_size_item in "${window_size[@]}"; do
         else
             preprocessing_data=0
         fi
-        run_deepmlp $preprocessing_data $seed $window_size_item
                 
-
-        #run_vlinear $preprocessing_data $seed $window_size_item
+        run_vlinear $preprocessing_data $seed $window_size_item
+        #run_Fedformer $preprocessing_data $seed $window_size_item
         if [ $preprocessing_data -eq 1 ]; then
             preprocessing_data=0
         fi
-        run_Fedformer $preprocessing_data $seed $window_size_item
-        run_iTransformer $preprocessing_data $seed $window_size_item
-        run_GVAR $preprocessing_data $seed $window_size_item
+        
+        #run_deepmlp $preprocessing_data $seed $window_size_item
+        
+        #run_iTransformer $preprocessing_data $seed $window_size_item
+        #run_GVAR $preprocessing_data $seed $window_size_item
         run_causalrca $preprocessing_data $seed $window_size_item
         run_experiment_baselines $preprocessing_data $seed $window_size_item
     done

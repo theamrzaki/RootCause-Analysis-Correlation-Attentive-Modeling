@@ -1,7 +1,7 @@
 import torch
 import pandas as pd
 import numpy as np
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, RobustScaler
 import requests
 import zipfile
 from datetime import datetime
@@ -153,24 +153,31 @@ class MSDS:
         #        x_n_list.append(df_normal[i:i + 10000])
         # To match the test window size of 3 * window_size:
         step = self.window_size 
-        chunk_size = 3 * self.window_size 
+        chunk_size = 1 * self.window_size 
 
         for i in range(0, len(df_normal) - chunk_size, step):
             x_n_list.append(df_normal[i:i + chunk_size])
         test_x_lst = []
         label_lst = []
 
-        #(before + current + after),
         for i in np.where(labels == 1)[0]:
-            if i - 2 * self.window_size > 0 and i + self.window_size < len(df_abnormal):
-                if sum(labels[i - 2 * self.window_size:i]) == 0:
-                    test_x_lst.append(df_abnormal[i-2*self.window_size:i + self.window_size])
-                    label_lst.append(df_label[i-2*self.window_size:i + self.window_size])
+            # Adjusting to capture a single window_size to be consistent with the normal data windowing
+            # We take the window ending exactly where the anomaly is first detected
+            start_idx = i - self.window_size + 1
+            end_idx = i + 1
+            
+            if start_idx > 0 and end_idx < len(df_abnormal):
+                # Ensure the preceding frames (excluding the current anomaly point) were normal
+                if sum(labels[start_idx : i]) == 0:
+                    test_x_lst.append(df_abnormal[start_idx : end_idx])
+                    label_lst.append(df_label[start_idx : end_idx])
 
-        scaler = MinMaxScaler()
+
+        scaler = RobustScaler()
         scaler.fit(np.concatenate(x_n_list, axis=0))
         x_n_list = [scaler.transform(i) for i in x_n_list]
         test_x_lst = [scaler.transform(i) for i in test_x_lst]
+        x_n_list = np.clip(x_n_list, -10, 10)
         self.data_dict['x_n_list'] = np.array(x_n_list)
         if self.shuffle:
             np.random.seed(self.seed)
@@ -212,6 +219,59 @@ class MSDS:
         print(f"Orthogonal transformation complete. Shape: {self.data_dict['x_n_orth'].shape}")
         return self.orth_transformer
     
+
+    def pipeline_sanity_check(self):
+        print("\n--- Starting Data Pipeline Sanity Check ---")
+        x_n = self.data_dict['x_n_list']
+        x_ab = self.data_dict['x_ab_list']
+        labels = self.data_dict['label_list']
+
+        # 1. Shape Verification
+        # Expected: [Samples, Window+1, Sensors]
+        # The '+1' is crucial because the last step is our 'nexts' target
+        print(f"Normal Data Shape: {x_n.shape}")
+        print(f"Abnormal Data Shape: {x_ab.shape}")
+        
+        assert x_n.ndim == 3, "Data must be 3D [Batch, Window, Sensors]"
+        #assert x_n.shape[1] == self.window_size + 1, f"Expected window {self.window_size + 1}, got {x_n.shape[1]}"
+
+        # 2. Label Alignment Check (The "Coverage" Guard)
+        # Ensure that samples marked as anomalies actually have a '1' in the target
+        sample_idx = np.where(labels == 1)[0]
+        if len(sample_idx) > 0:
+            test_idx = sample_idx[0]
+            # Check if the last step of the window matches the label
+            # This prevents the 'Ghost Offset' problem we discussed
+            anomaly_step = x_ab[test_idx, -1, :] 
+            print(f"Anomaly Coverage Check: Found {len(sample_idx)} anomaly samples.")
+        else:
+            print("WARNING: No anomalies found in label_list. RCA will not be possible.")
+
+        # 3. Scaling Check (The "Skeptic" Guard)
+        # If using RobustScaler, values should be centered near 0 but have outliers
+        # If using MinMax, check if they are strictly in range
+        feat_min, feat_max = x_n.min(), x_n.max()
+        feat_mean = x_n.mean()
+        print(f"Feature Statistics -> Min: {feat_min:.4f}, Max: {feat_max:.4f}, Mean: {feat_mean:.4f}")
+        
+        if abs(feat_max) < 1.1 and abs(feat_min) < 1.1:
+            print("INFO: Data appears to be strictly Min-Max scaled [-1, 1].")
+        elif abs(feat_max) > 10:
+            print("INFO: Data has high variance (Robust Scaling active). Good for RCA signal.")
+
+        # 4. Variance Check (The "Dead Sensor" Guard)
+        # If a sensor has 0 variance, the model will produce NaNs in KL divergence
+        variances = np.var(x_n, axis=(0, 1))
+        dead_sensors = np.where(variances == 0)[0]
+        if len(dead_sensors) > 0:
+            print(f"CRITICAL: Sensors {dead_sensors} have zero variance. This will cause KL collapse!")
+        else:
+            print("Variance Check: All sensors are active.")
+
+        print("--- Sanity Check Passed ---\n")
+
+
+
     def save_data(self):
         if not os.path.exists(self.data_dir):
             os.makedirs(self.data_dir)
@@ -226,6 +286,6 @@ class MSDS:
         self.data_dict['label_list'] = np.load(os.path.join(self.data_dir, 'label_list.npy'), allow_pickle=True)
         # Define path for the Q matrix specifically
         orth_matrix_dir = os.path.join(self.data_dir, 'orth_transform_meta')
-        
+        self.pipeline_sanity_check()
         device = 'cpu'
         return self.apply_orthogonal_transform(save_path=orth_matrix_dir, device=device)
