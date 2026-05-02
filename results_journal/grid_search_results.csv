@@ -271,3 +271,5 @@ gaiaGVAR_(no mean)_normal_KL02_054547_10_0.0001_7_window_10,gaia,7,normal_KL,GVA
 gaiaGVAR_(no mean)_normal_KL02_055832_10_0.0001_7_window_10,gaia,7,normal_KL,GVAR,256,2,0.0001,0.8761904761904762,0.7936507936507938,0.8000000000000009,0.7714285714285716,0.8025340136054423,6492132,10,0,200,0,0,256,2,50,0,vlinear,gated,aerca_based,1.0,1.0,0.5,0.5,1.0,1.0,0.01
 gaiaGVAR_(no mean)_normal_KL02_061052_10_0.0001_7_window_10,gaia,7,normal_KL,GVAR,256,2,0.0001,0.780952380952381,0.7619047619047622,0.7314285714285721,0.7428571428571425,0.7478065003779292,6492132,10,0,200,0,0,256,2,50,0,vlinear,gated,aerca_based,1.0,1.0,0.5,0.5,0.5,0.5,0.05
 gaiaGVAR_(no mean)_normal_KL02_062435_10_0.0001_7_window_10,gaia,7,normal_KL,GVAR,256,2,0.0001,0.6952380952380952,0.7301587301587301,0.7409523809523817,0.7571428571428576,0.7362551020408163,6492132,10,0,200,0,0,256,2,50,0,vlinear,gated,aerca_based,1.0,1.0,0.5,0.5,1.0,1.0,0.05
+
+For both models, the best results at window size 20 were achieved using a Beta of 0.01, a Lambda (Sparse) of 0.5, and a Gamma (Smooth) of 0.2.
