@@ -259,7 +259,7 @@ class GAIA:
         metric_path = os.path.join(base_path, 'metric')
         run_path = os.path.join(base_path, 'run')
 
-# 1. Load and Pivot Metrics
+        # 1. Load and Pivot Metrics
         full_df = self.load_metrics_as_matrix(metric_path)
         
         # 2. Parse RCA Logs
@@ -271,16 +271,20 @@ class GAIA:
         raw_values = full_df.drop(columns=['timestamp']).values
         variances = np.var(raw_values, axis=0)
         
-        # We use a small epsilon (1e-6) to catch near-zero variance
-        live_sensor_indices = np.where(variances > 1e-6)[0]
-        
-        # Prune the metric matrix and the label matrix simultaneously
-        # full_df.columns[1:] corresponds to the metric names (skipping 'timestamp')
-        live_columns = ['timestamp'] + [full_df.columns[i+1] for i in live_sensor_indices]
+        # Define how many features you want to keep (e.g., top 100 or top 50%)
+        k = min(self.options["num_vars"], len(variances)) 
+
+        # Get indices of the k largest variances
+        top_k_indices = np.argsort(variances)[-k:]
+        # Ensure we sort them to maintain original sensor order
+        top_k_indices = np.sort(top_k_indices)
+
+        # Prune the metric matrix and labels
+        live_columns = ['timestamp'] + [full_df.columns[i+1] for i in top_k_indices]
         full_df = full_df[live_columns]
-        root_cause_labels = root_cause_labels[:, live_sensor_indices]
-        
-        print(f"Pruned {len(variances) - len(live_sensor_indices)} dead sensors.")
+        root_cause_labels = root_cause_labels[:, top_k_indices]
+
+        print(f"Selected top {k} sensors by variance. Dropped {len(variances) - k} columns.")
         # --------------------------------------
 
         # 3. Create Global Labels
