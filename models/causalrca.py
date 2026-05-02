@@ -113,6 +113,9 @@ class MLPDecoder(nn.Module):  # NOTE
 
         return mat_z, out, adj_A_tilt
 
+def _h_A(A):
+    expm_A = matrix_poly(A * A, A.shape[0])
+    return torch.trace(expm_A) - A.shape[0]
 
 # ========================================
 # VAE utility functions

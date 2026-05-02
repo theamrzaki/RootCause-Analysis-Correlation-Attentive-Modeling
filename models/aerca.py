@@ -336,9 +336,7 @@ class AERCA(nn.Module):
 
         # In decoding_causalrca
         # u_next comes from us (after sliding windows)
-        B_windowed = us.shape[0] - self.window_size  # number of valid windows
-        u_next = us[-B_windowed:, :]                 # (B_windowed, p)
-        input_z_windows = input_z[-B_windowed:, :]   # (B_windowed, p)
+        input_z_windows = input_z  # NO slicing
 
         # Call MLPDecoder with aligned batch
         mat_z, preds, _ = self.decoder(
@@ -354,6 +352,7 @@ class AERCA(nn.Module):
         if preds.dim() == 3:
             preds = preds.squeeze(-1)
 
+        u_next = us   
         # Final prediction
         nexts_hat = preds + u_next if add_u else preds
 
@@ -362,7 +361,7 @@ class AERCA(nn.Module):
         mat_z_flat = mat_z.squeeze(-1) if mat_z.dim() == 3 else mat_z  # (B, p)
         decoder_coeffs = torch.einsum('bi,bj->bij', mat_z_flat, mat_z_flat)  # (B,p,p)
         decoder_coeffs = decoder_coeffs.unsqueeze(1)  # (B,1,p,p)
-        prev_coeffs = torch.zeros(B_windowed, 1, p, p, device=us.device)
+        prev_coeffs = torch.zeros(B, 1, p, p, device=us.device)
 
 
         return nexts_hat, decoder_coeffs, prev_coeffs
@@ -403,7 +402,7 @@ class AERCA(nn.Module):
         if self.options["coeff_architecture"] == "causalrca":
             # as attnn_weights contains both the attn_weights and aux vars used by the decoder
             nexts_hat, decoder_coeffs, prev_coeffs = self.decoding(us, winds, add_u=add_u,aux_vars=attn_weights[1])
-            attn_weights = attn_weights[0]
+            attn_weights = attn_weights[1]
         elif self.options["coeff_architecture"] in self.models_encoder_only:
             #no decoder, so return empty tensors
             nexts_hat = preds 
@@ -411,7 +410,6 @@ class AERCA(nn.Module):
             prev_coeffs = torch.tensor([])
         else:
             nexts_hat, decoder_coeffs, prev_coeffs = self.decoding(us, winds, add_u=add_u)
-        attn_weights = winds #TODO, clean it afterwards
         return nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us, attn_weights
     
     def _training_step(self, x, add_u=True):
@@ -440,12 +438,20 @@ class AERCA(nn.Module):
         loss_kl = kl_div# if self.options["coeff_architecture"] not in self.models_encoder_only else torch.tensor(0.0)
         logging.info('KL loss: %s', loss_kl.item())
 
+        # constraint DAG if causla RCA
+        if self.options["coeff_architecture"] == "causalrca":
+            from models import causalrca
+            loss_DAG = causalrca._h_A(attns["adj_A1"])
+        else:
+            loss_DAG = torch.tensor(0.0)
         loss = (loss_recon +
                 self.encoder_lambda * loss_encoder_coeffs +
                 self.decoder_lambda * (loss_decoder_coeffs + loss_prev_coeffs) +
                 self.encoder_gamma * loss_encoder_smooth +
                 self.decoder_gamma * (loss_decoder_smooth + loss_prev_smooth) +
-                self.beta * loss_kl)
+                self.beta * loss_kl +  
+                loss_DAG #only for causal RCA
+                )
         logging.info('Total loss: %s', loss.item())
 
         losses_to_log = {
@@ -457,6 +463,7 @@ class AERCA(nn.Module):
             "loss_decoder_smooth": loss_decoder_smooth.item(),
             "loss_prev_smooth": loss_prev_smooth.item(),
             "loss_kl": loss_kl.item(),
+            "loss_DAG": loss_DAG.item() if self.options["coeff_architecture"] == "causalrca" else 0.0
         }
         tensorboard_log = {f'training_step/{key}': value for key, value in losses_to_log.items()}
         for key, value in tensorboard_log.items():
