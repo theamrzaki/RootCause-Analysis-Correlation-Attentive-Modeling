@@ -136,4 +136,104 @@ class StatisticalRCA:
             k_all.append(topk(z_scores_final, current_labels, threshold=0.5))
             k_at_step_all.append(topk_at_step(z_scores_final, current_labels))
 
+        return StatisticalRCA._summarize(k_all, k_at_step_all)  
+                                         
+    @staticmethod
+    def evaluate_torai(xs, labels, n_components=None):
+        from sklearn.mixture import GaussianMixture
+        from pyrca.analyzers.rcd import RCD, RCDConfig
+        
+        k_all = []
+        k_at_step_all = []
+        num_vars = xs[0].shape[1]
+        
+        for i in tqdm(range(len(xs)), desc="Faithful TORAI Eval"):
+            window_data = xs[i]
+            split_idx = int(0.7 * len(window_data))
+            
+            # Step 1: Metric Z-Score Ranking (Coarse Stage)
+            metric_ranks = []
+            normal_part = window_data[:split_idx]
+            anomal_part = window_data[split_idx:]
+            
+            for col_idx in range(num_vars):
+                a = normal_part[:, col_idx]
+                b = anomal_part[:, col_idx]
+                scaler = StandardScaler().fit(a.reshape(-1, 1))
+                zscores = np.abs(scaler.transform(b.reshape(-1, 1)))
+                metric_ranks.append(np.max(zscores))
+            
+            # Normalize scores (Faithful to: x[1] / sum(...) logic)
+            total_sum = sum(metric_ranks) + 1e-9
+            norm_ranks = [s / total_sum for s in metric_ranks]
+            
+            # Step 2: Prepare GMM Feature Matrix (Faithful to: X_train = m.to_numpy())
+            X_train = np.array(norm_ranks).reshape(-1, 1)
+
+            # Step 3: Optimal Cluster Selection (Faithful to: bic_score_all logic)
+            if n_components is None:
+                bic_scores = []
+                n_range = range(1, min(num_vars, 10) + 1)
+                for n in n_range:
+                    gmm = GaussianMixture(n_components=n, max_iter=50, random_state=0).fit(X_train)
+                    bic_scores.append(gmm.bic(X_train))
+                n_comp_opt = n_range[np.argmin(bic_scores)]
+            else:
+                n_comp_opt = n_components
+
+            # Step 4: Clustering & Cluster Ranking (Faithful to: cluster_rank.sort)
+            estimator = GaussianMixture(n_components=n_comp_opt, max_iter=50, random_state=0).fit(X_train)
+            y_pred = estimator.predict(X_train)
+            
+            cluster_info = []
+            for c_idx in range(n_comp_opt):
+                indices = np.where(y_pred == c_idx)[0]
+                if len(indices) > 0:
+                    cluster_score = X_train[indices].mean()
+                    cluster_info.append((c_idx, cluster_score))
+            cluster_info.sort(key=lambda x: x[1], reverse=True)
+
+            # Step 5: Final Ranking (Faithful to: service_ranks_rcd logic)
+            final_ordered_indices = []
+            for c_idx, _ in cluster_info:
+                indices_in_cluster = np.where(y_pred == c_idx)[0]
+                
+                if len(indices_in_cluster) == 1:
+                    final_ordered_indices.append(indices_in_cluster[0])
+                else:
+                    # Sort internally by score first (Faithful to: aa.sort logic)
+                    internal_scores = [(idx, norm_ranks[idx]) for idx in indices_in_cluster]
+                    internal_scores.sort(key=lambda x: x[1], reverse=True)
+                    
+                    # Causal Refinement (Faithful to: _rcd_multimodal call)
+                    try:
+                        # Convert to DF for PyRCA RCD
+                        vars_in_cluster = [f"var_{idx}" for idx in indices_in_cluster]
+                        norm_df = pd.DataFrame(normal_part[:, indices_in_cluster], columns=vars_in_cluster)
+                        anom_df = pd.DataFrame(anomal_part[:, indices_in_cluster], columns=vars_in_cluster)
+                        
+                        rcd_model = RCD(config=RCDConfig(bins=5, gamma=5))
+                        rc_results = rcd_model.find_root_causes(norm_df, anom_df)
+                        
+                        rcd_ordered = [int(node[0].replace("var_", "")) for node in rc_results.root_cause_nodes]
+                        # Append RCD results, then fill in remaining cluster members
+                        final_ordered_indices.extend(rcd_ordered)
+                        for idx, _ in internal_scores:
+                            if idx not in final_ordered_indices:
+                                final_ordered_indices.append(idx)
+                    except:
+                        # Fallback to internal sorted scores
+                        final_ordered_indices.extend([x[0] for x in internal_scores])
+
+            # Step 6: Format Output for your Top-K
+            z_scores_final = np.zeros(num_vars)
+            for rank, idx in enumerate(final_ordered_indices):
+                # Higher score = higher rank (earlier in list)
+                z_scores_final[idx] = num_vars - rank 
+            
+            z_scores_exp = np.expand_dims(z_scores_final, axis=0)
+            current_labels = np.max(labels[i], axis=0, keepdims=True)
+            k_all.append(topk(z_scores_exp, current_labels, threshold=0.5))
+            k_at_step_all.append(topk_at_step(z_scores_exp, current_labels))
+
         return StatisticalRCA._summarize(k_all, k_at_step_all)
