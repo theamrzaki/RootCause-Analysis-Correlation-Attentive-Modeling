@@ -4,8 +4,8 @@ import logging
 import argparse
 import numpy as np
 
-from datasets import linear, lotka_volterra, lorenz96, swat, nonlinear, msds, smd, wadi, aiops
-from args import linear_args, lotka_volterra_args, lorenz96_args, swat_args, msds_args, nonlinear_args, sock_args, smd_args, wadi_args, aiops_args
+from datasets import linear, lotka_volterra, lorenz96, swat, nonlinear, msds, smd, wadi, aiops, gaia
+from args import linear_args, lotka_volterra_args, lorenz96_args, swat_args, msds_args, nonlinear_args, sock_args, smd_args, wadi_args, aiops_args, gaia_args
 from models import aerca, iTransformer, FEDformer
 from utils import utils
 import warnings
@@ -91,6 +91,12 @@ def main(argv):
             "args": aiops_args.create_arg_parser,
             "dataset_class": aiops.aiops,
             "log_file": "aiops.log",
+            "use_slice": False
+        },
+        "gaia": {
+            "args": gaia_args.create_arg_parser,
+            "dataset_class": gaia.GAIA,
+            "log_file": "gaia.log",
             "use_slice": False
         }
     }
@@ -241,17 +247,12 @@ def main(argv):
         test_x_ab = data_class.data_dict['x_ab_list']
         test_label = data_class.data_dict['label_list']
     print('Start testing AERCA model for root cause analysis...')
-    # if coeff rcd or epsilon diagnosis -> _testing_root_cause_old
-    # else -> _testing_root_cause
-    if options['coeff_architecture'] in ['rcd', 'epsilon_diagnosis']:
-        aerca_model._testing_root_cause_old(test_x_ab, test_label)
+    # dataset is aiops
+    if options['dataset_name'] == 'aiops':
+        aerca_model._testing_root_cause_services_metrics(test_x_ab, test_label)
+        #aerca_model._testing_root_cause(test_x_ab, test_label)
     else:
-        # dataset is aiops
-        if options['dataset_name'] == 'aiops':
-            aerca_model._testing_root_cause_services_metrics(test_x_ab, test_label)
-            #aerca_model._testing_root_cause(test_x_ab, test_label)
-        else:
-            aerca_model._testing_root_cause(test_x_ab, test_label)
+        aerca_model._testing_root_cause(test_x_ab, test_label)
     print('Done testing for root cause analysis')
 
 

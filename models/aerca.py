@@ -68,7 +68,8 @@ class AERCA(nn.Module):
         # For nexts: (B, num_vars)
         self.nexts_proj = nn.Linear(self.num_modalities * self.num_vars_mod, self.num_vars).to(device)
 
-        self.models_encoder_only = ["GVAR","vlinear"] 
+        self.models_encoder_only = ["GVAR","vlinear","cLSTM"] 
+        self.models_simple_next_step = ["cLSTM"]
         if(self.options["coeff_architecture"] in self.models_encoder_only):
             self._log_and_print('Number of parameters in encoder: {}', self._count_parameters(self.encoder))
             self.total_params = (self._count_parameters(self.encoder)  )
@@ -216,7 +217,36 @@ class AERCA(nn.Module):
 
         self.local_model_name =family_of_exp + datetime_str+ f"{str(window_size)}_{str(lr)}_{str(self.options['seed'])}_window_{str(self.window_size)}" 
         self.writer = SummaryWriter(log_dir=os.path.join(self.save_dir, "runs", self.local_model_name))
-                
+        self.init_weights()
+
+    def init_weights(self):
+        print("Initializing weights...")
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.LayerNorm):
+                nn.init.ones_(m.weight)
+                nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.LSTM):
+                for name, param in m.named_parameters():
+                    if 'weight_ih' in name:
+                        nn.init.xavier_uniform_(param.data)
+                    elif 'weight_hh' in name:
+                        nn.init.orthogonal_(param.data)
+                    elif 'bias' in name:
+                        nn.init.zeros_(param.data)
+        
+        # CRITICAL for vlinear: Initialize raw nn.Parameters
+        for name, param in self.named_parameters():
+            if 'delta_latent' in name or 'embeddings' in name:
+                if param.dim() > 1:
+                    nn.init.xavier_uniform_(param.data)
+                else:
+                    nn.init.normal_(param.data)
+
+
     def _count_parameters(self, model):
         num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
         # view it with commas
@@ -232,6 +262,10 @@ class AERCA(nn.Module):
         norm2 = torch.mean(torch.norm(coeffs, dim=1, p=2))
         norm1 = torch.mean(torch.norm(coeffs, dim=1, p=1))
         return (1 - alpha) * norm2 + alpha * norm1
+
+    def _sparsity_loss_cLSTM(self, W, alpha):
+        group_norm = torch.norm(W, dim=0, p=2)
+        return torch.sum(group_norm)
 
     def _smoothness_loss(self, coeffs):
         # coeffs shape: [Batch, Sensors, Sensors] -> [64, 30, 30]
@@ -417,8 +451,17 @@ class AERCA(nn.Module):
         loss_recon = self.mse_loss(nexts_hat, nexts)
         logging.info('Reconstruction loss: %s', loss_recon.item())
 
-        loss_encoder_coeffs = self._sparsity_loss(encoder_coeffs, self.encoder_alpha) 
+        if self.options["coeff_architecture"] in self.models_simple_next_step:
+            loss_encoder_coeffs = torch.zeros((), device=self.device)
+        else:
+            loss_encoder_coeffs = self._sparsity_loss(encoder_coeffs, self.encoder_alpha)
         logging.info('Encoder coeffs loss: %s', loss_encoder_coeffs.item())
+        if self.options["coeff_architecture"] == "cLSTM":
+            for net in self.encoder.coeff_net.networks:
+                loss_encoder_coeffs += self._sparsity_loss_cLSTM(
+                    net.lstm.weight_ih_l0,
+                    torch.tensor(self.encoder_alpha, device=net.lstm.weight_ih_l0.device)
+                )
 
         loss_decoder_coeffs = self._sparsity_loss(decoder_coeffs, self.decoder_alpha) if self.options["coeff_architecture"] not in self.models_encoder_only else torch.tensor(0.0)
         logging.info('Decoder coeffs loss: %s', loss_decoder_coeffs.item())
@@ -426,7 +469,7 @@ class AERCA(nn.Module):
         loss_prev_coeffs = self._sparsity_loss(prev_coeffs, self.decoder_alpha) if self.options["coeff_architecture"] not in self.models_encoder_only else torch.tensor(0.0)
         logging.info('Prev coeffs loss: %s', loss_prev_coeffs.item())
 
-        loss_encoder_smooth = self._smoothness_loss(encoder_coeffs)
+        loss_encoder_smooth = self._smoothness_loss(encoder_coeffs) if self.options["coeff_architecture"] not in self.models_simple_next_step else torch.tensor(0.0)
         logging.info('Encoder smooth loss: %s', loss_encoder_smooth.item())
 
         loss_decoder_smooth = self._smoothness_loss(decoder_coeffs) if self.options["coeff_architecture"] not in self.models_encoder_only else torch.tensor(0.0)
@@ -435,7 +478,7 @@ class AERCA(nn.Module):
         loss_prev_smooth = self._smoothness_loss(prev_coeffs) if self.options["coeff_architecture"] not in self.models_encoder_only else torch.tensor(0.0)
         logging.info('Prev smooth loss: %s', loss_prev_smooth.item())
 
-        loss_kl = kl_div# if self.options["coeff_architecture"] not in self.models_encoder_only else torch.tensor(0.0)
+        loss_kl = kl_div if self.options["coeff_architecture"] not in self.models_simple_next_step else torch.tensor(0.0)
         logging.info('KL loss: %s', loss_kl.item())
 
         # constraint DAG if causla RCA

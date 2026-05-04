@@ -48,7 +48,7 @@ run_vlinear() {
                                     --window_size="$window_size_item" \
 
                                     --training_aerca=1 \
-                                    --epochs=60 \
+                                    --epochs=100 \
                                     --early_stopping=0 \
                                     --combine_method="attention" \
                                     --results_csv="RQ_1_gaia_allmodels.csv" \
@@ -103,7 +103,7 @@ run_GVAR() {
                                     --window_size="$window_size_item" \
 
                                     --training_aerca=1 \
-                                    --epochs=60 \
+                                    --epochs=100 \
                                     --early_stopping=0 \
                                     --preprocessing_data=$preprocessing_data \
                                     --combine_method="attention" \
@@ -158,7 +158,7 @@ run_cLSTM() {
                                     --window_size="$window_size_item" \
 
                                     --training_aerca=1 \
-                                    --epochs=60 \
+                                    --epochs=100 \
                                     --early_stopping=0 \
                                     --preprocessing_data=$preprocessing_data \
                                     --combine_method="attention" \
@@ -212,7 +212,7 @@ run_causalrca() {
                                     --window_size="$window_size_item" \
 
                                     --training_aerca=1 \
-                                    --epochs=60 \
+                                    --epochs=100 \
                                     --early_stopping=0 \
                                     --preprocessing_data=$preprocessing_data \
                                     --combine_method="attention" \
@@ -269,18 +269,19 @@ run_experiment_baselines() {
 
 for window_size_item in "${window_size[@]}"; do
     for seed in "${seeds[@]}"; do
-        if [ $seed -eq 1 ]; then
+        if [ $seed -eq 2 ]; then
             preprocessing_data=1
         else
             preprocessing_data=0
         fi
-        run_vlinear $preprocessing_data $seed $window_size_item
+        #run_vlinear $preprocessing_data $seed $window_size_item
+        run_cLSTM $preprocessing_data $seed $window_size_item
         if [ $preprocessing_data -eq 1 ]; then
             preprocessing_data=0
         fi
-        run_GVAR $preprocessing_data $seed $window_size_item
-        run_causalrca $preprocessing_data $seed $window_size_item
-        run_experiment_baselines $preprocessing_data $seed $window_size_item
-        run_cLSTM $preprocessing_data $seed $window_size_item
+        #run_GVAR $preprocessing_data $seed $window_size_item
+        #run_causalrca $preprocessing_data $seed $window_size_item
+        #run_experiment_baselines $preprocessing_data $seed $window_size_item
+        #run_cLSTM $preprocessing_data $seed $window_size_item
     done
 done

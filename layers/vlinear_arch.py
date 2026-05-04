@@ -221,7 +221,7 @@ class OrthTransform(nn.Module):
         # x: [Batch, Window, Channels] (e.g., 20, 36, 51)
         target_len = self.Q.shape[0] # 1000
         current_len = x.shape[1]    # 36
-        disable_orth = False 
+        disable_orth = False
         if disable_orth:
             # IDENTITY MODE: Pure temporal pass-through
             # No spectral mixing happens here.
@@ -373,81 +373,3 @@ class vlinear(nn.Module):
 
         return preds, coeffs_time, coeffs_freq
     
-import math
-
-class vlinear_new(nn.Module):
-    def __init__(self, num_vars, order, hidden_dim=256, device="cpu", options=None):
-        super().__init__()
-        self.num_vars = num_vars  
-        self.order = order * 1 - 1       
-        self.device = device
-        self.orth_transformer = options.get('orth_transformer') 
-        
-        # 1. Delta Biases (Contextual Offsets)
-        self.delta1 = nn.Parameter(torch.zeros(1, num_vars, 1, self.order))
-        self.delta2 = nn.Parameter(torch.zeros(1, num_vars, 1, self.order))
-
-        # 2. Dynamic Latent Projections
-        self.embeddings = nn.Parameter(torch.randn(1, num_vars, 1, hidden_dim))
-        self.temporal_proj = nn.Linear(1, hidden_dim)
-        
-        # --- NEW: Expressive Sensor Interaction (Q/K Projections) ---
-        # Instead of raw dot product, we project to a lower-dim space for interaction
-        self.q_proj = nn.Linear(hidden_dim, hidden_dim // 4)
-        self.k_proj = nn.Linear(hidden_dim, hidden_dim // 4)
-        
-        # --- NEW: Learned Temporal Gating ---
-        # Balance between the "Extreme" (Max) and "Recent" (Last step) signal
-        self.gate_layer = nn.Linear(hidden_dim, 1)
-
-        self.vf = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim * 2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim * 2, self.order) 
-        )
-
-    def forward(self, inputs: torch.Tensor):
-        B, O_curr, P = inputs.shape 
-        
-        # --- 1. Domain Transformation ---
-        if self.orth_transformer is None:
-            x_orth = inputs.transpose(1, 2) 
-        else:
-            x_orth = self.orth_transformer(inputs) 
-        
-        # --- 2. Feature Embedding ---
-        x_orth_biased = x_orth.unsqueeze(-2) + self.delta1
-        x_t = x_orth_biased.squeeze(-2).transpose(1, 2).unsqueeze(-1)
-        
-        # cond shape: [B, T, P, H]
-        cond = self.temporal_proj(x_t) * self.embeddings.transpose(1, 2) 
-        
-        # --- 3. Enhanced Dynamic Coefficients (Anti-Smear) ---
-        # Using Q/K interaction for more complex dependency modeling
-        q = self.q_proj(cond) # [B, T, P, H/4]
-        k = self.k_proj(cond) # [B, T, P, H/4]
-        coeffs_time = torch.einsum('btph, btqh -> btpq', q, k)
-        coeffs_time = torch.tanh(coeffs_time)
-
-        # --- 4. Adaptive Temporal Pooling ---
-        # Identify the most relevant temporal signal using a learned gate
-        z_max, _ = torch.max(cond, dim=1)  # [B, P, H]
-        z_last = cond[:, -1, :, :]         # [B, P, H]
-        
-        # Compute gate: [B, P, 1]
-        alpha = torch.sigmoid(self.gate_layer(z_last))
-        z_final = alpha * z_last + (1 - alpha) * z_max
-
-        # --- 5. Reconstruction/Forecasting ---
-        v_pred = self.vf(z_final).unsqueeze(-2) + self.delta2
-        v_pred = v_pred.squeeze(-2) 
-
-        if self.orth_transformer is None:
-            preds_all_time = v_pred.transpose(1, 2)
-        else:
-            preds_all_time = self.orth_transformer.inverse(v_pred)
-        
-        preds = preds_all_time[:, -1, :] 
-        coeffs_freq = coeffs_time[:, 0, :, :] 
-
-        return preds, coeffs_time, coeffs_freq
