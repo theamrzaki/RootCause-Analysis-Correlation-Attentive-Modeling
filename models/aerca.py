@@ -1056,11 +1056,28 @@ class AERCA(nn.Module):
         feature_names = [self.idx_to_feature[str(i)] for i in range(self.num_vars)]
 
         coeff_architecture = self.options["coeff_architecture"]
-        
         # 1. Baseline check
-        if coeff_architecture == "rcd":
-            rcd_result = self._evaluate_rcd(xs, labels, bins=None, gamma=5)
-            return rcd_result
+        if coeff_architecture in ["rcd", "baro", "nsigma", "torai"]:
+            if coeff_architecture == "rcd":
+                res = StatisticalRCA.evaluate_rcd(xs, labels)
+            elif coeff_architecture == "baro":
+                res = StatisticalRCA.evaluate_baro(xs, labels)
+            elif coeff_architecture == "nsigma":
+                res = StatisticalRCA.evaluate_nsigma(xs, labels)
+            elif coeff_architecture == "torai":
+                res = StatisticalRCA.evaluate_torai(xs, labels)
+            if res:
+                k_at_step_all = res["avg_k_at_step"]
+                self._log_and_print('Root cause analysis AC@1: {:.5f}', k_at_step_all[0])
+                self._log_and_print('Root cause analysis AC@3: {:.5f}', k_at_step_all[2])
+                self._log_and_print('Root cause analysis AC@10: {:.5f}', k_at_step_all[9])
+                
+                # Write results for the RQ tables
+                write_results(self.options, self.local_model_name, 
+                              [k_at_step_all[0], k_at_step_all[2], k_at_step_all[4], k_at_step_all[9]], 
+                              k_at_step_all, 0, self.options.get("results_csv"))
+            return res
+
 
         # 2. Model Loading & Setup
         self.load_state_dict(torch.load(os.path.join(self.save_dir, f'{self.model_name}.pt'), map_location=self.device))
@@ -1147,7 +1164,25 @@ class AERCA(nn.Module):
                 def parse(name):
                     node = name.split('.')[0]
                     service = name.split('.')[1].split("-")[0]
-                    metric = name.split('-')[-1]
+
+                    # preserve fault keyword explicitly
+                    lower = name.lower()
+
+                    if "cpu" in lower:
+                        metric = "cpu"
+                    elif "mem" in lower:
+                        metric = "mem"
+                    elif "disk" in lower or "io" in lower:
+                        metric = "disk"
+                    elif "socket" in lower:
+                        metric = "socket"
+                    elif "lat" in lower or "delay" in lower:
+                        metric = "delay"
+                    elif "loss" in lower:
+                        metric = "loss"
+                    else:
+                        metric = "unknown"
+
                     return node, service, metric
 
                 gt_nodes = set(parse(m)[0] for m in gt_completes)
@@ -1198,7 +1233,11 @@ class AERCA(nn.Module):
                     self._log_and_print(f'AC@{k}: {acc:.5f}')
             
             write_results(self.options, self.local_model_name, [k_at_step_all[0], k_at_step_all[2], k_at_step_all[4], k_at_step_all[9]], 
-                          k_at_step_all, self.total_params, self.options.get("results_csv"))
+                          k_at_step_all, self.total_params, self.options.get("results_csv"),
+                          metric_results={k: v / valid_samples for k, v in results["metric"].items()},
+                          node_results={k: v / valid_samples for k, v in results["node"].items()},
+                          service_results={k: v / valid_samples for k, v in results["service"].items()},
+                          RCA_coverage=(valid_samples/len(xs))*100)
         else:
             self._log_and_print("Zero valid samples found.")
 

@@ -284,92 +284,170 @@ class RevIN(nn.Module):
         elif mode == 'denorm':
             x = (x - self.beta) / (self.gamma + self.eps)
             return x * self.sigma + self.mu
-        
-class vlinear(nn.Module):
+  
+
+class vlinear_old(nn.Module):
     def __init__(self, num_vars, order, hidden_dim=256, device="cpu", options=None):
         super().__init__()
         self.num_vars = num_vars  
-        self.order = order*1  -1      
+        self.order = order*1  -1  
         self.device = device
-        
         self.orth_transformer = options.get('orth_transformer') 
         
-        # 1. Delta Biases (Faithful to Model logic)
-        # These act as "Learned Context" for the orthogonal domain
-        # delta1: [1, Channels, 1, Lag]
+        # 1. Delta Biases
         self.delta_latent1 = nn.Parameter(torch.randn(1, num_vars, hidden_dim))
         self.delta_latent2 = nn.Parameter(torch.randn(1, num_vars, hidden_dim))
-
-        # Projection to match the output 'order'
         self.bias_proj = nn.Linear(hidden_dim, self.order)
         
-        # 2. Updated Embeddings 
-        # In the Model code, embeddings are often 1D and expanded
-        #self.embeddings = nn.Parameter(torch.randn(1, hidden_dim))
+        # 2. Embeddings & Projections
         self.embeddings = nn.Parameter(torch.randn(1, num_vars, 1, hidden_dim))
-        # 3. Projection matching the Model's logic
-        #self.temporal_proj = nn.Linear(self.order, hidden_dim)
         self.temporal_proj = nn.Linear(1, hidden_dim)
-        #self.temporal_proj = nn.Sequential(
-        #    nn.Linear(1, hidden_dim // 2),
-        #    nn.GELU(),
-        #    nn.Linear(hidden_dim // 2, hidden_dim)
-        #)
-        self.a = nn.Parameter(torch.randn(num_vars))
-        self.ln = nn.LayerNorm(hidden_dim)
-        self.vf = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim*2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim*2, self.order) 
+        
+        # 3. Contrastive weighting layer 
+        # This helps the model learn WHICH parts of the window indicate an anomaly
+        self.temporal_weight = nn.Sequential(
+            nn.Linear(hidden_dim, 1),
+            nn.Softmax(dim=1)
         )
-        #self.revin = RevIN(num_vars)
+
+        self.vf = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim * 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim * 2, self.order) 
+        )
 
     def forward(self, inputs: torch.Tensor):
-        B, O_curr, P = inputs.shape # [B, Window, Sensors] e.g., [B, 2, 51]
+        B, T, P = inputs.shape # [Batch, Window, Sensors]
         
         # --- 1. Step into Orthogonal Domain ---
         if self.orth_transformer is None:
-            x_orth = inputs.transpose(1, 2) # [B, 51, 2]
+            x_orth = inputs.transpose(1, 2) # [B, P, T]
         else:
-            x_orth = self.orth_transformer(inputs) # [B, 51, 2]
+            x_orth = self.orth_transformer(inputs)
         
         # --- 2. Apply Delta1 Latent Bias ---
-        # Project delta_latent1 [1, P, H] -> [1, P, Order]
-        # Then unsqueeze to [1, P, 1, Order] for broadcasting
         d1 = self.bias_proj(self.delta_latent1).unsqueeze(-2) 
-        x_orth_biased = x_orth.unsqueeze(-2) + d1 # [B, P, 1, Order]
+        x_orth_biased = x_orth.unsqueeze(-2) + d1 
         
         # --- 3. Truly Dynamic Latent Generation ---
-        # [B, P, 1, Order] -> [B, Order, P, 1]
-        x_t = x_orth_biased.squeeze(-2).transpose(1, 2).unsqueeze(-1)
+        x_t = x_orth_biased.squeeze(-2).transpose(1, 2).unsqueeze(-1) # [B, T, P, 1]
+        cond = self.temporal_proj(x_t) * self.embeddings.transpose(1, 2) # [B, T, P, H]
         
-        # Project each sensor at each time step into H-space
-        # cond: [B, Order, P, H]
-        cond = self.temporal_proj(x_t) * self.embeddings.transpose(1, 2) 
+        # --- 4. Contrastive Aggregation (The "BARO Killer" Logic) ---
+        # Split window into History (Normal) and Current (Anomalous) like BARO
+        split_idx = int(0.7 * T)
+        cond_history = cond[:, :split_idx, :, :]
+        cond_current = cond[:, split_idx:, :, :]
         
-        # --- 4. Dynamic AERCA Coefficients ---
-        # Creates a unique PxP matrix for every step in the window
-        coeffs_time = torch.einsum('btph, btqh -> btpq', cond, cond)
-        coeffs_time = torch.tanh(coeffs_time)
+        # BARO logic: Mean of history vs Max of current
+        # This highlights the DEVIATION rather than the raw value
+        z_hist_mean = torch.mean(cond_history, dim=1) # [B, P, H]
+        z_curr_max, _ = torch.max(cond_current, dim=1) # [B, P, H]
+        
+        # Feature Delta: This represents how much each sensor "jumped"
+        z_final = z_curr_max - z_hist_mean 
+        
+        # --- 5. Dynamic AERCA Coefficients ---
+        # We use the 'z_final' to build the correlation matrix
+        coeffs_time = torch.einsum('bph, bqh -> bpq', z_final, z_final)
+        coeffs_time = torch.tanh(coeffs_time).unsqueeze(1) # [B, 1, P, P]
 
-        # --- 5. Prediction (Forecasting) ---
-        # Aggregate temporal info using max pooling (as per your best results)
-        z_final, _ = torch.max(cond, dim=1) # [B, P, H]
-        
-        # Apply the second Latent Bias to the forecast
-        # vf(z_final) -> [B, P, Order]
-        # d2 -> [1, P, Order]
+        # --- 6. Prediction (Forecasting) ---
         d2 = self.bias_proj(self.delta_latent2)
         v_pred = self.vf(z_final) + d2 # [B, P, Order]
 
         if self.orth_transformer is None:
-            preds_all_time = v_pred.transpose(1, 2) # [B, Order, P]
+            preds_all_time = v_pred.transpose(1, 2)
         else:
             preds_all_time = self.orth_transformer.inverse(v_pred)
         
-        # Final forecast is the last step of the predicted window
         preds = preds_all_time[:, -1, :] 
-        coeffs_freq = coeffs_time[:, 0, :, :] # First step coefficients
+        coeffs_freq = coeffs_time[:, 0, :, :] 
 
         return preds, coeffs_time, coeffs_freq
     
+
+import torch
+import torch.nn as nn
+
+class vlinear(nn.Module):
+    def __init__(self, num_vars, order, hidden_dim=256, device="cpu", options=None):
+        super().__init__()
+        self.num_vars = num_vars  
+        self.order = order * 1 - 1  
+        self.device = device
+        self.orth_transformer = options.get('orth_transformer') 
+        
+        # 1. Delta Biases
+        self.delta_latent1 = nn.Parameter(torch.randn(1, num_vars, hidden_dim))
+        self.delta_latent2 = nn.Parameter(torch.randn(1, num_vars, hidden_dim))
+        self.bias_proj = nn.Linear(hidden_dim, self.order)
+        
+        # 2. Embeddings & Projections
+        self.embeddings = nn.Parameter(torch.randn(1, num_vars, 1, hidden_dim))
+        self.temporal_proj = nn.Linear(1, hidden_dim)
+        
+        # 3. Value Function for forecasting
+        self.vf = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim * 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim * 2, self.order) 
+        )
+
+    def forward(self, inputs: torch.Tensor):
+        B, T, P = inputs.shape # [Batch, Window, Sensors]
+        
+        # --- 1. Step into Orthogonal Domain ---
+        if self.orth_transformer is None:
+            x_orth = inputs.transpose(1, 2) # [B, P, T]
+        else:
+            x_orth = self.orth_transformer(inputs)
+        
+        # --- 2. Apply Delta1 Latent Bias ---
+        d1 = self.bias_proj(self.delta_latent1).unsqueeze(-2) 
+        x_orth_biased = x_orth.unsqueeze(-2) + d1 
+        
+        # --- 3. Truly Dynamic Latent Generation ---
+        x_t = x_orth_biased.squeeze(-2).transpose(1, 2).unsqueeze(-1) # [B, T, P, 1]
+        cond = self.temporal_proj(x_t) * self.embeddings.transpose(1, 2) # [B, T, P, H]
+        
+        # --- 4. Enhanced Contrastive Aggregation (Standardized Delta) ---
+        split_idx = int(0.7 * T)
+        cond_history = cond[:, :split_idx, :, :]
+        cond_current = cond[:, split_idx:, :, :]
+        
+        # Calculate mean and standard deviation of history in latent space
+        z_hist_mean = torch.mean(cond_history, dim=1) # [B, P, H]
+        z_hist_std = torch.std(cond_history, dim=1) + 1e-5 # [B, P, H]
+        
+        # Max of current anomalous segment
+        z_curr_max, _ = torch.max(cond_current, dim=1) # [B, P, H]
+        
+        # Standardized Latent Delta: Highlights significant changes relative to past noise
+        # This acts as a "Neural Z-Score"
+        z_final = (z_curr_max - z_hist_mean) / z_hist_std 
+        
+        # --- 5. Dynamic AERCA Coefficients ---
+        # Building the correlation matrix based on standardized deviations
+        coeffs_time = torch.einsum('bph, bqh -> bpq', z_final, z_final)
+        coeffs_time = torch.tanh(coeffs_time).unsqueeze(1) # [B, 1, P, P]
+
+        # --- 6. Prediction (Forecasting) ---
+        d2 = self.bias_proj(self.delta_latent2)
+        v_pred = self.vf(z_final) + d2 # [B, P, Order]
+
+        if self.orth_transformer is None:
+            preds_all_time = v_pred.transpose(1, 2)
+        else:
+            preds_all_time = self.orth_transformer.inverse(v_pred)
+        
+        preds = preds_all_time[:, -1, :] 
+        coeffs_freq = coeffs_time[:, 0, :, :] 
+
+        return preds, coeffs_time, coeffs_freq
+    
+
+
+
+
+

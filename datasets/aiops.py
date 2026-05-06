@@ -1,4 +1,5 @@
 import os
+import shutil
 import json
 import torch
 import pandas as pd
@@ -184,7 +185,7 @@ class aiops:
         df = self.get_wide_table()
         avg_suggested_interval, reason = self.predict_best_sampling_rate(df)  # Optional: Get sampling rate suggestions based on the data
         
-        df = df.iloc[::3, :]  # Resample the data based on the suggested interval (assuming original is 1 minute)
+        df = df.iloc[::1, :]  # Resample the data based on the suggested interval (assuming original is 1 minute)
         print(f"Data resampled to every {avg_suggested_interval} seconds. Reason: {reason}")
         
         # 2. Top-K Volatility (Coefficient of Variation)
@@ -269,6 +270,11 @@ class aiops:
               f"x_ab {self.data_dict['x_ab_list'].shape}")
         
         self.save_data()
+        # delete orth folder if exists to avoid confusion with old orth matrices
+        orth_matrix_dir = os.path.join(self.data_dir, 'orth_transform_meta')
+        if os.path.exists(orth_matrix_dir):
+            print(f"Removing old orthogonal transform metadata at {orth_matrix_dir} to avoid confusion.")
+            shutil.rmtree(orth_matrix_dir)
 
     def save_data(self):
         if not os.path.exists(self.data_dir): os.makedirs(self.data_dir)
