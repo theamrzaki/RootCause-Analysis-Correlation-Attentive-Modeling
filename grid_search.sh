@@ -14,8 +14,8 @@ WINDOW_SIZES=(6 20 30 10)
 BETA_VALS=(0.01 0.05) # Small beta was the winner
 LAMBDA_VALS=(0.5 1.0) # Testing higher sparsity for cleaner HitRate@1
 GAMMA_VALS=(0.2 0.5)
-DATASET="gaia" # Switching to your current successful dataset
-coeff_architecture=("GVAR")
+DATASET="smd" # Switching to your current successful dataset
+coeff_architecture=("vlinear")
 RESULTS_FILE="grid_search_results.csv"
 
 for win in "${WINDOW_SIZES[@]}"; do
