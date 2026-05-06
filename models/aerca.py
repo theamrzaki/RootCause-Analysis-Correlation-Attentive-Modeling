@@ -1,4 +1,5 @@
 import json
+import time
 import os
 from models.senn import SENNGC
 import torch.nn as nn
@@ -20,7 +21,8 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import pandas as pd
-
+import psutil
+import threading    
 class AERCA(nn.Module):
     def __init__(self, num_vars: int, hidden_layer_size: int, num_hidden_layers: int, device: torch.device,
                  window_size: int, stride: int = 1, encoder_alpha: float = 0.5, decoder_alpha: float = 0.5,
@@ -916,9 +918,10 @@ class AERCA(nn.Module):
         plt.savefig(f"results/case_study_heatmap({dataset_name})({coeff_architecture}).pdf")
         plt.show()
 
+
     def _testing_root_cause(self, xs, labels, alpha: float = 0.5, use_attention_fusion: bool = False):
         coeff_architecture = self.options["coeff_architecture"]
-        
+
         # 1. Baseline check
         if coeff_architecture in ["rcd", "baro", "nsigma", "torai"]:
             if coeff_architecture == "rcd":
@@ -929,100 +932,183 @@ class AERCA(nn.Module):
                 res = StatisticalRCA.evaluate_nsigma(xs, labels)
             elif coeff_architecture == "torai":
                 res = StatisticalRCA.evaluate_torai(xs, labels)
+
             if res:
                 k_at_step_all = res["avg_k_at_step"]
                 self._log_and_print('Root cause analysis AC@1: {:.5f}', k_at_step_all[0])
                 self._log_and_print('Root cause analysis AC@3: {:.5f}', k_at_step_all[2])
                 self._log_and_print('Root cause analysis AC@10: {:.5f}', k_at_step_all[9])
-                
-                # Write results for the RQ tables
-                write_results(self.options, self.local_model_name, 
-                              [k_at_step_all[0], k_at_step_all[2], k_at_step_all[4], k_at_step_all[9]], 
-                              k_at_step_all, 0, self.options.get("results_csv"))
+
+                write_results(
+                    self.options,
+                    self.local_model_name,
+                    [k_at_step_all[0], k_at_step_all[2], k_at_step_all[4], k_at_step_all[9]],
+                    k_at_step_all,
+                    0,
+                    self.options.get("results_csv"),
+                )
             return res
 
         # 2. Model Loading & Setup
-        self.load_state_dict(torch.load(os.path.join(self.save_dir, f'{self.model_name}.pt'), map_location=self.device))
+        self.load_state_dict(
+            torch.load(os.path.join(self.save_dir, f'{self.model_name}.pt'),
+                    map_location=self.device)
+        )
         self.eval()
-        
-        # Load normalization stats
-        self.us_mean_encoder = np.load(os.path.join(self.save_dir, f'{self.model_name}_us_mean_encoder.npy'))
-        self.us_std_encoder = np.load(os.path.join(self.save_dir, f'{self.model_name}_us_std_encoder.npy'))
 
-        us_list = []        # For global POT threshold
-        us_sample_list = [] # For individual sample evaluation
+        self.us_mean_encoder = np.load(
+            os.path.join(self.save_dir, f'{self.model_name}_us_mean_encoder.npy')
+        )
+        self.us_std_encoder = np.load(
+            os.path.join(self.save_dir, f'{self.model_name}_us_std_encoder.npy')
+        )
+
+        # =========================================================
+        # MEMORY TRACKING (UNIFIED CPU + GPU)
+        # =========================================================
+        use_cuda = torch.cuda.is_available() and self.device != "cpu"
+
+        if use_cuda:
+            torch.cuda.reset_peak_memory_stats()
+
+        process = psutil.Process(os.getpid())
+
+        peak_mem_bytes = {"value": 0}
+        stop_event = threading.Event()
+
+        def memory_poller():
+            """CPU memory polling for true peak tracking."""
+            while not stop_event.is_set():
+                mem = process.memory_info().rss
+                if mem > peak_mem_bytes["value"]:
+                    peak_mem_bytes["value"] = mem
+                time.sleep(0.01)  # 10ms resolution
+
+        monitor_thread = None
+        if not use_cuda:
+            monitor_thread = threading.Thread(target=memory_poller)
+            monitor_thread.start()
+
+        model_mem_mb = self.total_params * 4 / (1024 ** 2)
+
+        us_list = []
+        us_sample_list = []
         attn_list = []
-        
+
+        # ============================
+        # NEW METRIC STORAGE (ADDED ONLY)
+        # ============================
+        inference_times = []
+        mrr_list = []
+        hr1_list, hr3_list, hr5_list, hr10_list = [], [], [], []
+
         # 3. Inference Loop
         with torch.no_grad():
             for i in tqdm(range(len(xs)), desc="Inference"):
-                x = xs[i] # Current window: [25, 30]
+                x = xs[i]
                 label = labels[i]
-                
-                # Forward pass - encoding handles unsqueeze and slicing
-                _, _, _, _, _, _, _, us, attn_weights = self._testing_step(x, label, add_u=False)
-                
-                # PRECISION FIX: us is [1, 30], we take the whole thing
-                # No more [self.window_size:] slicing which resulted in empty arrays
-                u_numpy = us.cpu().numpy() # [1, 30]
+
+                _, _, _, _, _, _, _, us, attn_weights = self._testing_step(
+                    x, label, add_u=False
+                )
+
+                u_numpy = us.cpu().numpy()
                 us_sample_list.append(u_numpy)
                 us_list.append(u_numpy)
-                
+
                 if use_attention_fusion:
                     attn_mean = attn_weights.mean(dim=0).cpu().numpy()
                     attn_list.append(attn_mean)
 
         # 4. Global POT Threshold Calculation
-        us_all = np.concatenate(us_list, axis=0) # [Total_Windows, num_vars]
+        us_all = np.concatenate(us_list, axis=0)
         us_all_z_score = (-(us_all - self.us_mean_encoder) / self.us_std_encoder)
-        
+
         us_all_z_score_pot = []
         for i in range(self.num_vars):
             col_data = us_all_z_score[:, i]
             col_data = col_data[np.isfinite(col_data)]
-            
+
             if col_data.size == 0:
                 us_all_z_score_pot.append(0.0)
                 continue
-                
+
             try:
                 pot_val, _ = pot(col_data, self.risk, self.initial_level, self.num_candidates)
             except:
-                # Robust fallback: 3-Sigma
                 pot_val = np.mean(col_data) + 3 * np.std(col_data)
+
             us_all_z_score_pot.append(pot_val)
-        
+
         us_all_z_score_pot = np.array(us_all_z_score_pot)
+
+
+        # =========================================================
+        # 🔹 STOP MEMORY TRACKING
+        # =========================================================
+        if not use_cuda:
+            stop_event.set()
+            monitor_thread.join()
+
+            # final correction sample
+            final_mem = process.memory_info().rss
+            peak_mem_mb = max(peak_mem_bytes["value"], final_mem) / (1024 ** 2)
+        else:
+            peak_mem_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
 
         # 5. Top-K Evaluation
         k_all = []
         k_at_step_all = []
-        
+
         for i in tqdm(range(len(xs)), desc="Top-K Evaluation"):
-            us_sample = us_sample_list[i] # [1, 30]
+            start_time = time.time()
+
+            us_sample = us_sample_list[i]
             z_scores = (-(us_sample - self.us_mean_encoder) / self.us_std_encoder)
-            
+
             if use_attention_fusion:
                 attn_per_lag = attn_list[i].mean(axis=2)
                 attn_importance = attn_per_lag.mean(axis=0)
-                attn_importance = np.expand_dims(attn_importance, axis=0).repeat(z_scores.shape[0], axis=0)
+                attn_importance = np.expand_dims(attn_importance, axis=0).repeat(
+                    z_scores.shape[0], axis=0
+                )
                 z_scores = alpha * z_scores + (1 - alpha) * attn_importance
 
-            # LABEL ALIGNMENT FIX:
-            # We are predicting the very last step of the input window i.
-            # Therefore, we compare z_scores [1, 30] with the LAST row of labels[i].
-            #current_labels = labels[i][-1:] # [1, 30]
-            # Change this: current_labels = labels[i][-1:]
-            # To this:
-            # This takes the max across the window. If ANY sensor is an anomaly 
-            # at ANY point in the 25-step window, we evaluate it.
             current_labels = np.max(labels[i], axis=0, keepdims=True)
+
             try:
-                # TopK requires (Time, Vars) shapes. Both are [1, 30] here.
                 k_lst = topk(z_scores, current_labels, us_all_z_score_pot)
                 k_at_step = topk_at_step(z_scores, current_labels)
+
                 k_all.append(k_lst)
                 k_at_step_all.append(k_at_step)
+
+                # ============================
+                # NEW METRICS (ADDED ONLY)
+                # ============================
+
+                ranking = np.argsort(-z_scores[0])
+                true_idx = np.where(current_labels[0] == 1)[0]
+
+                # MRR
+                rr = 0.0
+                for rank, idx in enumerate(ranking, start=1):
+                    if idx in true_idx:
+                        rr = 1.0 / rank
+                        break
+                mrr_list.append(rr)
+
+                # HR@K
+                def hit(k):
+                    return int(any(idx in ranking[:k] for idx in true_idx))
+
+                hr1_list.append(hit(1))
+                hr3_list.append(hit(3))
+                hr5_list.append(hit(5))
+                hr10_list.append(hit(10))
+                
+                inference_times.append(time.time() - start_time)
+
             except Exception as e:
                 self._log_and_print("Error computing top-k for sample {}: {}", i, str(e))
                 continue
@@ -1030,23 +1116,69 @@ class AERCA(nn.Module):
         # 6. Result Aggregation
         valid_samples = len(k_all)
         total_samples = len(xs)
-        
-        self._log_and_print("RCA Coverage: {}/{} ({:.2f}%)", valid_samples, total_samples, (valid_samples/total_samples)*100)
-        
+        coverage = valid_samples / total_samples if total_samples > 0 else 0.0
+
+        self._log_and_print(
+            "RCA Coverage: {}/{} ({:.2f}%)",
+            valid_samples,
+            total_samples,
+            coverage * 100,
+        )
+
         if valid_samples > 0:
-            k_all = np.array(k_all).mean(axis=0)
             k_at_step_all = np.array(k_at_step_all).mean(axis=0)
-            
+
+            # ============================
+            # NEW METRIC AGGREGATION
+            # ============================
+            mrr = np.mean(mrr_list)
+            hr1, hr3, hr5, hr10 = map(
+                np.mean, [hr1_list, hr3_list, hr5_list, hr10_list]
+            )
+            auc_k = np.mean(k_at_step_all[:10])
+            std_ac = np.std(np.array(k_at_step_all))
+
+            avg_time = np.mean(inference_times)
+            throughput = 1.0 / avg_time if avg_time > 0 else 0.0
+
             self._log_and_print('Root cause analysis AC@1: {:.5f}', k_at_step_all[0])
             self._log_and_print('Root cause analysis AC@3: {:.5f}', k_at_step_all[2])
             self._log_and_print('Root cause analysis AC@5: {:.5f}', k_at_step_all[4])
             self._log_and_print('Root cause analysis AC@10: {:.5f}', k_at_step_all[9])
-            
-            # Save results
-            write_results(self.options, self.local_model_name, [k_at_step_all[0], k_at_step_all[2], k_at_step_all[4], k_at_step_all[9]], 
-                          k_at_step_all, self.total_params, self.options.get("results_csv"))
+
+            # NEW LOGS
+            self._log_and_print("MRR: {:.5f}", mrr)
+            self._log_and_print("HR@1/3/5/10: {:.5f} {:.5f} {:.5f} {:.5f}",
+                                hr1, hr3, hr5, hr10)
+            self._log_and_print("Avg time: {:.6f}s | Throughput: {:.2f} samples/s",
+                                avg_time, throughput)
+
+            write_results(
+                self.options,
+                self.local_model_name,
+                [k_at_step_all[0], k_at_step_all[2], k_at_step_all[4], k_at_step_all[9]],
+                k_at_step_all,
+                self.total_params,
+                self.options.get("results_csv"),
+                extra_metrics={
+                    "mrr": mrr,
+                    "hr@1": hr1,
+                    "hr@3": hr3,
+                    "hr@5": hr5,
+                    "hr@10": hr10,
+                    "auc@10": auc_k,
+                    "std_ac": std_ac,
+                    "coverage": coverage,
+                    "avg_time": avg_time,
+                    "throughput": throughput,
+                    "model_mem_mb": model_mem_mb,
+                    "peak_mem_mb": peak_mem_mb,
+                },
+            )
         else:
-            self._log_and_print("Zero valid samples found. Check if labels[i][-1] contains any anomalies.")
+            self._log_and_print(
+                "Zero valid samples found. Check if labels[i][-1] contains any anomalies."
+            )
 
     def _testing_root_cause_services_metrics(self, xs, labels, alpha: float = 0.5, use_attention_fusion: bool = False):
         # 0. Feature Mapping Setup
@@ -1233,7 +1365,7 @@ class AERCA(nn.Module):
                     self._log_and_print(f'AC@{k}: {acc:.5f}')
             
             write_results(self.options, self.local_model_name, [k_at_step_all[0], k_at_step_all[2], k_at_step_all[4], k_at_step_all[9]], 
-                          k_at_step_all, self.total_params, self.options.get("results_csv"),
+                          k_at_step_all, self.total_params, self.options.get("results_csv")+"_microservice",
                           metric_results={k: v / valid_samples for k, v in results["metric"].items()},
                           node_results={k: v / valid_samples for k, v in results["node"].items()},
                           service_results={k: v / valid_samples for k, v in results["service"].items()},
