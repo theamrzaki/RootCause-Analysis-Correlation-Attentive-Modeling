@@ -1,9 +1,9 @@
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate RCAEval
 
-seeds=(2 3)
+seeds=(1)
 dataset="gaia"
-window_size=(12)
+window_size=(8)
 lrs=("1e-4")
 
 BETA_VAL=0.01
@@ -292,7 +292,7 @@ done
 
 #seeds=(1 2 3)
 #dataset="gaia"
-#window_size=(4 6 10 12 14 18)
+#window_size=(8)
 #lrs=("1e-4")
 #
 #for window_size_item in "${window_size[@]}"; do
