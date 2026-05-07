@@ -128,7 +128,7 @@ def main(argv):
 
     # Set the random seed for reproducibility.
     utils.set_seed(options['seed'])
-    print('Set seed: {}, lr: {}'.format(options['seed'], options["lr"]), 'window_size:', options['window_size'])
+    print('Set seed: {}, lr: {}'.format(options['seed'], options["lr"]), 'window_size:', options['window_size'], 'encoder_alpha:', options['encoder_alpha'], 'decoder_alpha:', options['decoder_alpha'], 'encoder_gamma:', options['encoder_gamma'], 'decoder_gamma:', options['decoder_gamma'], 'encoder_lambda:', options['encoder_lambda'], 'decoder_lambda:', options['decoder_lambda'], 'beta:', options['beta'])
     print(f"shrinkage :{options['shrinkage']}")
     # Instantiate the dataset class and generate or load data based on the preprocessing flag.
     data_class = mapping["dataset_class"](options)
@@ -249,8 +249,8 @@ def main(argv):
     print('Start testing AERCA model for root cause analysis...')
     # dataset is aiops
     if options['dataset_name'] == 'aiops':
+        aerca_model._testing_root_cause(test_x_ab, test_label)
         aerca_model._testing_root_cause_services_metrics(test_x_ab, test_label)
-        #aerca_model._testing_root_cause(test_x_ab, test_label)
     else:
         aerca_model._testing_root_cause(test_x_ab, test_label)
     print('Done testing for root cause analysis')

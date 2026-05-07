@@ -918,7 +918,24 @@ class AERCA(nn.Module):
         plt.savefig(f"results/case_study_heatmap({dataset_name})({coeff_architecture}).pdf")
         plt.show()
 
+    def _estimate_model_memory_mb(self):
+        """
+        Dynamically estimate model memory usage based on actual parameter + buffer dtype.
+        More accurate than fixed FP32 assumption.
+        """
 
+        total_bytes = 0
+
+        # Parameters
+        for p in self.parameters():
+            total_bytes += p.numel() * p.element_size()
+
+        # Buffers (BatchNorm, running stats, etc.)
+        for b in self.buffers():
+            total_bytes += b.numel() * b.element_size()
+
+        return total_bytes / (1024 ** 2)
+    
     def _testing_root_cause(self, xs, labels, alpha: float = 0.5, use_attention_fusion: bool = False):
         coeff_architecture = self.options["coeff_architecture"]
 
@@ -989,7 +1006,7 @@ class AERCA(nn.Module):
             monitor_thread = threading.Thread(target=memory_poller)
             monitor_thread.start()
 
-        model_mem_mb = self.total_params * 4 / (1024 ** 2)
+        model_mem_mb = self._estimate_model_memory_mb()
 
         us_list = []
         us_sample_list = []

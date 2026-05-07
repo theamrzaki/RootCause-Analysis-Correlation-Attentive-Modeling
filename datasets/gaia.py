@@ -304,10 +304,23 @@ class GAIA:
         
         # 4. Segmenting (Mirroring SMD Processors)
         # Normal data: slices where global_labels == 0
-        normal_indices = np.where(global_labels == 0)[0]
-        # For simplicity, we take contiguous normal blocks
-        normal_data = scaled_data[normal_indices]
-        x_n_list = self.process_normal(normal_data, self.window_size)
+        normal_mask = (global_labels == 0)
+        x_n_list = []
+
+        start = None
+        for i in range(len(normal_mask)):
+            if normal_mask[i] and start is None:
+                start = i
+            elif not normal_mask[i] and start is not None:
+                if i - start >= self.window_size:
+                    segment = scaled_data[start:i]
+                    x_n_list.extend(self.process_normal(segment, self.window_size))
+                start = None
+
+        # handle tail
+        if start is not None and len(normal_mask) - start >= self.window_size:
+            segment = scaled_data[start:]
+            x_n_list.extend(self.process_normal(segment, self.window_size))
 
         # Abnormal data: concentrated windows around onsets
         # We wrap scaled_data back into a DF temporarily for your processor

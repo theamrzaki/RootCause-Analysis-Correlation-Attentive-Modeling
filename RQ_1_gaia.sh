@@ -1,9 +1,9 @@
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate RCAEval
 
-seeds=(2 3)
+seeds=(1 2 3)
 dataset="gaia"
-window_size=(30 10 20 6)
+window_size=(8 16)
 lrs=("1e-4")
 
 BETA_VAL=0.01
@@ -48,10 +48,10 @@ run_vlinear() {
                                     --window_size="$window_size_item" \
 
                                     --training_aerca=1 \
-                                    --epochs=100 \
+                                    --epochs=200 \
                                     --early_stopping=0 \
                                     --combine_method="attention" \
-                                    --results_csv="RQ_1_gaia_allmodels.csv" \
+                                    --results_csv="RQ_1_gaia_allmodels_30vars.csv" \
 
                                     --attention_dim="$attention_dim" \
                                     --num_attention_heads="$heads" \
@@ -103,11 +103,11 @@ run_GVAR() {
                                     --window_size="$window_size_item" \
 
                                     --training_aerca=1 \
-                                    --epochs=100 \
+                                    --epochs=200 \
                                     --early_stopping=0 \
                                     --preprocessing_data=$preprocessing_data \
                                     --combine_method="attention" \
-                                    --results_csv="RQ_1_gaia_allmodels.csv" \
+                                    --results_csv="RQ_1_gaia_allmodels_30vars.csv" \
 
                                     --attention_dim="$attention_dim" \
                                     --num_attention_heads="$heads" \
@@ -158,11 +158,11 @@ run_cLSTM() {
                                     --window_size="$window_size_item" \
 
                                     --training_aerca=1 \
-                                    --epochs=100 \
+                                    --epochs=200 \
                                     --early_stopping=0 \
                                     --preprocessing_data=$preprocessing_data \
                                     --combine_method="attention" \
-                                    --results_csv="RQ_1_gaia_allmodels.csv" \
+                                    --results_csv="RQ_1_gaia_allmodels_30vars.csv" \
 
                                     --attention_dim="$attention_dim" \
                                     --num_attention_heads="$heads" \
@@ -212,11 +212,11 @@ run_causalrca() {
                                     --window_size="$window_size_item" \
 
                                     --training_aerca=1 \
-                                    --epochs=100 \
+                                    --epochs=200 \
                                     --early_stopping=0 \
                                     --preprocessing_data=$preprocessing_data \
                                     --combine_method="attention" \
-                                    --results_csv="RQ_1_gaia_allmodels.csv" \
+                                    --results_csv="RQ_1_gaia_allmodels_30vars.csv" \
 
                                     --attention_dim="$attention_dim" \
                                     --num_attention_heads="$heads" \
@@ -241,7 +241,7 @@ run_experiment_baselines() {
     local seed=$2
     local window_size_item=$3
 
-    local coeff_architecture=("rcd" "epsilon_diagnosis" "baro" "torai")
+    local coeff_architecture=("torai")
     local main_model="aerca_based" # Changed from array to string
 
     for arch in "${coeff_architecture[@]}"; do
@@ -255,7 +255,7 @@ run_experiment_baselines() {
             --window_size=$window_size_item \
             --main_model=$main_model \
             --training_aerca=0 \
-            --results_csv=RQ_1_gaia_allmodels.csv" # Removed the comment/backslash error here
+            --results_csv=RQ_1_gaia_allmodels_30vars.csv" # Removed the comment/backslash error here
 
         eval $cmd
     done
@@ -269,19 +269,18 @@ run_experiment_baselines() {
 
 for window_size_item in "${window_size[@]}"; do
     for seed in "${seeds[@]}"; do
-        if [ $seed -eq 2 ]; then
+        if [ $seed -eq 1 ]; then
             preprocessing_data=1
         else
             preprocessing_data=0
         fi
-        #run_vlinear $preprocessing_data $seed $window_size_item
-        run_cLSTM $preprocessing_data $seed $window_size_item
+        run_vlinear $preprocessing_data $seed $window_size_item
+        
         if [ $preprocessing_data -eq 1 ]; then
             preprocessing_data=0
         fi
-        #run_GVAR $preprocessing_data $seed $window_size_item
-        #run_causalrca $preprocessing_data $seed $window_size_item
+        run_GVAR $preprocessing_data $seed $window_size_item
         #run_experiment_baselines $preprocessing_data $seed $window_size_item
-        #run_cLSTM $preprocessing_data $seed $window_size_item
+       # run_cLSTM $preprocessing_data $seed $window_size_item
     done
 done

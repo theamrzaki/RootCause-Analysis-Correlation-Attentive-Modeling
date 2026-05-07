@@ -3,7 +3,7 @@ conda activate RCAEval
 
 seeds=(1)
 dataset="aiops"
-window_size=(6 10 20 30)
+window_size=(6)
 lrs=("1e-4")
 
 BETA_VAL=0.01
@@ -51,7 +51,7 @@ run_vlinear() {
                                     --epochs=200 \
                                     --early_stopping=0 \
                                     --combine_method="attention" \
-                                    --results_csv="RQ_1_aiops_allmodels.csv" \
+                                    --results_csv="RQ_1_aiops_allmodels_detailed.csv" \
 
                                     --attention_dim="$attention_dim" \
                                     --num_attention_heads="$heads" \
@@ -107,7 +107,7 @@ run_GVAR() {
                                     --early_stopping=0 \
                                     --preprocessing_data=$preprocessing_data \
                                     --combine_method="attention" \
-                                    --results_csv="RQ_1_aiops_allmodels.csv" \
+                                    --results_csv="RQ_1_aiops_allmodels_detailed.csv" \
 
                                     --attention_dim="$attention_dim" \
                                     --num_attention_heads="$heads" \
@@ -162,7 +162,7 @@ run_cLSTM() {
                                     --early_stopping=0 \
                                     --preprocessing_data=$preprocessing_data \
                                     --combine_method="attention" \
-                                    --results_csv="RQ_1_aiops_allmodels.csv" \
+                                    --results_csv="RQ_1_aiops_allmodels_detailed.csv" \
 
                                     --attention_dim="$attention_dim" \
                                     --num_attention_heads="$heads" \
@@ -216,7 +216,7 @@ run_causalrca() {
                                     --early_stopping=0 \
                                     --preprocessing_data=$preprocessing_data \
                                     --combine_method="attention" \
-                                    --results_csv="RQ_1_aiops_allmodels.csv" \
+                                    --results_csv="RQ_1_aiops_allmodels_detailed.csv" \
 
                                     --attention_dim="$attention_dim" \
                                     --num_attention_heads="$heads" \
@@ -255,7 +255,7 @@ run_experiment_baselines() {
             --window_size=$window_size_item \
             --main_model=$main_model \
             --training_aerca=0 \
-            --results_csv=RQ_1_aiops_allmodels.csv" # Removed the comment/backslash error here
+            --results_csv=RQ_1_aiops_allmodels_detailed.csv" # Removed the comment/backslash error here
 
         eval $cmd
     done
@@ -274,13 +274,12 @@ for window_size_item in "${window_size[@]}"; do
         else
             preprocessing_data=0
         fi
-        #run_vlinear $preprocessing_data $seed $window_size_item
-        run_experiment_baselines $preprocessing_data $seed $window_size_item
+        run_vlinear $preprocessing_data $seed $window_size_item
         if [ $preprocessing_data -eq 1 ]; then
             preprocessing_data=0
         fi
         #run_GVAR $preprocessing_data $seed $window_size_item
-        #
+        #run_experiment_baselines $preprocessing_data $seed $window_size_item
         #run_cLSTM $preprocessing_data $seed $window_size_item
     done
 done
