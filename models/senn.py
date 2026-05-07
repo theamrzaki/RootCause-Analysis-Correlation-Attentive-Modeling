@@ -4,6 +4,7 @@ import torch
 
 from layers.vlinear_arch import vlinear
 from layers.cLSTM import cLSTM
+from models.causalrca import causalrca
 class SENNGC(nn.Module):
     def __init__(self, num_vars: int, order: int, hidden_layer_size: int, num_hidden_layers: int,
                  args: dict,  device: torch.device):

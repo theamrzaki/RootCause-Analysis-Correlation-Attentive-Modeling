@@ -13,7 +13,7 @@ def create_arg_parser():
     # Dataset arguments
     parser.add_argument('--preprocessing_data', type=int, default=1, help='Flag for preprocessing data (default: 1)')
     parser.add_argument('--data_dir', type=str, default=os.path.join(os.getcwd(), 'datasets', 'gaia_data'), help='Data directory (default: ./datasets/gaia_data)')
-    parser.add_argument('--num_vars', type=int, default=30, help='Number of variables (default: 101 when working with 200 files, 248 when working with all files after removing constant features)')
+    parser.add_argument('--num_vars', type=int, default=50, help='Number of variables (default: 101 when working with 200 files, 248 when working with all files after removing constant features)')
     parser.add_argument('--causal_quantile', type=float, default=0.70, help='Causal quantile (default: 0.70)')
     parser.add_argument('--shuffle', type=int, default=1, help='Flag for shuffling data (default: 1)')
     parser.add_argument('--main_model', type=str, default='aerca', help='Main model to use (default: aerca)')
@@ -36,7 +36,7 @@ def create_arg_parser():
     parser.add_argument('--beta', type=float, default=0.01, help='Beta (default: 0.5)')
     parser.add_argument('--lr', type=float, default=0.0001, help='Learning rate (default: 0.000001)')
     parser.add_argument('--epochs', type=int, default=100, help='Number of epochs (default: 5000)')
-    parser.add_argument('--hidden_layer_size', type=int, default=256, help='Hidden layer size (default: 1000)')
+    parser.add_argument('--hidden_layer_size', type=int, default=128, help='Hidden layer size (default: 1000)')
     parser.add_argument('--num_hidden_layers', type=int, default=2, help='Number of hidden layers (default: 8)')
     parser.add_argument('--recon_threshold', type=float, default=0.90, help='Reconstruction threshold (default: 0.95)')
     parser.add_argument('--root_cause_threshold_encoder', type=float, default=0.99, help='Root cause threshold for encoder (default: 0.99)')

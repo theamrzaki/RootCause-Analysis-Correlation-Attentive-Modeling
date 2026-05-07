@@ -952,10 +952,55 @@ class AERCA(nn.Module):
 
             if res:
                 k_at_step_all = res["avg_k_at_step"]
+                scores_list = res["scores"]
+                labels_list = res["labels"]
+
+                mrr_list = []
+                hr1_list, hr3_list, hr5_list, hr10_list = [], [], [], []
+
+                for z_scores, current_labels in zip(scores_list, labels_list):
+
+                    ranking = np.argsort(-z_scores[0])
+                    true_idx = np.where(current_labels[0] == 1)[0]
+
+                    # MRR
+                    rr = 0.0
+                    for rank, idx in enumerate(ranking, start=1):
+                        if idx in true_idx:
+                            rr = 1.0 / rank
+                            break
+
+                    mrr_list.append(rr)
+
+                    # HR@K
+                    def hit(k):
+                        return int(any(idx in ranking[:k] for idx in true_idx))
+
+                    hr1_list.append(hit(1))
+                    hr3_list.append(hit(3))
+                    hr5_list.append(hit(5))
+                    hr10_list.append(hit(10))
+
+                mrr = np.mean(mrr_list)
+                hr1, hr3, hr5, hr10 = map(
+                    np.mean,
+                    [hr1_list, hr3_list, hr5_list, hr10_list]
+                )
+
+                auc_k = np.mean(k_at_step_all[:10])
+                std_ac = np.std(np.array(k_at_step_all))
                 self._log_and_print('Root cause analysis AC@1: {:.5f}', k_at_step_all[0])
                 self._log_and_print('Root cause analysis AC@3: {:.5f}', k_at_step_all[2])
                 self._log_and_print('Root cause analysis AC@10: {:.5f}', k_at_step_all[9])
+                self._log_and_print("MRR: {:.5f}", mrr)
 
+                self._log_and_print(
+                    "HR@1/3/5/10: {:.5f} {:.5f} {:.5f} {:.5f}",
+                    hr1, hr3, hr5, hr10
+                )
+                valid_samples = len(scores_list)
+                total_samples = len(xs)
+                coverage = valid_samples / total_samples if total_samples > 0 else 0.0
                 write_results(
                     self.options,
                     self.local_model_name,
@@ -963,6 +1008,20 @@ class AERCA(nn.Module):
                     k_at_step_all,
                     0,
                     self.options.get("results_csv"),
+                    extra_metrics={
+                        "mrr": mrr,
+                        "hr@1": hr1,
+                        "hr@3": hr3,
+                        "hr@5": hr5,
+                        "hr@10": hr10,
+                        "auc@10": auc_k,
+                        "std_ac": std_ac,
+                        "coverage": coverage,
+                        "avg_time": 0,
+                        "throughput": 0,
+                        "model_mem_mb": 0,
+                        "peak_mem_mb": 0,
+                    },
                 )
             return res
 

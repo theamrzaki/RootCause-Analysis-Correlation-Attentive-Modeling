@@ -12,6 +12,9 @@ class StatisticalRCA:
         """Unified loop for PyRCA-based analyzers to ensure consistent Top-K evaluation."""
         k_all = []
         k_at_step_all = []
+
+        all_scores = []
+        all_labels = []
         num_vars = xs[0].shape[1]
 
         for i in tqdm(range(len(xs)), desc="PyRCA Evaluation"):
@@ -43,20 +46,24 @@ class StatisticalRCA:
 
                 k_all.append(topk(z_scores_exp, current_labels, threshold=0.5))
                 k_at_step_all.append(topk_at_step(z_scores_exp, current_labels))
+                all_scores.append(z_scores_exp)
+                all_labels.append(current_labels)
             except Exception as e:
                 print(f"Method failed for window {i}: {e}")
                 continue
 
-        return StatisticalRCA._summarize(k_all, k_at_step_all)
+        return StatisticalRCA._summarize(k_all, k_at_step_all, all_scores=all_scores, all_labels=all_labels)
 
     @staticmethod
-    def _summarize(k_all, k_at_step_all):
+    def _summarize(k_all, k_at_step_all, all_scores=None, all_labels=None):
         """Aggregates results into the format expected by your logging."""
         if not k_all:
             return None
         return {
             "avg_k_all": np.array(k_all).mean(axis=0),
-            "avg_k_at_step": np.array(k_at_step_all).mean(axis=0)
+            "avg_k_at_step": np.array(k_at_step_all).mean(axis=0),
+            "scores": all_scores,
+            "labels": all_labels,
         }
 
     @staticmethod
@@ -69,6 +76,9 @@ class StatisticalRCA:
         """Classical statistical baseline: flags any sensor exceeding N standard deviations."""
         k_all = []
         k_at_step_all = []
+
+        all_scores = []
+        all_labels = []
         num_vars = xs[0].shape[1]
 
         for i in range(len(xs)):
@@ -83,8 +93,9 @@ class StatisticalRCA:
             current_labels = np.max(labels[i], axis=0, keepdims=True)
             k_all.append(topk(z_scores, current_labels, threshold=n))
             k_at_step_all.append(topk_at_step(z_scores, current_labels))
-
-        return StatisticalRCA._summarize(k_all, k_at_step_all)
+            all_scores.append(z_scores)
+            all_labels.append(current_labels)
+        return StatisticalRCA._summarize(k_all, k_at_step_all, all_scores=all_scores, all_labels=all_labels)
 
     @staticmethod
     def evaluate_baro(xs, labels, scalar_type="Robust", seq_len=1):
@@ -94,6 +105,9 @@ class StatisticalRCA:
         """
         k_all = []
         k_at_step_all = []
+
+        all_scores = []
+        all_labels = []
         num_vars = xs[0].shape[1]
         
         for i in range(len(xs)):
@@ -135,8 +149,10 @@ class StatisticalRCA:
             
             k_all.append(topk(z_scores_final, current_labels, threshold=0.5))
             k_at_step_all.append(topk_at_step(z_scores_final, current_labels))
+            all_scores.append(z_scores_final)
+            all_labels.append(current_labels)
 
-        return StatisticalRCA._summarize(k_all, k_at_step_all)  
+        return StatisticalRCA._summarize(k_all, k_at_step_all, all_scores=all_scores, all_labels=all_labels)  
                                          
     @staticmethod
     def evaluate_torai(xs, labels, n_components=None):
@@ -145,6 +161,9 @@ class StatisticalRCA:
         
         k_all = []
         k_at_step_all = []
+
+        all_scores = []
+        all_labels = []
         num_vars = xs[0].shape[1]
         
         for i in tqdm(range(len(xs)), desc="Faithful TORAI Eval"):
@@ -235,5 +254,7 @@ class StatisticalRCA:
             current_labels = np.max(labels[i], axis=0, keepdims=True)
             k_all.append(topk(z_scores_exp, current_labels, threshold=0.5))
             k_at_step_all.append(topk_at_step(z_scores_exp, current_labels))
+            all_scores.append(z_scores_exp)
+            all_labels.append(current_labels)
 
-        return StatisticalRCA._summarize(k_all, k_at_step_all)
+        return StatisticalRCA._summarize(k_all, k_at_step_all, all_scores=all_scores, all_labels=all_labels)

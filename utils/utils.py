@@ -413,7 +413,12 @@ def topk_at_step(scores, labels, k_range=10):
     return np.array(k_lst).reshape(-1, k_range).mean(axis=0)
 
 
-def write_results(args, local_model_name, ac_at,k_at_step_all, total_params,file_name='result.csv'):
+def write_results(args, local_model_name, ac_at,k_at_step_all, total_params,file_name='result.csv',
+                   metric_results=None,
+                   node_results=None,
+                   service_results=None,
+                   RCA_coverage=None,
+                   extra_metrics=None):
     file_path = "./results_journal/"+file_name
     #infodict = {'pr':ps, 'rc':rs, 'auc':auc, 'ap':ap, 'f1':effection}
     
@@ -463,7 +468,48 @@ def write_results(args, local_model_name, ac_at,k_at_step_all, total_params,file
         "decoder_gamma": args['decoder_gamma'] if 'decoder_gamma' in args else 0,
         "encoder_lambda (sparse)": args['encoder_lambda'] if 'encoder_lambda' in args else 0,
         "decoder_lambda": args['decoder_lambda'] if 'decoder_lambda' in args else 0,
-        "beta": args['beta'] if 'beta' in args else 0   
+        "beta": args['beta'] if 'beta' in args else 0   ,
+
+
+        # =========================
+        # METRIC LEVEL RCA
+        # =========================
+        'AC@1_metric': metric_results["top1"] if metric_results else 0,
+        'AC@3_metric': metric_results["top3"] if metric_results else 0,
+        'AC@5_metric': metric_results["top5"] if metric_results else 0,
+        'AC@10_metric': metric_results["top10"] if metric_results else 0,
+
+        # =========================
+        # NODE LEVEL RCA
+        # =========================
+        'AC@1_node': node_results["top1"] if node_results else 0,
+        'AC@3_node': node_results["top3"] if node_results else 0,
+        'AC@5_node': node_results["top5"] if node_results else 0,
+        'AC@10_node': node_results["top10"] if node_results else 0,
+
+        # =========================
+        # SERVICE LEVEL RCA
+        # =========================
+        'AC@1_service': service_results["top1"] if service_results else 0,
+        'AC@3_service': service_results["top3"] if service_results else 0,
+        'AC@5_service': service_results["top5"] if service_results else 0,
+        'AC@10_service': service_results["top10"] if service_results else 0,
+
+        'RCA_coverage': RCA_coverage if RCA_coverage is not None else "N/A",
+
+        
+        "mrr": extra_metrics["mrr"] if extra_metrics and "mrr" in extra_metrics else 0,
+        "hr@1": extra_metrics["hr@1"] if extra_metrics and "hr@1" in extra_metrics else 0,
+        "hr@3": extra_metrics["hr@3"] if extra_metrics and "hr@3" in extra_metrics else 0,
+        "hr@5": extra_metrics["hr@5"] if extra_metrics and "hr@5" in extra_metrics else 0,
+        "hr@10": extra_metrics["hr@10"] if extra_metrics and "hr@10" in extra_metrics else 0,
+        "auc@10": extra_metrics["auc@10"] if extra_metrics and "auc@10" in extra_metrics else 0,
+        "std_ac": extra_metrics["std_ac"] if extra_metrics and "std_ac" in extra_metrics else 0,
+        "coverage": extra_metrics["coverage"] if extra_metrics and "coverage" in extra_metrics else 0,
+        "avg_time": extra_metrics["avg_time"] if extra_metrics and "avg_time" in extra_metrics else 0,
+        "throughput": extra_metrics["throughput"] if extra_metrics and "throughput" in extra_metrics else 0,
+        "model_mem_mb": extra_metrics["model_mem_mb"] if extra_metrics and "model_mem_mb" in extra_metrics else 0,
+        "peak_mem_mb": extra_metrics["peak_mem_mb"] if extra_metrics and "peak_mem_mb" in extra_metrics else 0,
     }
     
 
