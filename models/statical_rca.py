@@ -42,8 +42,10 @@ class StatisticalRCA:
                 
                 # Consistency Fix: Align with your new label maxing logic
                 current_labels = np.max(labels[i], axis=0, keepdims=True)
+                if np.sum(current_labels) == 0:
+                    continue
                 z_scores_exp = np.expand_dims(z_scores, axis=0) # [1, num_vars]
-
+                
                 k_all.append(topk(z_scores_exp, current_labels, threshold=0.5))
                 k_at_step_all.append(topk_at_step(z_scores_exp, current_labels))
                 all_scores.append(z_scores_exp)
@@ -146,7 +148,8 @@ class StatisticalRCA:
             
             # Align with your label maxing logic
             current_labels = np.max(labels[i], axis=0, keepdims=True)
-            
+            if np.sum(current_labels) == 0:
+                continue
             k_all.append(topk(z_scores_final, current_labels, threshold=0.5))
             k_at_step_all.append(topk_at_step(z_scores_final, current_labels))
             all_scores.append(z_scores_final)
@@ -252,6 +255,8 @@ class StatisticalRCA:
             
             z_scores_exp = np.expand_dims(z_scores_final, axis=0)
             current_labels = np.max(labels[i], axis=0, keepdims=True)
+            if np.sum(current_labels) == 0:
+                continue
             k_all.append(topk(z_scores_exp, current_labels, threshold=0.5))
             k_at_step_all.append(topk_at_step(z_scores_exp, current_labels))
             all_scores.append(z_scores_exp)
