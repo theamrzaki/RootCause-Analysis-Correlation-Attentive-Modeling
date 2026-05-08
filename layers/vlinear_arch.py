@@ -437,8 +437,8 @@ class vlinear(nn.Module):
         coeffs_time = torch.tanh(coeffs_time)
 
         # --- 5. Prediction (Forecasting) ---
-        # Aggregate temporal info using max pooling (as per your best results)
-        z_final, _ = torch.max(cond, dim=1) # [B, P, H]
+        attn = torch.softmax(cond.norm(dim=-1), dim=1)  # [B, T, P]
+        z_final = (cond * attn.unsqueeze(-1)).sum(dim=1)
         
         # Apply the second Latent Bias to the forecast
         # vf(z_final) -> [B, P, Order]
