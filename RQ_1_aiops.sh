@@ -1,9 +1,9 @@
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate RCAEval
 
-seeds=(2 3)
+seeds=(4 5 6)
 dataset="aiops"
-window_size=(8 10 12 14 20)
+window_size=(8 10 12 14 16)
 lrs=("1e-4")
 
 BETA_VAL=0.01
@@ -242,13 +242,13 @@ run_experiment_baselines() {
     local seed=$2
     local window_size_item=$3
 
-    local coeff_architecture=("torai" "baro" "rcd")
+    local coeff_architecture=("rcd") #=("torai" "baro" "rcd")
     local main_model="aerca_based" # Changed from array to string
 
     for arch in "${coeff_architecture[@]}"; do
         echo "Running: dataset=$dataset | seed=$seed | arch=$arch | window_size=$window_size_item"
         # only run preprocessing for the first coeff_architecture to avoid redundant preprocessing
-        if [ $arch == "torai" ]; then
+        if [ $arch == "rcd" ]; then
             preprocessing_flag=$preprocessing_data
         else
             preprocessing_flag=0
@@ -277,7 +277,7 @@ run_experiment_baselines() {
 
 for window_size_item in "${window_size[@]}"; do
     for seed in "${seeds[@]}"; do
-        if [ $seed -eq 2 ]; then
+        if [ $seed -eq 4 ]; then
             preprocessing_data=1
         else
             preprocessing_data=0
@@ -289,5 +289,25 @@ for window_size_item in "${window_size[@]}"; do
         run_GVAR $preprocessing_data $seed $window_size_item
         #run_experiment_baselines $preprocessing_data $seed $window_size_item
         run_cLSTM $preprocessing_data $seed $window_size_item
+    done
+done
+
+    
+seeds=(4 5 6)
+dataset="gaia"
+window_size=(8 10 12 14 16)
+lrs=("1e-4")
+
+for window_size_item in "${window_size[@]}"; do
+    for seed in "${seeds[@]}"; do
+        if [ $seed -eq 1 ]; then
+            preprocessing_data=1
+        else
+            preprocessing_data=0
+        fi
+        run_experiment_baselines $preprocessing_data $seed $window_size_item
+        if [ $preprocessing_data -eq 1 ]; then
+            preprocessing_data=0
+        fi        
     done
 done
