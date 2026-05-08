@@ -1,9 +1,9 @@
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate RCAEval
 
-seeds=(4 5 6)
+seeds=(1 2 3)
 dataset="aiops"
-window_size=(8 10 12 14 16)
+window_size=(30)
 lrs=("1e-4")
 
 BETA_VAL=0.01
@@ -277,7 +277,7 @@ run_experiment_baselines() {
 
 for window_size_item in "${window_size[@]}"; do
     for seed in "${seeds[@]}"; do
-        if [ $seed -eq 4 ]; then
+        if [ $seed -eq 1 ]; then
             preprocessing_data=1
         else
             preprocessing_data=0
@@ -293,21 +293,21 @@ for window_size_item in "${window_size[@]}"; do
 done
 
     
-seeds=(4 5 6)
-dataset="gaia"
-window_size=(8 10 12 14 16)
-lrs=("1e-4")
-
-for window_size_item in "${window_size[@]}"; do
-    for seed in "${seeds[@]}"; do
-        if [ $seed -eq 1 ]; then
-            preprocessing_data=1
-        else
-            preprocessing_data=0
-        fi
-        run_experiment_baselines $preprocessing_data $seed $window_size_item
-        if [ $preprocessing_data -eq 1 ]; then
-            preprocessing_data=0
-        fi        
-    done
-done
+#seeds=(4 5 6)
+#dataset="gaia"
+#window_size=(8 10 12 14 16)
+#lrs=("1e-4")
+#
+#for window_size_item in "${window_size[@]}"; do
+#    for seed in "${seeds[@]}"; do
+#        if [ $seed -eq 1 ]; then
+#            preprocessing_data=1
+#        else
+#            preprocessing_data=0
+#        fi
+#        run_experiment_baselines $preprocessing_data $seed $window_size_item
+#        if [ $preprocessing_data -eq 1 ]; then
+#            preprocessing_data=0
+#        fi        
+#    done
+#done

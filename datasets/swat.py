@@ -167,8 +167,11 @@ class SWaT:
         if self.shuffle:
             np.random.seed(self.seed)
             indices = np.random.permutation(len(self.data_dict['x_n_list']))
+            self.data_dict['x_n_list'] = self.data_dict['x_n_list']
             self.data_dict['x_n_list'] = self.data_dict['x_n_list'][indices]
+        #(20, 3, 51)
         self.data_dict['x_ab_list'] = np.array(test_x_lst)
+        #(20, 3, 51)
         self.data_dict['label_list'] = np.array(test_label_lst)
 
     def save_data(self):
@@ -200,11 +203,15 @@ class SWaT:
         # 2. Transform Normal Data
         x_n_tensor = torch.from_numpy(self.data_dict['x_n_list']).float().to(device)
         with torch.no_grad():
+            #(164, 51, 1000)
             self.data_dict['x_n_orth'] = self.orth_transformer(x_n_tensor).cpu().numpy()
         
         # 3. Transform Abnormal (Attack) Data
+        # (20, 3, 51)
+        # label = (20, 3, 51)
         x_ab_tensor = torch.from_numpy(self.data_dict['x_ab_list']).float().to(device)
         with torch.no_grad():
+            #(20, 51, 3)
             self.data_dict['x_ab_orth'] = self.orth_transformer(x_ab_tensor).cpu().numpy()
         
         print(f"Orthogonal transformation complete. Shape: {self.data_dict['x_n_orth'].shape}")

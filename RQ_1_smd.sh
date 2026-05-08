@@ -1,7 +1,7 @@
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate RCAEval
 
-seeds=(2 3)
+seeds=(1 2 3)
 dataset="smd"
 window_size=(4 6 10 20 30)
 lrs=("1e-4")
@@ -51,7 +51,7 @@ run_vlinear() {
                                     --epochs=200 \
                                     --early_stopping=0 \
                                     --combine_method="attention" \
-                                    --results_csv="RQ_1_smd_allmodels.csv" \
+                                    --results_csv="RQ_1_smd_allmodels_8May.csv" \
 
                                     --attention_dim="$attention_dim" \
                                     --num_attention_heads="$heads" \
@@ -107,7 +107,7 @@ run_GVAR() {
                                     --early_stopping=0 \
                                     --preprocessing_data=$preprocessing_data \
                                     --combine_method="attention" \
-                                    --results_csv="RQ_1_smd_allmodels.csv" \
+                                    --results_csv="RQ_1_smd_allmodels_8May.csv" \
 
                                     --attention_dim="$attention_dim" \
                                     --num_attention_heads="$heads" \
@@ -162,7 +162,7 @@ run_cLSTM() {
                                     --early_stopping=0 \
                                     --preprocessing_data=$preprocessing_data \
                                     --combine_method="attention" \
-                                    --results_csv="RQ_1_smd_allmodels.csv" \
+                                    --results_csv="RQ_1_smd_allmodels_8May.csv" \
 
                                     --attention_dim="$attention_dim" \
                                     --num_attention_heads="$heads" \
@@ -216,7 +216,7 @@ run_causalrca() {
                                     --early_stopping=0 \
                                     --preprocessing_data=$preprocessing_data \
                                     --combine_method="attention" \
-                                    --results_csv="RQ_1_smd_allmodels.csv" \
+                                    --results_csv="RQ_1_smd_allmodels_8May.csv" \
 
                                     --attention_dim="$attention_dim" \
                                     --num_attention_heads="$heads" \
@@ -255,7 +255,7 @@ run_experiment_baselines() {
             --window_size=$window_size_item \
             --main_model=$main_model \
             --training_aerca=0 \
-            --results_csv=RQ_1_smd_allmodels.csv" # Removed the comment/backslash error here
+            --results_csv=RQ_1_smd_allmodels_8May.csv" # Removed the comment/backslash error here
 
         eval $cmd
     done
@@ -267,21 +267,54 @@ run_experiment_baselines() {
 #-----------------------------GAIA experiments-------------------------
 #-------------------------------------------------------------------
 
-for window_size_item in "${window_size[@]}"; do
-    for seed in "${seeds[@]}"; do
-        if [ $seed -eq 2 ]; then
+seeds=(1)
+
+for seed in "${seeds[@]}"; do
+    for window_size_item in "${window_size[@]}"; do
             preprocessing_data=1
-        else
-            preprocessing_data=0
-        fi
         run_vlinear $preprocessing_data $seed $window_size_item
-        if [ $preprocessing_data -eq 1 ]; then
             preprocessing_data=0
-        fi
         
 
-        #run_GVAR $preprocessing_data $seed $window_size_item
-        #run_experiment_baselines $preprocessing_data $seed $window_size_item
-        #run_cLSTM $preprocessing_data $seed $window_size_item
+        run_GVAR $preprocessing_data $seed $window_size_item
+        run_experiment_baselines $preprocessing_data $seed $window_size_item
+    done
+done
+
+
+
+for seed in "${seeds[@]}"; do
+    for window_size_item in "${window_size[@]}"; do
+        preprocessing_data=1
+        run_cLSTM $preprocessing_data $seed $window_size_item
+        preprocessing_data=0
+    done
+done
+
+
+
+
+
+seeds=(2 3)
+
+for seed in "${seeds[@]}"; do
+    for window_size_item in "${window_size[@]}"; do
+            preprocessing_data=1
+        run_vlinear $preprocessing_data $seed $window_size_item
+            preprocessing_data=0
+        
+
+        run_GVAR $preprocessing_data $seed $window_size_item
+        run_experiment_baselines $preprocessing_data $seed $window_size_item
+    done
+done
+
+
+
+for seed in "${seeds[@]}"; do
+    for window_size_item in "${window_size[@]}"; do
+        preprocessing_data=1
+        run_cLSTM $preprocessing_data $seed $window_size_item
+        preprocessing_data=0
     done
 done
