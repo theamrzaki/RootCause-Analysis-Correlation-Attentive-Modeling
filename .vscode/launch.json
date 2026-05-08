@@ -53,7 +53,7 @@
                 "--training_aerca", "0",
                 "--epochs", "60",
                 "--early_stopping", "0",
-                "--preprocessing_data", "1",
+                "--preprocessing_data", "0",
                 "--results_csv", "RQ_1_smd.csv",
 
                 "--attention_dim", "256",

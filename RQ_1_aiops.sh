@@ -3,7 +3,7 @@ conda activate RCAEval
 
 seeds=(1 2 3)
 dataset="aiops"
-window_size=(30)
+window_size=(8 12 16 20)
 lrs=("1e-4")
 
 BETA_VAL=0.01
@@ -274,33 +274,33 @@ run_experiment_baselines() {
 #-------------------------------------------------------------------
 #-----------------------------GAIA experiments-------------------------
 #-------------------------------------------------------------------
-
-##for window_size_item in "${window_size[@]}"; do
-##    for seed in "${seeds[@]}"; do
-##        if [ $seed -eq 1 ]; then
-##            preprocessing_data=1
-##        else
-##            preprocessing_data=0
-##        fi
-##        run_vlinear $preprocessing_data $seed $window_size_item
-##        if [ $preprocessing_data -eq 1 ]; then
-##            preprocessing_data=0
-##        fi
-##        run_GVAR $preprocessing_data $seed $window_size_item
-##        #run_experiment_baselines $preprocessing_data $seed $window_size_item
-##        run_cLSTM $preprocessing_data $seed $window_size_item
-##    done
-##done
-
-    
-seeds=(1 2 3 4 5 6)
-dataset="aiops"
-window_size=(16)
-lrs=("1e-4")
 for seed in "${seeds[@]}"; do
     for window_size_item in "${window_size[@]}"; do
-        preprocessing_data=1
-        run_experiment_baselines $preprocessing_data $seed $window_size_item
-        preprocessing_data=0
+    
+        #if [ $seed -eq 1 ]; then
+            preprocessing_data=1
+        #else
+        #    preprocessing_data=0
+        #fi
+        run_vlinear $preprocessing_data $seed $window_size_item
+        #if [ $preprocessing_data -eq 1 ]; then
+            preprocessing_data=0
+        #fi
+        #run_GVAR $preprocessing_data $seed $window_size_item
+        #run_experiment_baselines $preprocessing_data $seed $window_size_item
+        #run_cLSTM $preprocessing_data $seed $window_size_item
     done
 done
+
+    
+#seeds=(1 2 3 4 5 6)
+#dataset="aiops"
+#window_size=(16)
+#lrs=("1e-4")
+#for seed in "${seeds[@]}"; do
+#    for window_size_item in "${window_size[@]}"; do
+#        preprocessing_data=1
+#        run_experiment_baselines $preprocessing_data $seed $window_size_item
+#        preprocessing_data=0
+#    done
+#done
