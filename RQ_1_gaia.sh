@@ -1,9 +1,9 @@
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate RCAEval
 
-seeds=(1)
+seeds=(2 3)
 dataset="gaia"
-window_size=(8)
+window_size=(8 10 12 14)
 lrs=("1e-4")
 
 BETA_VAL=0.01
@@ -279,12 +279,13 @@ for window_size_item in "${window_size[@]}"; do
         else
             preprocessing_data=0
         fi
-        run_vlinear $preprocessing_data $seed $window_size_item
+        #run_vlinear $preprocessing_data $seed $window_size_item
+        run_cLSTM $preprocessing_data $seed $window_size_item
         if [ $preprocessing_data -eq 1 ]; then
             preprocessing_data=0
         fi
-        run_GVAR $preprocessing_data $seed $window_size_item
-        #run_cLSTM $preprocessing_data $seed $window_size_item
+        #run_GVAR $preprocessing_data $seed $window_size_item
+        
     done
 done
 

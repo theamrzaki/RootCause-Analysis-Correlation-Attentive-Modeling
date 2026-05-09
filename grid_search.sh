@@ -10,10 +10,11 @@ conda activate RCAEval
 SEEDS=(7) # Expand to (7 10 42) for final results
 
 # 2. ABLATION GRIDS
-WINDOW_SIZES=(6 20 30 10)
+WINDOW_SIZES=(4)
 BETA_VALS=(0.01 0.05) # Small beta was the winner
 LAMBDA_VALS=(0.5 1.0) # Testing higher sparsity for cleaner HitRate@1
 GAMMA_VALS=(0.2 0.5)
+ALPHA_VALS=(1.0 0.5) # Keep alpha fixed for this ablation to isolate the effect of other parameters
 DATASET="smd" # Switching to your current successful dataset
 coeff_architecture=("vlinear")
 RESULTS_FILE="grid_search_results.csv"
@@ -23,6 +24,7 @@ for win in "${WINDOW_SIZES[@]}"; do
         for g in "${GAMMA_VALS[@]}"; do
         for b in "${BETA_VALS[@]}"; do
         for l in "${LAMBDA_VALS[@]}"; do
+        for a in "${ALPHA_VALS[@]}"; do
             for coeff in "${coeff_architecture[@]}"; do
             for s in "${SEEDS[@]}"; do
                 
@@ -46,6 +48,7 @@ for win in "${WINDOW_SIZES[@]}"; do
                 python main.py \
                     --window_size "$win" \
                     --dataset "$DATASET" \
+                    --encoder_alpha "$a" --decoder_alpha "$a" \
                     --encoder_gamma "$g" --decoder_gamma "$g" \
                     --encoder_lambda "$l" --decoder_lambda "$l" \
                     --seed "$s" \
@@ -54,11 +57,12 @@ for win in "${WINDOW_SIZES[@]}"; do
                     --correlated_KL 0 --beta "$b" \
                     --main_model aerca_based --coeff_architecture "$coeff" \
                     --time_freq_representation vlinear --lr 1e-4 \
-                    --epochs 200 --early_stopping 0 \
+                    --epochs 50 --early_stopping 0 \
                     --attention_dim 256 --num_attention_heads 2 \
                     --outer_heads_num 2 --outer_hidden_dim 256
             done
             done
+        done
         done
         done
         done

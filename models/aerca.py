@@ -936,6 +936,7 @@ class AERCA(nn.Module):
 
         return total_bytes / (1024 ** 2)
     
+
     def _testing_root_cause(self, xs, labels, alpha: float = 0.5, use_attention_fusion: bool = False):
         coeff_architecture = self.options["coeff_architecture"]
 

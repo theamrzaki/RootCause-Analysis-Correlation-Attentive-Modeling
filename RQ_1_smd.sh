@@ -1,9 +1,9 @@
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate RCAEval
 
-seeds=(1 2 3)
+seeds=(1)
 dataset="smd"
-window_size=(4 6 10 20 30)
+window_size=(10 20 30)
 lrs=("1e-4")
 
 BETA_VAL=0.01
@@ -272,49 +272,51 @@ seeds=(1)
 for seed in "${seeds[@]}"; do
     for window_size_item in "${window_size[@]}"; do
             preprocessing_data=1
-        run_vlinear $preprocessing_data $seed $window_size_item
+        #run_vlinear $preprocessing_data $seed $window_size_item
+        run_cLSTM $preprocessing_data $seed $window_size_item
             preprocessing_data=0
         
 
-        run_GVAR $preprocessing_data $seed $window_size_item
-        run_experiment_baselines $preprocessing_data $seed $window_size_item
+        #run_GVAR $preprocessing_data $seed $window_size_item
+        #run_experiment_baselines $preprocessing_data $seed $window_size_item
     done
 done
 
 
 
-for seed in "${seeds[@]}"; do
-    for window_size_item in "${window_size[@]}"; do
-        preprocessing_data=1
-        run_cLSTM $preprocessing_data $seed $window_size_item
-        preprocessing_data=0
-    done
-done
-
-
-
-
-
-seeds=(2 3)
-
-for seed in "${seeds[@]}"; do
-    for window_size_item in "${window_size[@]}"; do
-            preprocessing_data=1
-        run_vlinear $preprocessing_data $seed $window_size_item
-            preprocessing_data=0
-        
-
-        run_GVAR $preprocessing_data $seed $window_size_item
-        run_experiment_baselines $preprocessing_data $seed $window_size_item
-    done
-done
-
-
-
-for seed in "${seeds[@]}"; do
-    for window_size_item in "${window_size[@]}"; do
-        preprocessing_data=1
-        run_cLSTM $preprocessing_data $seed $window_size_item
-        preprocessing_data=0
-    done
-done
+#for seed in "${seeds[@]}"; do
+#    for window_size_item in "${window_size[@]}"; do
+#        preprocessing_data=1
+#        run_cLSTM $preprocessing_data $seed $window_size_item
+#        preprocessing_data=0
+#    done
+#done
+#
+#
+#
+#
+#
+#seeds=(2 3)
+#
+#for seed in "${seeds[@]}"; do
+#    for window_size_item in "${window_size[@]}"; do
+#            preprocessing_data=1
+#        run_vlinear $preprocessing_data $seed $window_size_item
+#            preprocessing_data=0
+#        
+#
+#        run_GVAR $preprocessing_data $seed $window_size_item
+#        run_experiment_baselines $preprocessing_data $seed $window_size_item
+#    done
+#done
+#
+#
+#
+#for seed in "${seeds[@]}"; do
+#    for window_size_item in "${window_size[@]}"; do
+#        preprocessing_data=1
+#        run_cLSTM $preprocessing_data $seed $window_size_item
+#        preprocessing_data=0
+#    done
+#done
+#
