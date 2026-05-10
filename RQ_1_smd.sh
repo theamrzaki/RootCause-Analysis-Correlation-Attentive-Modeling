@@ -3,7 +3,7 @@ conda activate RCAEval
 
 seeds=(1)
 dataset="smd"
-window_size=(10 20 30)
+window_size=(4 6 10 20 30)
 lrs=("1e-4")
 
 BETA_VAL=0.01
@@ -241,17 +241,22 @@ run_experiment_baselines() {
     local seed=$2
     local window_size_item=$3
 
-    local coeff_architecture=("rcd" "torai")
+    local coeff_architecture=("torai" "baro" "rcd")
     local main_model="aerca_based" # Changed from array to string
 
     for arch in "${coeff_architecture[@]}"; do
         echo "Running: dataset=$dataset | seed=$seed | arch=$arch | window_size=$window_size_item"
-
+        # only run preprocessing for the first coeff_architecture to avoid redundant preprocessing
+        if [ $arch == "torai" ]; then
+            preprocessing_flag=$preprocessing_data
+        else
+            preprocessing_flag=0
+        fi
         cmd="python3 main.py \
             --seed=$seed \
             --dataset=$dataset \
             --coeff_architecture=$arch \
-            --preprocessing_data=$preprocessing_data \
+            --preprocessing_data=$preprocessing_flag \
             --window_size=$window_size_item \
             --main_model=$main_model \
             --training_aerca=0 \
@@ -267,20 +272,20 @@ run_experiment_baselines() {
 #-----------------------------GAIA experiments-------------------------
 #-------------------------------------------------------------------
 
-seeds=(1)
+seeds=(1 2 3)
 
-for seed in "${seeds[@]}"; do
-    for window_size_item in "${window_size[@]}"; do
-            preprocessing_data=1
-        #run_vlinear $preprocessing_data $seed $window_size_item
-        run_cLSTM $preprocessing_data $seed $window_size_item
-            preprocessing_data=0
-        
+#for seed in "${seeds[@]}"; do
+#    for window_size_item in "${window_size[@]}"; do
+#            preprocessing_data=1
+#        run_vlinear $preprocessing_data $seed $window_size_item
+#        #run_cLSTM $preprocessing_data $seed $window_size_item
+#            preprocessing_data=0
+#        #
 
-        #run_GVAR $preprocessing_data $seed $window_size_item
-        #run_experiment_baselines $preprocessing_data $seed $window_size_item
-    done
-done
+#        #run_GVAR $preprocessing_data $seed $window_size_item
+#        #run_experiment_baselines $preprocessing_data $seed $window_size_item
+#    done
+#done
 
 
 
@@ -298,17 +303,13 @@ done
 #
 #seeds=(2 3)
 #
-#for seed in "${seeds[@]}"; do
-#    for window_size_item in "${window_size[@]}"; do
-#            preprocessing_data=1
-#        run_vlinear $preprocessing_data $seed $window_size_item
-#            preprocessing_data=0
-#        
-#
-#        run_GVAR $preprocessing_data $seed $window_size_item
-#        run_experiment_baselines $preprocessing_data $seed $window_size_item
-#    done
-#done
+for seed in "${seeds[@]}"; do
+    for window_size_item in "${window_size[@]}"; do
+            preprocessing_data=1
+        run_experiment_baselines $preprocessing_data $seed $window_size_item
+            preprocessing_data=0
+    done
+done
 #
 #
 #
