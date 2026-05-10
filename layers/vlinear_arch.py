@@ -370,7 +370,7 @@ class vlinear_old(nn.Module):
 import torch
 import torch.nn as nn
 class vlinear(nn.Module):
-    def __init__(self, num_vars, order, hidden_dim=256, device="cpu", options=None):
+    def __init__(self, num_vars, order, hidden_dim=128, device="cpu", options=None):
         super().__init__()
         self.num_vars = num_vars  
         self.order = order*1  -1      
@@ -407,6 +407,14 @@ class vlinear(nn.Module):
             nn.Linear(hidden_dim*2, self.order) 
         )
         #self.revin = RevIN(num_vars)
+        self.temporal_mixer = nn.Conv1d(
+            hidden_dim,
+            hidden_dim,
+            kernel_size=3,
+            padding=1,
+            groups=hidden_dim
+        )
+        
 
     def forward(self, inputs: torch.Tensor):
         B, O_curr, P = inputs.shape # [B, Window, Sensors] e.g., [B, 2, 51]
@@ -430,7 +438,15 @@ class vlinear(nn.Module):
         # Project each sensor at each time step into H-space
         # cond: [B, Order, P, H]
         cond = self.temporal_proj(x_t) * self.embeddings.transpose(1, 2) 
-        
+        # [B,T,P,H] -> [B,P,H,T]
+        cond_mix = cond.permute(0,2,3,1)
+        H = cond_mix.shape[2]
+        T = cond_mix.shape[3]
+
+        cond_mix = self.temporal_mixer(cond_mix.reshape(B*P, H, T))
+        cond_mix = cond_mix.reshape(B, P, H, T).permute(0,3,1,2)
+
+        cond = cond + cond_mix
         # --- 4. Dynamic AERCA Coefficients ---
         # Creates a unique PxP matrix for every step in the window
         coeffs_time = torch.einsum('btph, btqh -> btpq', cond, cond)
