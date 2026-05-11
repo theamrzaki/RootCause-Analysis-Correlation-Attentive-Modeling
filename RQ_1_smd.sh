@@ -337,14 +337,14 @@ run_experiment_baselines() {
 #-------------------gaia-----------------------
 
 
-dataset="gaia"
+dataset="aiops"
 
-run_vlinear_gaia() {
+run_CUTS_PLUS_aiops() {
     local preprocessing_data=$1
     local seed=$2
     local window_size_item=$3
 
-    local arch="vlinear"
+    local arch="CUTS_PLUS"
     local main_model="aerca_based"
     local attention_dim=16
     local heads=2
@@ -389,83 +389,14 @@ run_vlinear_gaia() {
 }
 
 
+seeds=(2 3)
+window_size=(8 10 16 20)
 
-#window_size=(8 10 12 14)
-#
-#for seed in "${seeds[@]}"; do
-#    for window_size_item in "${window_size[@]}"; do
-#            preprocessing_data=1
-#        run_vlinear_gaia $preprocessing_data $seed $window_size_item
-#            preprocessing_data=0
-#    done
-#done
-
-
-
-
-#-------------------aiops-----------------------
-
-
-
-
-dataset="gaia"
-
-run_vlinear_gaia() {
-    local preprocessing_data=$1
-    local seed=$2
-    local window_size_item=$3
-
-    local arch="vlinear"
-    local main_model="aerca_based"
-    local attention_dim=16
-    local heads=2
-    local outer_att_dim_val=16
-    local outer_heads_val=2
-
-                                echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model"
-
-
-                                cmd="python3 main.py \
-                                        --correlated_KL=0 --mean_std_recon_loss=0 --AMOC_Loss=0 \
-                                        --encoder_gamma=$GAMMA_VAL --decoder_gamma=$GAMMA_VAL \
-                                        --encoder_lambda=$LAMBDA_VAL --decoder_lambda=$LAMBDA_VAL --beta=$BETA_VAL \
-
-                                    --main_model=$main_model \
-                                    --coeff_architecture="$arch" \
-                                    --time_freq_representation="mag_phase" \
-
-                                    --preprocessing_data="$preprocessing_data" \
-
-                                    --lr="$lrs" \
-                                    --seed="$seed" \
-                                    --dataset="$dataset" \
-                                    --window_size="$window_size_item" \
-
-                                    --training_aerca=1 \
-                                    --epochs=200 \
-                                    --early_stopping=0 \
-                                    --combine_method="attention" \
-                                    --results_csv="RQ_1_gaia_allmodels_50vars.csv" \
-
-                                    --attention_dim="$attention_dim" \
-                                    --num_attention_heads="$heads" \
-                                    --outer_heads_num="$outer_heads_val" \
-                                    --outer_hidden_dim="$outer_att_dim_val" \
-
-                                       "
-
-                                eval $cmd
-                        
-            
-}
-
-
-window_size=(8 10 12 14)
-seeds=(1 2 3)
 for seed in "${seeds[@]}"; do
     for window_size_item in "${window_size[@]}"; do
             preprocessing_data=1
-        run_vlinear_gaia $preprocessing_data $seed $window_size_item
+        run_CUTS_PLUS_aiops $preprocessing_data $seed $window_size_item
             preprocessing_data=0
     done
 done
+

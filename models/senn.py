@@ -5,6 +5,7 @@ import torch
 from layers.vlinear_arch import vlinear
 from layers.cLSTM import cLSTM
 from models.causalrca import causalrca
+from layers.CUTS_PLUS import CUTS_PLUS_Wrapper
 class SENNGC(nn.Module):
     def __init__(self, num_vars: int, order: int, hidden_layer_size: int, num_hidden_layers: int,
                  args: dict,  device: torch.device):
@@ -51,7 +52,7 @@ class SENNGC(nn.Module):
             total_params = sum(p.numel() for p in self.coeff_net.parameters() if p.requires_grad)
             print(f"Total parameters for temporal : {total_params}")
      
-        if args["coeff_architecture"] not in  ["ht","epsilon_diagnosis","rcd","TemporalGNN","cross_time_freq","cross_attention_single_coeff_network","TemporalGNN_Attention","trend_seasonal","rcd","TemporalGNN_Attention_fourier","TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced","causalrca","cuts_mlp","cuts_lstm","GVAR","vlinear","nsigma","baro","circa","torai","cLSTM"]:
+        if args["coeff_architecture"] not in  ["ht","epsilon_diagnosis","rcd","TemporalGNN","cross_time_freq","cross_attention_single_coeff_network","TemporalGNN_Attention","trend_seasonal","rcd","TemporalGNN_Attention_fourier","TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced","causalrca","cuts_mlp","cuts_lstm","GVAR","vlinear","nsigma","baro","circa","torai","cLSTM","CUTS_PLUS"]:
             total_params = sum(p.numel() for net in self.coeff_nets for p in net.parameters())
             print(f"Total parameters for {order} lags: {total_params}")
         
@@ -66,6 +67,14 @@ class SENNGC(nn.Module):
         if args["coeff_architecture"] == "cLSTM":
             self.coeff_net = cLSTM(num_vars, hidden_layer_size)
 
+        if args["coeff_architecture"] == "CUTS_PLUS":
+            # Time branch: separate MLP for each lag
+            self.coeff_net = CUTS_PLUS_Wrapper(
+                num_vars=num_vars,
+                order=order,
+                device=device,
+                options = args  # default to None if not specified
+            )
         # Some bookkeeping
         self.num_vars = num_vars
         self.order = order
@@ -287,7 +296,7 @@ class SENNGC(nn.Module):
         if self.args["coeff_architecture"] == "deep_mlp" or self.args["coeff_architecture"] == "GVAR":
             return self.forward_normal(inputs)
 
-        elif self.args["coeff_architecture"] in ["vlinear"]:
+        elif self.args["coeff_architecture"] in ["vlinear","CUTS_PLUS"]:
             return self.forward_temporal(inputs)
         elif self.args["coeff_architecture"] == "causalrca":
             return self.forward_temporal_causalrca(inputs)

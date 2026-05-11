@@ -42,15 +42,15 @@
                 "--beta", "0.01",
 
                 "--main_model", "aerca_based",
-                "--coeff_architecture", "baro",
+                "--coeff_architecture", "CUTS_PLUS",
                 "--time_freq_representation", "vlinear",
 
                 "--lr", "1e-4",
                 "--seed", "7",
                 "--dataset", "aiops",
-                "--window_size", "6",
+                "--window_size", "8",
 
-                "--training_aerca", "0",
+                "--training_aerca", "1",
                 "--epochs", "60",
                 "--early_stopping", "0",
                 "--preprocessing_data", "0",

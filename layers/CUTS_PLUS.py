@@ -150,3 +150,49 @@ class CUTS_Plus_Net(nn.Module):
         pred = torch.stack(pred, dim=-1)
         pred = rearrange(pred, 'b c n s -> b n s c')
         return pred[:, :, -1:]
+
+
+
+class CUTS_PLUS_Wrapper(nn.Module):
+    def __init__(self, num_vars, order, hidden_dim=256, n_layers=1, device="cpu", options=None):
+        super().__init__()
+        self.num_vars = num_vars
+        self.order = order 
+        self.device = device
+        
+        self.backbone = CUTS_Plus_Net(
+            n_nodes=num_vars,
+            in_ch=1, 
+            hidden_ch=hidden_dim,
+            n_layers=n_layers,
+            shared_weights_decoder=False 
+        ).to(device)
+
+        self.causal_graph = nn.Parameter(torch.randn(num_vars, num_vars)).to(device)
+
+    def forward(self, inputs: torch.Tensor):
+        B, W, P = inputs.shape
+        
+        # 1. Reshape for CUTS+
+        x_cuts = inputs.transpose(1, 2).unsqueeze(-1)
+        
+        # 2. Prepare Adjacency
+        adj = torch.sigmoid(self.causal_graph)
+        
+        # --- FIX STARTS HERE ---
+        # The MPNN expects [B, N, N] because of the 'bmn' string in einsum.
+        # We expand our [N, N] adj to [B, N, N] so it matches the batch size.
+        adj_batched = adj.unsqueeze(0).expand(B, -1, -1) 
+        # --- FIX ENDS HERE ---
+        
+        # 3. Prediction
+        # Pass the BATCHED adjacency matrix
+        pred_raw = self.backbone(x_cuts, None, adj_batched)
+        
+        preds = pred_raw.squeeze(-1).squeeze(-1)
+        
+        # 4. Align Adjacency Outputs (Expanding for your specific signature)
+        coeffs_time = adj.unsqueeze(0).unsqueeze(0).expand(B, W, P, P)
+        coeffs_freq = adj.unsqueeze(0).expand(B, P, P)
+
+        return preds, coeffs_time, coeffs_freq
