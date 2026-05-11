@@ -369,114 +369,117 @@ class vlinear_old(nn.Module):
 
 import torch
 import torch.nn as nn
-
 class vlinear(nn.Module):
     def __init__(self, num_vars, order, hidden_dim=256, device="cpu", options=None):
         super().__init__()
         self.num_vars = num_vars  
-        self.order = order * 1 - 1  
+        self.order = order*1  -1      
         self.device = device
+        
         self.orth_transformer = options.get('orth_transformer') 
         
-        # 1. Delta Biases
+        # 1. Delta Biases (Faithful to Model logic)
+        # These act as "Learned Context" for the orthogonal domain
+        # delta1: [1, Channels, 1, Lag]
         self.delta_latent1 = nn.Parameter(torch.randn(1, num_vars, hidden_dim))
         self.delta_latent2 = nn.Parameter(torch.randn(1, num_vars, hidden_dim))
+
+        # Projection to match the output 'order'
         self.bias_proj = nn.Linear(hidden_dim, self.order)
         
-        # 2. Embeddings & Projections
+        # 2. Updated Embeddings 
+        # In the Model code, embeddings are often 1D and expanded
+        #self.embeddings = nn.Parameter(torch.randn(1, hidden_dim))
         self.embeddings = nn.Parameter(torch.randn(1, num_vars, 1, hidden_dim))
+        # 3. Projection matching the Model's logic
+        #self.temporal_proj = nn.Linear(self.order, hidden_dim)
         self.temporal_proj = nn.Linear(1, hidden_dim)
-        
-        # 3. Value Function for forecasting
+        #self.temporal_proj = nn.Sequential(
+        #    nn.Linear(1, hidden_dim // 2),
+        #    nn.GELU(),
+        #    nn.Linear(hidden_dim // 2, hidden_dim)
+        #)
+        self.a = nn.Parameter(torch.randn(num_vars))
+        self.ln = nn.LayerNorm(hidden_dim)
         self.vf = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim * 2),
+            nn.Linear(hidden_dim, hidden_dim*2),
             nn.ReLU(),
-            nn.Linear(hidden_dim * 2, self.order) 
+            nn.Linear(hidden_dim*2, self.order) 
         )
-
-        # 🔥 NEW: learnable exponential decay
-        self.lambda_decay = nn.Parameter(torch.tensor(0.1))
-
-        # 🔥 OPTIONAL but recommended: normalization
-        self.use_layernorm = True
+        self.left_proj  = nn.Linear(hidden_dim, hidden_dim)
+        self.right_proj = nn.Linear(hidden_dim, hidden_dim)
+        #self.revin = RevIN(num_vars)
+        self.temporal_mixer = nn.Conv1d(
+            hidden_dim,
+            hidden_dim,
+            kernel_size=3,
+            padding=1,
+            groups=hidden_dim
+        )
+        
 
     def forward(self, inputs: torch.Tensor):
-        B, T, P = inputs.shape
+        B, O_curr, P = inputs.shape # [B, Window, Sensors] e.g., [B, 2, 51]
         
         # --- 1. Step into Orthogonal Domain ---
         if self.orth_transformer is None:
-            x_orth = inputs.transpose(1, 2)
+            x_orth = inputs.transpose(1, 2) # [B, 51, 2]
         else:
-            x_orth = self.orth_transformer(inputs)
+            x_orth = self.orth_transformer(inputs) # [B, 51, 2]
         
         # --- 2. Apply Delta1 Latent Bias ---
+        # Project delta_latent1 [1, P, H] -> [1, P, Order]
+        # Then unsqueeze to [1, P, 1, Order] for broadcasting
         d1 = self.bias_proj(self.delta_latent1).unsqueeze(-2) 
-        x_orth_biased = x_orth.unsqueeze(-2) + d1 
+        x_orth_biased = x_orth.unsqueeze(-2) + d1 # [B, P, 1, Order]
         
-        # --- 3. Dynamic Latent Generation ---
+        # --- 3. Truly Dynamic Latent Generation ---
+        # [B, P, 1, Order] -> [B, Order, P, 1]
         x_t = x_orth_biased.squeeze(-2).transpose(1, 2).unsqueeze(-1)
-        cond = self.temporal_proj(x_t) * self.embeddings.transpose(1, 2)  # [B, T, P, H]
         
-        # --- 4. Split history / current ---
-        split_idx = int(0.7 * T)
-        cond_history = cond[:, :split_idx, :, :]
-        cond_current = cond[:, split_idx:, :, :]
+        # Project each sensor at each time step into H-space
+        # cond: [B, Order, P, H]
+        cond = self.temporal_proj(x_t) * self.embeddings.transpose(1, 2) 
+        # [B,T,P,H] -> [B,P,H,T]
+        cond_mix = cond.permute(0,2,3,1)
+        H = cond_mix.shape[2]
+        T = cond_mix.shape[3]
 
-        # 🔥 Optional stabilization
-        if self.use_layernorm:
-            cond_history = torch.nn.functional.layer_norm(cond_history, cond_history.shape[-1:])
-            cond_current = torch.nn.functional.layer_norm(cond_current, cond_current.shape[-1:])
+        cond_mix = self.temporal_mixer(cond_mix.reshape(B*P, H, T))
+        cond_mix = cond_mix.reshape(B, P, H, T).permute(0,3,1,2)
 
-        # =========================================================
-        # 🔥 EXPONENTIAL DECAY (core fix)
-        # =========================================================
-        Th = cond_history.shape[1]
+        cond = cond + cond_mix
+        # --- 4. Dynamic AERCA Coefficients ---
+        # Creates a unique PxP matrix for every step in the window
+        cond_left  = self.left_proj(cond)
+        cond_right = self.right_proj(cond)
 
-        # time index: 0 (oldest) → Th-1 (most recent)
-        t = torch.arange(Th, device=cond_history.device).float()
-        t = t.view(1, Th, 1, 1)
-
-        # enforce positivity for stability
-        lambda_decay = torch.nn.functional.softplus(self.lambda_decay)
-
-        # exponential weights (recent points emphasized)
-        weights = torch.exp(-lambda_decay * (Th - 1 - t))
-
-        # normalize
-        weights = weights / (weights.sum(dim=1, keepdim=True) + 1e-6)
-
-        # weighted mean
-        z_hist_mean = torch.sum(cond_history * weights, dim=1)
-
-        # weighted variance
-        z_hist_var = torch.sum(
-            weights * (cond_history - z_hist_mean.unsqueeze(1))**2,
-            dim=1
+        coeffs_time = torch.einsum(
+            'btph,btqh->btpq',
+            cond_left,
+            cond_right
         )
-        z_hist_std = torch.sqrt(z_hist_var + 1e-5)
+        #coeffs_time = torch.einsum('btph, btqh -> btpq', cond, cond)
+        coeffs_time = torch.tanh(coeffs_time)
 
-        # =========================================================
-
-        # --- Current aggregation (unchanged for now) ---
-        z_curr_max, _ = torch.max(cond_current, dim=1)
-
-        # --- Standardized latent delta ---
-        z_final = (z_curr_max - z_hist_mean) / z_hist_std 
+        # --- 5. Prediction (Forecasting) ---
+        # Aggregate temporal info using max pooling (as per your best results)
+        z_final, _ = torch.max(cond, dim=1) # [B, P, H]
         
-        # --- 5. Dynamic AERCA Coefficients ---
-        coeffs_time = torch.einsum('bph, bqh -> bpq', z_final, z_final)
-        coeffs_time = torch.tanh(coeffs_time).unsqueeze(1)
-
-        # --- 6. Prediction ---
+        # Apply the second Latent Bias to the forecast
+        # vf(z_final) -> [B, P, Order]
+        # d2 -> [1, P, Order]
         d2 = self.bias_proj(self.delta_latent2)
-        v_pred = self.vf(z_final) + d2
+        v_pred = self.vf(z_final) + d2 # [B, P, Order]
 
         if self.orth_transformer is None:
-            preds_all_time = v_pred.transpose(1, 2)
+            preds_all_time = v_pred.transpose(1, 2) # [B, Order, P]
         else:
             preds_all_time = self.orth_transformer.inverse(v_pred)
         
+        # Final forecast is the last step of the predicted window
         preds = preds_all_time[:, -1, :] 
-        coeffs_freq = coeffs_time[:, 0, :, :] 
+        coeffs_freq = coeffs_time[:, 0, :, :] # First step coefficients
 
         return preds, coeffs_time, coeffs_freq
+    

@@ -277,17 +277,12 @@ run_experiment_baselines() {
 for seed in "${seeds[@]}"; do
     for window_size_item in "${window_size[@]}"; do
     
-        #if [ $seed -eq 1 ]; then
-            preprocessing_data=1
-        #else
-        #    preprocessing_data=0
-        #fi
+        preprocessing_data=1
         run_vlinear $preprocessing_data $seed $window_size_item
-        #if [ $preprocessing_data -eq 1 ]; then
-            preprocessing_data=0
+        preprocessing_data=0
         #fi
         #run_GVAR $preprocessing_data $seed $window_size_item
-        #run_experiment_baselines $preprocessing_data $seed $window_size_item
+        run_experiment_baselines $preprocessing_data $seed $window_size_item
         #run_cLSTM $preprocessing_data $seed $window_size_item
     done
 done

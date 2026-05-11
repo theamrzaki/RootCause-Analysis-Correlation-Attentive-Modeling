@@ -10,12 +10,12 @@ conda activate RCAEval
 SEEDS=(7) # Expand to (7 10 42) for final results
 
 # 2. ABLATION GRIDS
-WINDOW_SIZES=(4)
+WINDOW_SIZES=(8)
 BETA_VALS=(0.01 0.05) # Small beta was the winner
 LAMBDA_VALS=(0.5 1.0) # Testing higher sparsity for cleaner HitRate@1
 GAMMA_VALS=(0.2 0.5)
 ALPHA_VALS=(1.0 0.5) # Keep alpha fixed for this ablation to isolate the effect of other parameters
-DATASET="smd" # Switching to your current successful dataset
+DATASET="aiops" # Switching to your current successful dataset
 coeff_architecture=("vlinear")
 RESULTS_FILE="grid_search_results.csv"
 
@@ -28,12 +28,10 @@ for win in "${WINDOW_SIZES[@]}"; do
             for coeff in "${coeff_architecture[@]}"; do
             for s in "${SEEDS[@]}"; do
                 
-                # Skip the 5 runs already completed for Window 6
-                if [ "$win" == "6" ]; then
-                    if [ "$g" == "0.2" ]; then continue; fi # Finished all Gamma 0.2
-                    if [ "$g" == "0.5" ] && [ "$b" == "0.01" ] && [ "$l" == "0.5" ]; then continue; fi # Finished this specific one
+                # Skip the 1 runs already completed for Window 8
+                if [ "$win" == "8" ] && [ "$g" == "0.2" ] && [ "$b" == "0.01" ] && [ "$l" == "0.5" ] && [ "$a" == "1.0" ] && [ "$coeff" == "vlinear" ] && [ "$s" == "7" ]; then
+                    continue
                 fi
-
                 # Determine if preprocessing is needed
                 if [ "$first_in_window" = true ]; then
                     preprocessing=1
