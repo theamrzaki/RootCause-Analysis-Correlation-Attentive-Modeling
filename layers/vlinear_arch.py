@@ -370,7 +370,7 @@ class vlinear_old(nn.Module):
 import torch
 import torch.nn as nn
 class vlinear(nn.Module):
-    def __init__(self, num_vars, order, hidden_dim=256, device="cpu", options=None):
+    def __init__(self, num_vars, order, hidden_dim=256, device="cpu", options=None):#128 for SMD
         super().__init__()
         self.num_vars = num_vars  
         self.order = order*1  -1      

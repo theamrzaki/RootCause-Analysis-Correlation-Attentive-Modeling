@@ -154,7 +154,7 @@ class CUTS_Plus_Net(nn.Module):
 
 
 class CUTS_PLUS_Wrapper(nn.Module):
-    def __init__(self, num_vars, order, hidden_dim=256, n_layers=1, device="cpu", options=None):
+    def __init__(self, num_vars, order, hidden_dim=128, n_layers=1, device="cpu", options=None):#128 for SMD
         super().__init__()
         self.num_vars = num_vars
         self.order = order 

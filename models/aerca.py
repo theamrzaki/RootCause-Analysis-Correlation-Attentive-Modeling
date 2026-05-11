@@ -522,114 +522,197 @@ class AERCA(nn.Module):
         else:
             raise ValueError(f"Unknown dataset {self.options['dataset']} for training")
         
-    def _training_batches_swat(self, xs,batch_size=512):
+    def _training_batches_swat(self, xs, batch_size=512):
         """
         xs: list of windows, each of shape (window_size+1, num_vars)
         batch_size: number of windows per batch
         """
 
-        #if len(xs.shape) == 3:
-        #    xs = np.concatenate(xs, axis=0)
-        #    xs = torch.tensor(xs, dtype=torch.float32, device=self.device)
-        # Split into train and validation
-        split_idx = int(0.8 * len(xs))
+        import time
+        import numpy as np
+        import psutil
+        import threading
+        from collections import defaultdict
 
+        split_idx = int(0.8 * len(xs))
         xs_train = xs[:split_idx]
         xs_val = xs[split_idx:]
 
         best_val_loss = np.inf
-        count = 0
+        early_stop_counter = 0
 
-        for epoch in tqdm(range(self.epochs), desc='Epoch'):
-            count += 1
+        # =========================================================
+        # TRAINING METRICS STORAGE
+        # =========================================================
+        epoch_times = []
+        train_losses = []
+
+        use_cuda = torch.cuda.is_available() and self.device != "cpu"
+        process = psutil.Process(os.getpid())
+
+        # =========================================================
+        # MEMORY POLLING SETUP (CPU PEAK TRACKING)
+        # =========================================================
+        peak_mem_bytes = {"value": 0}
+        stop_event = threading.Event()
+
+        def memory_poller():
+            """Continuously tracks CPU memory usage (true peak)."""
+            while not stop_event.is_set():
+                mem = process.memory_info().rss
+                if mem > peak_mem_bytes["value"]:
+                    peak_mem_bytes["value"] = mem
+                time.sleep(0.01)  # 10ms resolution
+
+        monitor_thread = None
+        if not use_cuda:
+            monitor_thread = threading.Thread(target=memory_poller)
+            monitor_thread.start()
+
+        if use_cuda:
+            torch.cuda.reset_peak_memory_stats()
+
+        # =========================================================
+        # TRAINING LOOP
+        # =========================================================
+        for epoch in tqdm(range(self.epochs), desc="Epoch"):
             self.current_epoch = epoch
             self.train()
-            epoch_loss = 0
 
-            # Shuffle training windows
+            epoch_start_time = time.time()
+            epoch_loss = 0.0
+
             np.random.shuffle(xs_train)
 
-            # --- Training loop with batching ---
             for i in range(0, len(xs_train), batch_size):
-                # xs_train shape
-                # swat = (131, 1000, 51)
-                # smd = (56672, 10, 38)
-                batch_windows = xs_train[i:i+batch_size]
-                x_batch = torch.tensor(batch_windows, dtype=torch.float32, device=self.device)  # (B, W, P)
+                batch_windows = xs_train[i:i + batch_size]
+                x_batch = torch.tensor(batch_windows, dtype=torch.float32, device=self.device)
 
                 self.optimizer.zero_grad()
-                #SWaT = torch.Size([131, 1000, 51])
-                #SMD = torch.Size([1000, 10, 38])
+
                 loss, _ = self._training_step(x_batch)
                 loss.backward()
+
                 try:
                     self.optimizer.step()
-                # check if exception due to out of memory error 
                 except Exception as e:
                     print(e)
-                    if 'CUDA out of memory' in str(e):
-                        self._log_and_print('Total parameters exceed 100 million, stopping training.')
-                        ac_at = [0, 0, 0, 0]
-                        k_at_step_all = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-                        write_results(self.options, self.local_model_name, ac_at, k_at_step_all, self.total_params, self.options.get("results_csv", 'RQ_swat_windows.csv'))
-                        #stop the whole python program
+                    if "CUDA out of memory" in str(e):
+                        self._log_and_print("CUDA OOM: stopping training early.")
+
+                        write_results(
+                            self.options,
+                            self.local_model_name,
+                            [0, 0, 0, 0],
+                            [0] * 10,
+                            self.total_params,
+                            self.options.get("results_csv", "results.csv"),
+                        )
                         os._exit(1)
+
                 epoch_loss += loss.item()
 
-            self.writer.add_scalar('Loss/train', epoch_loss, epoch)
-            logging.info('Epoch %s/%s', epoch + 1, self.epochs)
-            logging.info('Epoch training loss: %s', epoch_loss)
+            # =========================================================
+            # EPOCH METRICS
+            # =========================================================
+            epoch_time = time.time() - epoch_start_time
+            epoch_times.append(epoch_time)
+            train_losses.append(epoch_loss)
 
-            # --- Validation loop ---
+            cpu_mem_mb = process.memory_info().rss / (1024 ** 2)
+
+            self.writer.add_scalar("Loss/train", epoch_loss, epoch)
+            self.writer.add_scalar("Time/epoch", epoch_time, epoch)
+
+            logging.info(
+                "Epoch %d/%d | Loss: %.6f | Time: %.3fs | CPU Mem: %.2f MB",
+                epoch + 1, self.epochs, epoch_loss, epoch_time, cpu_mem_mb
+            )
+
+            # =========================================================
+            # VALIDATION LOOP
+            # =========================================================
             self.eval()
-            val_loss = 0
+            val_loss = 0.0
             losses_dict_validation = defaultdict(float)
+
             with torch.no_grad():
                 for i in range(0, len(xs_val), batch_size):
-                    batch_windows = xs_val[i:i+batch_size]
+                    batch_windows = xs_val[i:i + batch_size]
                     x_batch = torch.tensor(batch_windows, dtype=torch.float32, device=self.device)
+
                     loss, losses_dict = self._training_step(x_batch)
                     val_loss += loss.item()
+
                     for k, v in losses_dict.items():
                         losses_dict_validation[k] += v
 
-            self.writer.add_scalar('Loss/val', val_loss, epoch)
+            self.writer.add_scalar("Loss/val", val_loss, epoch)
+
             for k, v in losses_dict_validation.items():
-                self.writer.add_scalar(f'val/{k}', v, epoch)
+                self.writer.add_scalar(f"val/{k}", v, epoch)
 
-            logging.info('Epoch val loss: %s', val_loss)
+            logging.info("Val Loss: %.6f", val_loss)
 
-            # --- Early stopping ---
-            #if val_loss < best_val_loss:
-            #    best_val_loss = val_loss
-            #    early_stop_count = 0
-            #    logging.info(f'Saving model at epoch {epoch + 1}')
-            #    torch.save(self.state_dict(), os.path.join(self.save_dir, f'{self.model_name}.pt'))
-            #else:
-            #    early_stop_count += 1
-            #    if early_stop_count >= 20:
-            #        print('Early stopping')
-            #        break
+            # =========================================================
+            # CHECKPOINT + EARLY STOPPING
+            # =========================================================
             if val_loss < best_val_loss:
-                count = 0
-                logging.info(f'Saving model at epoch {epoch + 1}')
-                if self.options["early_stopping"]: #AERCA paper style early stopping
-                    best_val_loss = val_loss
-                torch.save(self.state_dict(), os.path.join(self.save_dir, f'{self.model_name}.pt'))
-            if count >= 20:
-                print('Early stopping')
+                best_val_loss = val_loss
+                early_stop_counter = 0
+
+                torch.save(
+                    self.state_dict(),
+                    os.path.join(self.save_dir, f"{self.model_name}.pt"),
+                )
+            else:
+                early_stop_counter += 1
+
+            if early_stop_counter >= 20:
+                print("Early stopping triggered.")
                 break
+
             if epoch % 5 == 0:
                 self.writer.flush()
 
-        # --- Load best model ---
-        self.load_state_dict(torch.load(os.path.join(self.save_dir, f'{self.model_name}.pt'), map_location=self.device))
-        logging.info('Training complete')
+        # =========================================================
+        # STOP MEMORY POLLER + FINAL METRICS
+        # =========================================================
+        if not use_cuda:
+            stop_event.set()
+            monitor_thread.join()
 
-        # --- Compute thresholds ---
-        #self._get_recon_threshold(xs_val)
-        #self._get_root_cause_threshold_encoder(xs_val)
-        #self._get_root_cause_threshold_decoder(xs_val)
+            peak_mem_mb = peak_mem_bytes["value"] / (1024 ** 2)
+        else:
+            peak_mem_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
+
+        total_train_time = sum(epoch_times)
+        avg_epoch_time = np.mean(epoch_times)
+        train_throughput = len(xs_train) / avg_epoch_time if avg_epoch_time > 0 else 0
+
+        self.training_metrics = {
+            "total_train_time": total_train_time,
+            "avg_epoch_time": avg_epoch_time,
+            "train_throughput": train_throughput,
+            "peak_mem_mb": peak_mem_mb,
+        }
+
+        self._log_and_print("Training complete")
+        self._log_and_print("Avg Epoch Time: {:.4f}s", avg_epoch_time)
+        self._log_and_print("Throughput: {:.2f} samples/s", train_throughput)
+        self._log_and_print("Peak Memory: {:.2f} MB", peak_mem_mb)
+
+        # =========================================================
+        # LOAD BEST MODEL
+        # =========================================================
+        self.load_state_dict(
+            torch.load(
+                os.path.join(self.save_dir, f"{self.model_name}.pt"),
+                map_location=self.device,
+            )
+        )
+
+        logging.info("Training complete")
 
     def _testing_step(self, x, label=None, add_u=True):
         nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us, attn_weights = self.forward(x, add_u=add_u)
@@ -1250,6 +1333,15 @@ class AERCA(nn.Module):
                     "throughput": throughput,
                     "model_mem_mb": model_mem_mb,
                     "peak_mem_mb": peak_mem_mb,
+
+
+                    # -------------------------
+                    # TRAINING efficiency (NEW)
+                    # -------------------------
+                    "train_total_time": self.training_metrics["total_train_time"],
+                    "train_avg_epoch_time": self.training_metrics["avg_epoch_time"],
+                    "train_throughput": self.training_metrics["train_throughput"],
+                    "train_peak_mem_mb": self.training_metrics["peak_mem_mb"],
                 },
             )
         else:

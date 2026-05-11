@@ -510,6 +510,11 @@ def write_results(args, local_model_name, ac_at,k_at_step_all, total_params,file
         "throughput": extra_metrics["throughput"] if extra_metrics and "throughput" in extra_metrics else 0,
         "model_mem_mb": extra_metrics["model_mem_mb"] if extra_metrics and "model_mem_mb" in extra_metrics else 0,
         "peak_mem_mb": extra_metrics["peak_mem_mb"] if extra_metrics and "peak_mem_mb" in extra_metrics else 0,
+
+        "train_total_time": extra_metrics["train_total_time"] if extra_metrics and "train_total_time" in extra_metrics else 0,
+        "train_avg_epoch_time": extra_metrics["train_avg_epoch_time"] if extra_metrics and "train_avg_epoch_time" in extra_metrics else 0,
+        "train_throughput": extra_metrics["train_throughput"] if extra_metrics and "train_throughput" in extra_metrics else 0,
+        "train_peak_mem_mb": extra_metrics["train_peak_mem_mb"] if extra_metrics and "train_peak_mem_mb" in extra_metrics else 0,
     }
     
 
