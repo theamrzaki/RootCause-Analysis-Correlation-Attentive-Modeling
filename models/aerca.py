@@ -134,21 +134,6 @@ class AERCA(nn.Module):
                                 self._count_parameters(self.coeff_proj_decoder) +
                                 self._count_parameters(self.vf)  )
         
-        elif(self.options["coeff_architecture"] == "causalrca"):
-            from models.causalrca import MLPDecoder
-            self.decoder = MLPDecoder(
-                n_in_node=None,
-                n_in_z=1,
-                n_out=1,
-                data_variable_size=options.get("num_vars"),
-                n_hid=options.get("outer_hidden_dim", 64),
-            ).to(device)
-            
-            self._log_and_print('Number of parameters in encoder: {}', self._count_parameters(self.encoder))
-            self._log_and_print('Number of parameters in decoder: {}', self._count_parameters(self.decoder))
-            self.total_params = (self._count_parameters(self.encoder) +
-                                 self._count_parameters(self.decoder)  )
-            
         print('----------------------------------')
         print(f'Total number of parameters in AERCA: {self.total_params}')
         print('----------------------------------')
@@ -301,108 +286,6 @@ class AERCA(nn.Module):
         else:
             return us, coeffs, nexts, winds, attn_weights, preds
 
-    def decoding_1decoder(self, us, winds, add_u=True):
-        # us shape: (B, p) -> [64, 30]
-        # winds shape: (B, T, p) -> [64, 25, 30]
-        batch_size, p = us.shape
-        rank = self.rank
-
-        # 1. Project the residual directly (No temporal dimension here)
-        # us is (B, p), so u_proj becomes (B, hidden)
-        u_proj = self.decoding_input_proj(us) 
-        current_state = self.decoding_norm(u_proj)
-        
-        # 2. Sensor-wise predictions (B, p)
-        # This matches your observed torch.Size([64, 30])
-        preds = self.decoding_output_proj(current_state) 
-
-        # 3. Low-rank Coefficients (The VLinear interaction)
-        coeff_flat = self.decoding_coeff_proj(current_state)
-        U, V = torch.split(coeff_flat, p * rank, dim=-1)
-        
-        # Reshape for matrix multiplication
-        U = U.view(batch_size, p, rank)
-        V = V.view(batch_size, rank, p)
-        coeffs = torch.matmul(U, V) # (B, p, p)
-
-        # 4. Final next-step prediction
-        # nexts_hat = Linear Prediction + The Surprise (us)
-        nexts_hat = preds + us if add_u else preds
-
-        # Return None for prev_coeffs if you aren't using them in this mode
-        return nexts_hat, coeffs, torch.zeros_like(coeffs)
-
-    def decoding_causalrca(self, us, winds, add_u=True, aux_vars=None):
-        """
-        MLP-based CausalRCA decoding.
-
-        Args:
-            us:    latent states from encoder (B, T, p)
-            winds: original sliding windows (B, T, p) — not used here
-            add_u: residual addition flag
-            aux_vars: dict containing encoder graph outputs:
-                    {
-                        "adj_A1",
-                        "adj_A",
-                        "adj_A_tilt",
-                        "logits",
-                        "enc_x",
-                        "Wa",
-                        "z",
-                        "z_positive"
-                    }
-
-        Returns:
-            nexts_hat:      (B_windowed, p)
-            decoder_coeffs: mat_z from causal RCA (B_windowed, p)
-            prev_coeffs:    zeros placeholder to match 1decoder signature (B_windowed, 1, p, p)
-        """
-        if aux_vars is None:
-            raise ValueError("decoding_causalrca requires aux_vars from causalrca encoder.")
-
-        B, p = us.shape  # latent includes temporal dimension
-
-        # ----------------------
-        # Extract encoder auxiliary variables
-        # ----------------------
-        origin_A   = aux_vars["adj_A1"]       # sinh(3A)
-        adj_A_tilt = aux_vars["adj_A_tilt"]   # I - A^T
-        Wa         = aux_vars["Wa"]           # learnable param
-        input_z    = aux_vars["logits"]       # graph-weighted latent (B, T, p)
-
-        # In decoding_causalrca
-        # u_next comes from us (after sliding windows)
-        input_z_windows = input_z  # NO slicing
-
-        # Call MLPDecoder with aligned batch
-        mat_z, preds, _ = self.decoder(
-            inputs=None,
-            input_z=input_z_windows,
-            n_in_node=p,
-            origin_A=origin_A,
-            adj_A_tilt=adj_A_tilt,
-            Wa=Wa
-        )
-
-        # Ensure preds has shape (B_windowed, p)
-        if preds.dim() == 3:
-            preds = preds.squeeze(-1)
-
-        u_next = us   
-        # Final prediction
-        nexts_hat = preds + u_next if add_u else preds
-
-        # prev_coeffs placeholder
-        # Outer product to get full p x p matrix per batch
-        mat_z_flat = mat_z.squeeze(-1) if mat_z.dim() == 3 else mat_z  # (B, p)
-        decoder_coeffs = torch.einsum('bi,bj->bij', mat_z_flat, mat_z_flat)  # (B,p,p)
-        decoder_coeffs = decoder_coeffs.unsqueeze(1)  # (B,1,p,p)
-        prev_coeffs = torch.zeros(B, 1, p, p, device=us.device)
-
-
-        return nexts_hat, decoder_coeffs, prev_coeffs
-
-    
     def decoding_2decoders(self, us, winds, add_u=True):
         #u_windows = sliding_window_view_torch(us, self.window_size + 1)
         u_winds = us[:, :-1, :]
@@ -420,10 +303,6 @@ class AERCA(nn.Module):
     def decoding(self, us, winds, add_u=True,aux_vars=None):
         if self.options["coeff_architecture"] in ["deep_mlp"]:
             return self.decoding_2decoders(us, winds, add_u=add_u)
-        elif self.options["coeff_architecture"] in ["TemporalGNN_Attention", "TemporalGNN_Attention_fourier", "TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced","cuts_mlp","cuts_lstm"]:
-            return self.decoding_1decoder(us, winds, add_u=add_u)
-        elif self.options["coeff_architecture"] == "causalrca":
-            return self.decoding_causalrca(us, winds, add_u=add_u, aux_vars=aux_vars)
 
     def forward(self, x,add_u=True):
         us, encoder_coeffs, nexts, winds, attn_weights, preds = self.encoding(x)
@@ -435,11 +314,7 @@ class AERCA(nn.Module):
             print(f"Error computing KL divergence: {e}")
             kl_div = torch.tensor(0.0, device=self.device)
 
-        if self.options["coeff_architecture"] == "causalrca":
-            # as attnn_weights contains both the attn_weights and aux vars used by the decoder
-            nexts_hat, decoder_coeffs, prev_coeffs = self.decoding(us, winds, add_u=add_u,aux_vars=attn_weights[1])
-            attn_weights = attn_weights[1]
-        elif self.options["coeff_architecture"] in self.models_encoder_only:
+        if self.options["coeff_architecture"] in self.models_encoder_only:
             #no decoder, so return empty tensors
             nexts_hat = preds 
             decoder_coeffs = torch.tensor([])
@@ -483,19 +358,13 @@ class AERCA(nn.Module):
         loss_kl = kl_div if self.options["coeff_architecture"] not in self.models_simple_next_step else torch.tensor(0.0)
         logging.info('KL loss: %s', loss_kl.item())
 
-        # constraint DAG if causla RCA
-        if self.options["coeff_architecture"] == "causalrca":
-            from models import causalrca
-            loss_DAG = causalrca._h_A(attns["adj_A1"])
-        else:
-            loss_DAG = torch.tensor(0.0)
+
         loss = (loss_recon +
                 self.encoder_lambda * loss_encoder_coeffs +
                 self.decoder_lambda * (loss_decoder_coeffs + loss_prev_coeffs) +
                 self.encoder_gamma * loss_encoder_smooth +
                 self.decoder_gamma * (loss_decoder_smooth + loss_prev_smooth) +
-                self.beta * loss_kl +  
-                loss_DAG #only for causal RCA
+                self.beta * loss_kl
                 )
         logging.info('Total loss: %s', loss.item())
 
@@ -507,8 +376,7 @@ class AERCA(nn.Module):
             "loss_encoder_smooth": loss_encoder_smooth.item(),
             "loss_decoder_smooth": loss_decoder_smooth.item(),
             "loss_prev_smooth": loss_prev_smooth.item(),
-            "loss_kl": loss_kl.item(),
-            "loss_DAG": loss_DAG.item() if self.options["coeff_architecture"] == "causalrca" else 0.0
+            "loss_kl": loss_kl.item()
         }
         tensorboard_log = {f'training_step/{key}': value for key, value in losses_to_log.items()}
         for key, value in tensorboard_log.items():
@@ -856,62 +724,6 @@ class AERCA(nn.Module):
         np.save(os.path.join(self.save_dir, f'{self.model_name}_recon_threshold.npy'), self.recon_threshold_value)
         np.save(os.path.join(self.save_dir, f'{self.model_name}_recon_mean.npy'), self.recon_mean)
         np.save(os.path.join(self.save_dir, f'{self.model_name}_recon_std.npy'), self.recon_std)
-
-    def _evaluate_rcd(self, xs, labels, bins=None, gamma=5, agg="mean"):
-        """
-        RCD baseline for root cause analysis with temporal windows preserved.
-        - xs: ndarray of shape [N, T, P]  (N windows, T timesteps, P variables)
-        - labels: ndarray of shape [N, T, P] (0=normal, 1=anomalous)
-        - agg: str, aggregation method across time ("mean", "median", "last")
-        """
-        import pandas as pd
-        from models.baselines.rcd import rca_with_rcd
-        import numpy as np
-
-        N, T, P = xs.shape
-
-        # --- Aggregate across the time dimension ---
-        if agg == "mean":
-            X_all = xs.mean(axis=1)       # (N, P)
-            y_all = labels.max(axis=1)    # (N, P), mark anomalous if anomaly in any timestep
-        elif agg == "median":
-            X_all = np.median(xs, axis=1) # (N, P)
-            y_all = labels.max(axis=1)
-        elif agg == "last":
-            X_all = xs[:, -1, :]          # take last timestep per window
-            y_all = labels[:, -1, :]
-        else:
-            raise ValueError(f"Unknown agg={agg}")
-
-        # --- Masks at window level ---
-        mask_normal = (y_all == 0).all(axis=-1)   # window normal if all vars=0
-        mask_anom   = (y_all == 1).any(axis=-1)   # window anomalous if any var=1
-
-        # --- Apply masks ---
-        normal_X = X_all[mask_normal, :]
-        anomalous_X = X_all[mask_anom, :]
-
-        # --- Convert to DataFrame ---
-        cols = [f"var{i}" for i in range(P)]
-        normal_df = pd.DataFrame(normal_X, columns=cols)
-        anomalous_df = pd.DataFrame(anomalous_X, columns=cols)
-
-        # --- Run RCD ---
-        result = rca_with_rcd(
-            normal_df,
-            anomalous_df,
-            bins=bins,
-            gamma=gamma,
-            localized=False,
-            verbose=False
-        )
-
-        return {
-            "root_cause": result['root_cause'],
-            "num_tests": result['tests'],
-            "time": result['time']
-        }
-
 
     def plot_case_study(self, z_scores, labels=None, attn_importance=None, mlp_scores=None, num_vars=None, threshold=0.1):
         """

@@ -433,8 +433,8 @@ def write_results(args, local_model_name, ac_at,k_at_step_all, total_params,file
 
         'correlated_KL': "correlated_&_normal" if args['correlated_KL'] == 1 else "normal_KL",
         'architecture': args['coeff_architecture'],
-        'attention_dim': args['attention_dim'],
-        'num_attention_heads': args['num_attention_heads'],
+        'hidden_layer_size': args['hidden_layer_size'],
+        'num_attention_heads': 0,#just to maintain the same format as previous results, since we are not using attention in O-ScaleRCA, we set it to 0
         'lr': args['lr'],
         
 
@@ -451,8 +451,8 @@ def write_results(args, local_model_name, ac_at,k_at_step_all, total_params,file
 
         'AMOC_Loss': args['AMOC_Loss'],
         'mean_std_recon_loss': args['mean_std_recon_loss'],
-        'outer_hidden_dim': args['outer_hidden_dim'],
-        'outer_heads_num': args['outer_heads_num'],
+        'outer_hidden_dim': args['outer_hidden_dim'] if 'outer_hidden_dim' in args else 0,
+        'outer_heads_num': args['outer_heads_num'] if 'outer_heads_num' in args else 0,
 
         #if "num_vars" in args, print it, else print 0 (num of species in lotka)
         'num_vars': args['num_vars'] if 'num_vars' in args else 0,
@@ -515,6 +515,8 @@ def write_results(args, local_model_name, ac_at,k_at_step_all, total_params,file
         "train_avg_epoch_time": extra_metrics["train_avg_epoch_time"] if extra_metrics and "train_avg_epoch_time" in extra_metrics else 0,
         "train_throughput": extra_metrics["train_throughput"] if extra_metrics and "train_throughput" in extra_metrics else 0,
         "train_peak_mem_mb": extra_metrics["train_peak_mem_mb"] if extra_metrics and "train_peak_mem_mb" in extra_metrics else 0,
+
+        "temporal_mixer": args['temporal_mixer'] if 'temporal_mixer' in args else 0,
     }
     
 

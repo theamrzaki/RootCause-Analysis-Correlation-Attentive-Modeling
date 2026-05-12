@@ -17,6 +17,7 @@ def create_arg_parser():
     parser.add_argument('--causal_quantile', type=float, default=0.70, help='Causal quantile (default: 0.70)')
     parser.add_argument('--shuffle', type=int, default=1, help='Flag for shuffling data (default: 1)')
     parser.add_argument('--main_model', type=str, default='aerca', help='Main model to use (default: aerca)')
+    parser.add_argument('--include_logs_and_traces', type=int, default=0, help='Flag for including logs and traces (default: 0)')
 
     # Meta arguments
     parser.add_argument('--seed', type=int, default=4, help='Random seed (default: 4)')
@@ -57,10 +58,7 @@ def create_arg_parser():
     
     # Architecture arguments
     parser.add_argument('--coeff_architecture', type=str, default='deep_mlp', help='Coefficient architecture options (deep_mlp, gnn_attention) (default: deep_mlp)')
-    parser.add_argument('--attention_dim', type=int, default=256, help='Attention dimension (default: 64)')
-    parser.add_argument('--num_attention_heads', type=int, default=2, help='Number of attention heads (default: 4)')
-    parser.add_argument('--outer_heads_num', type=int, default=2, help='Number of outer attention heads (default: 4)')
-    parser.add_argument('--outer_hidden_dim', type=int, default=128, help='Outer hidden dimension (default: 64)')
+    parser.add_argument('--temporal_mixer', type=int, default=0, help='Flag for using temporal mixer (default: 0)')
     
     # Attention arguments
     parser.add_argument('--global_attention_over_all_lag', type=str)

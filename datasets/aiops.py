@@ -22,119 +22,128 @@ class aiops:
         self.window_size = options['window_size']
         self.shuffle = options.get('shuffle', False)
         self.metric_types = ['container', 'istio', 'jvm', 'node', 'service']
-
-
-    def predict_best_sampling_rate(self, df, current_interval_sec=60):
-        """
-        Analyzes the wide table to suggest an optimal sampling interval.
-        
-        Args:
-            df: The wide table (full_df) from get_wide_table()
-            current_interval_sec: The existing time delta between rows (default 60s)
-            
-        Returns:
-            Suggested interval in seconds and a rationale.
-        """
-        # 1. Variance Check: Identify "Fast" vs "Slow" columns
-        # We look at the Power Spectral Density (PSD)
-        sampling_recommendations = []
-        
-        # We sample a subset of columns to save time
-        sample_cols = df.columns[np.random.choice(len(df.columns), min(20, len(df.columns)))]
-        
-        for col in sample_cols:
-            series = df[col].values
-            # Compute the frequency components
-            freqs, psd = welch(series, fs=1/current_interval_sec)
-            
-            # Find the frequency below which 90% of the power resides
-            cumulative_psd = np.cumsum(psd)
-            total_power = cumulative_psd[-1]
-            if total_power == 0: continue
-            
-            # Nyquist frequency needed for this specific metric
-            idx_90 = np.where(cumulative_psd >= 0.90 * total_power)[0][0]
-            f_max = freqs[idx_90]
-            
-            # Sampling interval = 1 / (2 * f_max)
-            if f_max > 0:
-                sampling_recommendations.append(1 / (2 * f_max))
-
-        if not sampling_recommendations:
-            return current_interval_sec, "Insufficient variance to determine rate."
-
-        avg_suggested_interval = np.median(sampling_recommendations)
-        
-        # Logic-based clamping
-        if avg_suggested_interval < current_interval_sec:
-            reason = "High-frequency noise/spikes detected. Consider higher resolution if available."
-        elif avg_suggested_interval > current_interval_sec * 2:
-            reason = "Data is redundant. You can downsample to save memory."
+        self.include_logs_and_traces = options.get('include_logs_and_traces', False)
+        if not self.include_logs_and_traces:
+            print("INFO: ONLY metric")
         else:
-            reason = "Current sampling rate is optimal for the signal-to-noise ratio."
+            print("INFO: INCLUDING logs and traces. This will increase feature count significantly.")
 
-        return round(avg_suggested_interval), reason
+    def get_log_features(self, date_dir):
+        log_base = os.path.join(date_dir, "cloudbed", "log", "all")
+        if not os.path.exists(log_base): return None
+
+        day_log_frames = []
+        
+        # 1. Envoy Logs: Use vectorized split instead of Regex extract
+        envoy_path = os.path.join(log_base, "log_filebeat-testbed-log-envoy.csv")
+        if os.path.exists(envoy_path):
+            df = pd.read_csv(envoy_path, usecols=['timestamp', 'cmdb_id', 'value'])
+            
+            # Faster positional splitting: isolate the status and latency block
+            # Envoy format usually: ... "METHOD PATH" STATUS FLAGS BYTES_SENT DURATION ...
+            # We split by quotes and then by spaces for the trailing metrics
+            val_parts = df['value'].str.rsplit('"', n=1).str[-1].str.split()
+            
+            df['is_error'] = val_parts.str[0].str.startswith(('4', '5')).fillna(0).astype(int)
+            df['latency'] = pd.to_numeric(val_parts.str[4], errors='coerce').fillna(0)
+            
+            # Pivot once for both features
+            pdf = df.pivot_table(index='timestamp', columns='cmdb_id', 
+                                values=['is_error', 'latency'], 
+                                aggfunc={'is_error': 'sum', 'latency': 'mean'}).fillna(0)
+            pdf.columns = [f"{c[1]}_{'envoy_err' if c[0]=='is_error' else 'avg_lat'}" for c in pdf.columns]
+            day_log_frames.append(pdf)
+
+        # 2. Service Logs: Use NumPy vectorized search (10x faster than str.contains)
+        service_path = os.path.join(log_base, "log_filebeat-testbed-log-service.csv")
+        if os.path.exists(service_path):
+            df_svc = pd.read_csv(service_path, usecols=['timestamp', 'cmdb_id', 'value'])
+            vals = df_svc['value'].str.lower().values.astype(str)
+            
+            # Vectorized keyword check
+            df_svc['is_error'] = np.char.find(vals, 'error') >= 0
+            df_svc['is_error'] |= np.char.find(vals, 'fail') >= 0
+            df_svc['is_error'] |= np.char.find(vals, 'exception') >= 0
+            
+            df_svc['is_conn'] = np.char.find(vals, 'timeout') >= 0
+            df_svc['is_conn'] |= np.char.find(vals, 'connect') >= 0
+            
+            pdf_svc = df_svc.pivot_table(index='timestamp', columns='cmdb_id', 
+                                        values=['is_error', 'is_conn'], 
+                                        aggfunc='sum').fillna(0)
+            pdf_svc.columns = [f"{c[1]}_{'svc_err' if c[0]=='is_error' else 'conn_fail'}" for c in pdf_svc.columns]
+            day_log_frames.append(pdf_svc)
+
+        return pd.concat(day_log_frames, axis=1) if day_log_frames else None
+
+    def get_trace_features(self, date_dir):
+        trace_path = os.path.join(date_dir, "cloudbed", "trace", "all", "trace_jaeger-span.csv")
+        if not os.path.exists(trace_path): return None
+
+        # Load only what we need and use int32/float32 to save memory
+        df = pd.read_csv(trace_path, usecols=['timestamp', 'cmdb_id', 'duration', 'status_code'])
+        
+        # 1. Vectorized Timestamp Scaling
+        df['timestamp'] = (df['timestamp'] // 1000).astype(int)
+
+        # 2. Vectorized Status Check (Avoid .apply())
+        # status_code 0, Ok, 200 are successes. Everything else is error.
+        success_codes = {'0', 'ok', '200', 0}
+        df['is_trace_err'] = (~df['status_code'].astype(str).str.lower().isin(success_codes)).astype(int)
+
+        # 3. Single Pivot for speed
+        pdf = df.pivot_table(index='timestamp', columns='cmdb_id', 
+                            values=['duration', 'is_trace_err'],
+                            aggfunc={'duration': 'mean', 'is_trace_err': 'sum'}).fillna(0)
+        
+        pdf.columns = [f"{c[1]}_{'span_dur' if c[0]=='duration' else 'span_err'}" for c in pdf.columns]
+        return pdf
 
     def get_wide_table(self):
-        """
-        Flattens the entire directory tree into a single Wide Table.
-        """
-        # Find all date directories (e.g., 2022-05-01)
         date_dirs = sorted([d for d in glob(os.path.join(self.data_dir, "2022-*")) if os.path.isdir(d)])
-        
         all_date_frames = []
 
         for d_dir in tqdm(date_dirs, desc="Processing Date Folders"):
-            # Path: root/2022-05-01/cloudbed/metric/
             metric_base = os.path.join(d_dir, "cloudbed", "metric")
-            day_frames = []
+            day_metric_frames = [] # Consistent list name
 
+            # A. Process Metrics
             for m_type in self.metric_types:
                 type_path = os.path.join(metric_base, m_type)
-                if not os.path.exists(type_path):
-                    continue
+                if not os.path.exists(type_path): continue
 
                 csv_files = glob(os.path.join(type_path, "*.csv"))
                 for f in csv_files:
-                    
-                    # e.g., 'container_cpu_system'
                     metric_name = os.path.basename(f).replace(".csv", "").replace("kpi_", "")
-                    # DIMENSIONALITY REDUCTION: Only keep essential metrics
-                    #if not any(key in metric_name for key in self.essential_keywords):
-                    #    continue
-                    df = pd.read_csv(f)
-                    
-                    # Keep the first occurrence of each (timestamp, cmdb_id) pair
-                    df = df.drop_duplicates(keep='first')
-
-                    # Core Logic: Pivot the data
-                    # Original: [timestamp, cmdb_id, value]
-                    # Pivoted: Index=timestamp, Columns=cmdb_id_metric_name
+                    df = pd.read_csv(f).drop_duplicates(keep='first')
                     try:
-                        pivoted = df.pivot_table(
-                            index='timestamp', 
-                            columns='cmdb_id', 
-                            values='value', 
-                            aggfunc='max' 
-                        )
+                        pivoted = df.pivot_table(index='timestamp', columns='cmdb_id', values='value', aggfunc='max')
                         pivoted.columns = [f"{col}_{metric_name}" for col in pivoted.columns]
-                        day_frames.append(pivoted)
+                        day_metric_frames.append(pivoted)
                     except Exception as e:
                         print(f"Error processing {f}: {e}")
 
-            if day_frames:
-                # Merge all metrics for this specific day
-                day_wide = pd.concat(day_frames, axis=1)
-                all_date_frames.append(day_wide)
+            print(f"num metric features for {d_dir}: {sum(len(df.columns) for df in day_metric_frames)}")
+            if day_metric_frames and self.include_logs_and_traces:
+                # Merge all metric columns for the day
+                day_wide = pd.concat(day_metric_frames, axis=1)
 
-        # Final Vertical Concatenation of all days
+                # B. Join Logs (Left join keeps metric timestamps as the baseline)
+                log_features = self.get_log_features(d_dir)
+                if log_features is not None:
+                    day_wide = day_wide.join(log_features, how='left')
+
+                # C. Join Traces
+                trace_features = self.get_trace_features(d_dir)
+                if trace_features is not None:
+                    day_wide = day_wide.join(trace_features, how='left')
+
+                all_date_frames.append(day_wide.fillna(0))
+            if not self.include_logs_and_traces:
+                all_date_frames.append(pd.concat(day_metric_frames, axis=1).fillna(0))
+                
         print("Finalizing global alignment...")
-        full_df = pd.concat(all_date_frames, axis=0).sort_index()
-        
-        # Topology-Agnostic Handling: 
-        # If a metric didn't exist at a certain time (e.g., a container wasn't scaled up), fill with 0.
-        full_df = full_df.fillna(0)
-        
+        full_df = pd.concat(all_date_frames, axis=0).sort_index().fillna(0)
         return full_df
 
     def parse_json_groundtruth(self, full_df):
@@ -183,10 +192,8 @@ class aiops:
 
     def generate_example(self):
         df = self.get_wide_table()
-        avg_suggested_interval, reason = self.predict_best_sampling_rate(df)  # Optional: Get sampling rate suggestions based on the data
         
         df = df.iloc[::1, :]  # Resample the data based on the suggested interval (assuming original is 1 minute)
-        print(f"Data resampled to every {avg_suggested_interval} seconds. Reason: {reason}")
         
         # 2. Top-K Volatility (Coefficient of Variation)
         # 1. Calculate volatility as usual
@@ -367,7 +374,8 @@ if __name__ == "__main__":
         'data_dir': '/home/db2003/Desktop/Amr/Tests/Medicine/dataset/aiops22-pre/初赛评分数据',
         'seed': 1,
         'window_size': 10,
-        'shuffle': True
+        'shuffle': True,
+        'include_logs_and_traces': True
     }
     dataset = aiops(options)
     dataset.generate_example()
