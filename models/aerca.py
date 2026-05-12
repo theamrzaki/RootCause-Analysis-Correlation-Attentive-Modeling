@@ -523,99 +523,108 @@ class AERCA(nn.Module):
             raise ValueError(f"Unknown dataset {self.options['dataset']} for training")
         
     def _training_batches_swat(self, xs, batch_size=512):
-        """
-        xs: list of windows, each of shape (window_size+1, num_vars)
-        batch_size: number of windows per batch
-        """
-
         import time
         import numpy as np
         import psutil
         import threading
+        import os
+        import torch
+        from torch.utils.data import DataLoader, TensorDataset
         from collections import defaultdict
+        from tqdm import tqdm
 
+        # =========================================================
+        # SPLIT DATA (KEEP ON CPU)
+        # =========================================================
         split_idx = int(0.8 * len(xs))
         xs_train = xs[:split_idx]
         xs_val = xs[split_idx:]
 
-        best_val_loss = np.inf
-        early_stop_counter = 0
+        # Convert once (CPU tensors ONLY)
+        xs_train = torch.tensor(xs_train, dtype=torch.float32)
+        xs_val = torch.tensor(xs_val, dtype=torch.float32)
 
         # =========================================================
-        # TRAINING METRICS STORAGE
+        # DATALOADERS (correct + fast)
         # =========================================================
+        train_loader = DataLoader(
+            TensorDataset(xs_train),
+            batch_size=batch_size,
+            shuffle=True,
+            pin_memory=True,
+            num_workers=4,
+            persistent_workers=True
+        )
+
+        val_loader = DataLoader(
+            TensorDataset(xs_val),
+            batch_size=batch_size,
+            shuffle=False,
+            pin_memory=True,
+            num_workers=2,
+        )
+
+        # =========================================================
+        # METRICS
+        # =========================================================
+        best_val_loss = float("inf")
+        early_stop_counter = 0
+
         epoch_times = []
         train_losses = []
 
-        use_cuda = torch.cuda.is_available() and self.device != "cpu"
         process = psutil.Process(os.getpid())
 
-        # =========================================================
-        # MEMORY POLLING SETUP (CPU PEAK TRACKING)
-        # =========================================================
         peak_mem_bytes = {"value": 0}
         stop_event = threading.Event()
 
         def memory_poller():
-            """Continuously tracks CPU memory usage (true peak)."""
             while not stop_event.is_set():
                 mem = process.memory_info().rss
-                if mem > peak_mem_bytes["value"]:
-                    peak_mem_bytes["value"] = mem
-                time.sleep(0.01)  # 10ms resolution
+                peak_mem_bytes["value"] = max(peak_mem_bytes["value"], mem)
+                time.sleep(0.1)
 
         monitor_thread = None
-        if not use_cuda:
+        if not torch.cuda.is_available():
             monitor_thread = threading.Thread(target=memory_poller)
             monitor_thread.start()
 
-        if use_cuda:
+        if torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats()
 
         # =========================================================
-        # TRAINING LOOP
+        # TRAIN LOOP
         # =========================================================
         for epoch in tqdm(range(self.epochs), desc="Epoch"):
+
             self.current_epoch = epoch
             self.train()
 
-            epoch_start_time = time.time()
+            epoch_start = time.time()
             epoch_loss = 0.0
 
-            np.random.shuffle(xs_train)
+            # -----------------------------
+            # TRAIN STEP
+            # -----------------------------
+            for (x_batch,) in train_loader:
 
-            for i in range(0, len(xs_train), batch_size):
-                batch_windows = xs_train[i:i + batch_size]
-                x_batch = torch.tensor(batch_windows, dtype=torch.float32, device=self.device)
+                x_batch = x_batch.to(self.device, non_blocking=True)
 
                 self.optimizer.zero_grad()
 
                 loss, _ = self._training_step(x_batch)
+
                 loss.backward()
+                self.optimizer.step()
 
-                try:
-                    self.optimizer.step()
-                except Exception as e:
-                    print(e)
-                    if "CUDA out of memory" in str(e):
-                        self._log_and_print("CUDA OOM: stopping training early.")
+                epoch_loss += loss.detach()
 
-                        write_results(
-                            self.options,
-                            self.local_model_name,
-                            [0, 0, 0, 0],
-                            [0] * 10,
-                            self.total_params,
-                            self.options.get("results_csv", "results.csv"),
-                        )
-                        os._exit(1)
-
-                epoch_loss += loss.item()
+            epoch_loss = epoch_loss.item()
 
             # =========================================================
-            # EPOCH METRICS
+            # LOGGING
             # =========================================================
-            epoch_time = time.time() - epoch_start_time
+            epoch_time = time.time() - epoch_start
             epoch_times.append(epoch_time)
             train_losses.append(epoch_loss)
 
@@ -630,18 +639,19 @@ class AERCA(nn.Module):
             )
 
             # =========================================================
-            # VALIDATION LOOP
+            # VALIDATION
             # =========================================================
             self.eval()
             val_loss = 0.0
             losses_dict_validation = defaultdict(float)
 
             with torch.no_grad():
-                for i in range(0, len(xs_val), batch_size):
-                    batch_windows = xs_val[i:i + batch_size]
-                    x_batch = torch.tensor(batch_windows, dtype=torch.float32, device=self.device)
+                for (x_batch,) in val_loader:
+
+                    x_batch = x_batch.to(self.device, non_blocking=True)
 
                     loss, losses_dict = self._training_step(x_batch)
+
                     val_loss += loss.item()
 
                     for k, v in losses_dict.items():
@@ -655,7 +665,7 @@ class AERCA(nn.Module):
             logging.info("Val Loss: %.6f", val_loss)
 
             # =========================================================
-            # CHECKPOINT + EARLY STOPPING
+            # EARLY STOPPING
             # =========================================================
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
@@ -676,16 +686,20 @@ class AERCA(nn.Module):
                 self.writer.flush()
 
         # =========================================================
-        # STOP MEMORY POLLER + FINAL METRICS
+        # STOP MONITORING
         # =========================================================
-        if not use_cuda:
+        if monitor_thread is not None:
             stop_event.set()
             monitor_thread.join()
 
-            peak_mem_mb = peak_mem_bytes["value"] / (1024 ** 2)
-        else:
+        if torch.cuda.is_available():
             peak_mem_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
+        else:
+            peak_mem_mb = peak_mem_bytes["value"] / (1024 ** 2)
 
+        # =========================================================
+        # FINAL METRICS
+        # =========================================================
         total_train_time = sum(epoch_times)
         avg_epoch_time = np.mean(epoch_times)
         train_throughput = len(xs_train) / avg_epoch_time if avg_epoch_time > 0 else 0
@@ -713,6 +727,8 @@ class AERCA(nn.Module):
         )
 
         logging.info("Training complete")
+
+
 
     def _testing_step(self, x, label=None, add_u=True):
         nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us, attn_weights = self.forward(x, add_u=add_u)
