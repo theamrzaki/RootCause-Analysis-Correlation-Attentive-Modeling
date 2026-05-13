@@ -3,7 +3,7 @@ conda activate RCAEval
 
 seeds=(1)
 dataset="aiops"
-window_size=(12 16 20)
+window_size=(8 12 16 20)
 lrs=("1e-4")
 results_csv="RQ_1_aiops_final.csv"
 
@@ -96,6 +96,33 @@ run_experiment_baselines() {
 #---------------------------------------------------------------------------
 #-----------------------------run experiments-------------------------------
 #---------------------------------------------------------------------------
+#####for seed in "${seeds[@]}"; do
+#####    for window_size_item in "${window_size[@]}"; do
+#####        preprocessing_data=1 
+#####        run_deep_models $preprocessing_data $seed $window_size_item "vlinear"
+#####        preprocessing_data=0
+#####        run_deep_models $preprocessing_data $seed $window_size_item "GVAR"
+#####
+#####        if [ $window_size_item -ne 8 ]; then
+#####             run_experiment_baselines $preprocessing_data $seed $window_size_item
+#####        fi
+#####        
+#####        #run_deep_models $preprocessing_data $seed $window_size_item "cLSTM"
+#####        #run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS"
+#####    done
+#####done
+
+    
+for seed in "${seeds[@]}"; do
+    for window_size_item in "${window_size[@]}"; do
+        preprocessing_data=1
+        run_deep_models $preprocessing_data $seed $window_size_item "cLSTM"
+        preprocessing_data=0
+        run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS"
+    done
+done
+
+seeds=(2)
 for seed in "${seeds[@]}"; do
     for window_size_item in "${window_size[@]}"; do
         preprocessing_data=1 
@@ -111,8 +138,6 @@ for seed in "${seeds[@]}"; do
         #run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS"
     done
 done
-
-    
 for seed in "${seeds[@]}"; do
     for window_size_item in "${window_size[@]}"; do
         preprocessing_data=1
