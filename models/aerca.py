@@ -12,7 +12,6 @@ from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 from collections import defaultdict
 import torch.nn.functional as F
-from models.scoring import scoring
 from models.statical_rca import StatisticalRCA
 
 import numpy as np
@@ -1489,39 +1488,3 @@ class AERCA(nn.Module):
 
         print(f"[✓] Heatmap + JSON saved for window {t_start}:{t_end}")
 
-    def run_rca(self, anomaly, data, data_scaled):
-        scores = scoring(data=data, data_scaled=data_scaled, anomaly=anomaly)
-        sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-
-        return sorted_scores
-
-
-    def run_for_datapath(datapath, args):
-        args.datapath = datapath
-
-        data, data_scaled, inject_time = prepare_data(datapath=datapath)
-            
-        if args.ad is None or args.ad == "inject":
-            anomaly = inject_time
-        else:
-            dataset = datapath.strip(os.sep).split(os.sep)[3]
-
-            complexity = "simple" if "simple" in datapath else "full"
-            anomalies_path = f"./evaluation_ad/{args.ad}_{dataset}_{complexity}.txt"
-
-            anomalies = None
-            with open(anomalies_path, "r") as file:
-                for line in file:
-                    if args.datapath in line.lower():
-                        anomalies = line.strip()
-                        break
-            
-            anomalies = re.search(r'\[(.*?)\]', anomalies).groups()[0]
-            anomaly = anomalies.split(",")[0]
-            anomaly = int(anomaly)    
-        
-        rca_start = time()
-        sorted_scores = run_rca(args, anomaly, data, data_scaled)
-        rca_end = time()    
-
-        return datapath, rca_end-rca_start, sorted_scores

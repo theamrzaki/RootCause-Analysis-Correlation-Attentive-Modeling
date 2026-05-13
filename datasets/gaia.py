@@ -7,14 +7,15 @@ import numpy as np
 from sklearn.preprocessing import RobustScaler
 import torch
 from tqdm import tqdm
-#from layers.vlinear_arch import OrthTransform 
+from layers.vlinear_arch import OrthTransform 
 
 class GAIA:
     def __init__(self, options):
         self.options = options
         self.data_dir = options.get('data_dir')
         self.window_size = options.get('window_size')
-        self.service_prefix = options.get('service_prefix') # Adjust based on your target service in GAIA
+        #self.service_prefix = options.get('service_prefix') # Adjust based on your target service in GAIA
+        self.service_prefixes =  ['dbservice1', 'authservice', 'cache']
         self.urls = {
             'MicroSS': 'https://github.com/CloudWise-OpenSource/GAIA-DataSet/archive/refs/heads/main.zip'
         }
@@ -103,42 +104,68 @@ class GAIA:
         return extracted_path
 
     def load_metrics_as_matrix(self, metric_dir):
+
         extracted_csv_dir = self.extract_split_zip(metric_dir) + "/metric"
-        # Filter files that contain the service name
-        all_files = [f for f in os.listdir(extracted_csv_dir) 
-                        if self.service_prefix in f]
-        # 1. Use a smaller subset for stable RCA (e.g., 200 files) 
-        # or process in buckets of 50 to avoid the 'freeze'
-        all_files = all_files#[:200] 
+
+        all_files = [
+            f for f in os.listdir(extracted_csv_dir)
+            if any(prefix in f for prefix in self.service_prefixes)
+        ]
+
         bucket_size = 50
+
         final_df = None
 
         for i in range(0, len(all_files), bucket_size):
-            bucket = all_files[i : i + bucket_size]
+
+            bucket = all_files[i:i + bucket_size]
             df_list = []
-            
-            for f in tqdm(bucket, desc=f"Processing Bucket {i//bucket_size + 1}"):
+
+            for f in tqdm(bucket, desc=f"Bucket {i//bucket_size + 1}"):
+
                 df = pd.read_csv(os.path.join(extracted_csv_dir, f))
                 indicator = f.replace('.csv', '')
-                df = df.rename(columns={'value': indicator}).drop_duplicates('timestamp')
-                df_list.append(df.set_index('timestamp'))
-            
-            # Merge the current bucket
-            bucket_df = pd.concat(df_list, axis=1, join='outer')
-            
-            # Combine bucket with the final result
+
+                df = df.rename(columns={'value': indicator})
+
+                df['timestamp'] = pd.to_datetime(df['timestamp'])
+                df = df.drop_duplicates('timestamp')
+
+                df = df.set_index('timestamp')
+
+                # ⚠️ reduce memory early (CRITICAL)
+                df[indicator] = df[indicator].astype(np.float32)
+
+                df_list.append(df)
+
+            # merge within bucket (safe)
+            bucket_df = pd.concat(df_list, axis=1, join='outer').sort_index()
+
+            del df_list
+
+            # ---------------------------
+            # 🔴 MEMORY-SAFE MERGE STRATEGY
+            # ---------------------------
+
             if final_df is None:
                 final_df = bucket_df
             else:
-                final_df = pd.concat([final_df, bucket_df], axis=1, join='outer')
-            
-            # Explicitly clear memory
-            del df_list
+                # avoid full recomputation of both sides repeatedly
+                final_df = final_df.join(bucket_df, how='outer')
+
             del bucket_df
 
-        # 2. Final cleanup for 'Collector Gaps'
-        # sort_index is crucial before ffill
-        final_df = final_df.sort_index().interpolate(method='linear', limit=10).fillna(0)
+        # ---------------------------
+        # FINAL REDUCTION STEP
+        # ---------------------------
+
+        final_df = final_df.sort_index()
+
+        # downcast BEFORE interpolation (very important)
+        final_df = final_df.astype(np.float32)
+
+        final_df = final_df.interpolate(limit=10).fillna(0)
+
         return final_df.reset_index()
 
     def process_normal(self, combined_train, target_len):
@@ -357,7 +384,7 @@ class GAIA:
         self.data_dict['label_list'] = np.load(os.path.join(self.data_dir, 'label_list.npy'))
         orth_matrix_dir = os.path.join(self.data_dir, 'orth_transform_meta')
         self.pipeline_sanity_check()
-        return None#self.apply_orthogonal_transform(save_path=orth_matrix_dir, device='cpu')
+        return self.apply_orthogonal_transform(save_path=orth_matrix_dir, device='cpu')
 
 
 

@@ -363,3 +363,80 @@ class vlinear(nn.Module):
 
         return preds, coeffs_time, coeffs_freq
     
+
+
+class MultiModalVLinear(nn.Module):
+    def __init__(self, metric_dim, log_dim, trace_dim,
+                 order, hidden_dim=128, device="cpu", options=None):
+
+        super().__init__()
+        self.md, self.ld, self.td = metric_dim, log_dim, trace_dim
+        self.total = metric_dim + log_dim + trace_dim
+
+        self.metric_orth = (options or {}).get("orth_transformer", None)
+
+        # adapters (map -> metric space)
+        self.ma = nn.Sequential(nn.Linear(metric_dim, metric_dim), nn.LayerNorm(metric_dim))
+        self.la = nn.Sequential(nn.Linear(log_dim, metric_dim), nn.LayerNorm(metric_dim))
+        self.ta = nn.Sequential(nn.Linear(trace_dim, metric_dim), nn.LayerNorm(metric_dim))
+
+        # shared backbone
+        opts = dict(options or {})
+        opts["orth_transformer"] = None
+
+        self.backbone = vlinear(
+            num_vars=metric_dim,
+            order=order,
+            hidden_dim=hidden_dim,
+            device=device,
+            options=opts,
+        )
+
+        # fusion + output
+        self.attn = nn.Linear(hidden_dim, 1)
+        self.out = nn.Linear(metric_dim, self.total)
+
+    # ---------------- utils ----------------
+
+    def split(self, x):
+        m, l = self.md, self.md + self.ld
+        return x[..., :m], x[..., m:l], x[..., l:]
+
+    def enc(self, x):
+        return self.backbone(x)
+          # [B,P,H]
+
+    def fuse_linear_attn(self, zs):
+        z = torch.stack(zs, dim=1)  # [B,3,P,H]
+
+        q = torch.nn.functional.elu(z) + 1
+        k = torch.nn.functional.elu(z) + 1
+
+        scores = torch.einsum('bmph,bnph->bmpn', q, k)  # [B,3,P,3]
+
+        attn = torch.softmax(scores, dim=-1)
+
+        z_fused = torch.einsum('bmpn,bnph->bmph', attn, z)
+
+        return z_fused.mean(dim=-1), attn
+
+    # ---------------- forward ----------------
+
+    def forward(self, x):
+
+        xm, xl, xt = self.split(x)
+
+        if self.metric_orth is not None:
+            xm = self.metric_orth(xm)
+
+        xm, xl, xt = self.ma(xm), self.la(xl), self.ta(xt)
+
+        pm, _, _, zm = self.enc(xm)
+        pl, _, _, zl = self.enc(xl)
+        pt, _, _, zt = self.enc(xt)
+
+        zf, attn = self.fuse_linear_attn([zm, zl, zt])
+
+        pred = self.out(zf.mean(-1))
+
+        return pred, attn

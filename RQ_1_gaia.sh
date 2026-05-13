@@ -1,44 +1,41 @@
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate RCAEval
 
-seeds=(2 3)
+seeds=(1)
 dataset="gaia"
-window_size=(8 10 12 14)
+window_size=(12 14)
 lrs=("1e-4")
+results_csv="RQ_1_gaia_final.csv"
 
 BETA_VAL=0.01
 LAMBDA_VAL=0.5
 GAMMA_VAL=0.2
 
+
 #-------------------------------------------------------------------
-#-----------------------------vlinear-------------------------------
+#-----------------------------deep models---------------------------
 #-------------------------------------------------------------------
 
 
 
-run_vlinear() {
+run_deep_models() {
     local preprocessing_data=$1
     local seed=$2
     local window_size_item=$3
-
-    local arch="vlinear"
+    local arch=$4
     local main_model="aerca_based"
-    local attention_dim=16
-    local heads=2
-    local outer_att_dim_val=16
-    local outer_heads_val=2
+    local hidden_layer_size=256
 
-                                echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model"
+                                echo "Running:  arch=$arch | dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model | preprocessing_data=$preprocessing_data"
 
 
                                 cmd="python3 main.py \
-                                        --correlated_KL=0 --mean_std_recon_loss=0 --AMOC_Loss=0 \
                                         --encoder_gamma=$GAMMA_VAL --decoder_gamma=$GAMMA_VAL \
                                         --encoder_lambda=$LAMBDA_VAL --decoder_lambda=$LAMBDA_VAL --beta=$BETA_VAL \
 
                                     --main_model=$main_model \
                                     --coeff_architecture="$arch" \
-                                    --time_freq_representation="mag_phase" \
+                                    --temporal_mixer=0 \
 
                                     --preprocessing_data="$preprocessing_data" \
 
@@ -49,127 +46,10 @@ run_vlinear() {
 
                                     --training_aerca=1 \
                                     --epochs=200 \
-                                    --early_stopping=0 \
-                                    --combine_method="attention" \
-                                    --results_csv="RQ_1_gaia_allmodels_50vars.csv" \
+                                    --results_csv="$results_csv" \
 
-                                    --attention_dim="$attention_dim" \
-                                    --num_attention_heads="$heads" \
-                                    --outer_heads_num="$outer_heads_val" \
-                                    --outer_hidden_dim="$outer_att_dim_val" \
-
-                                       "
-
-                                eval $cmd
-                        
-            
-}
-
-
-
-#-------------------------------------------------------------------
-#-----------------------------GVAR----------------------------------
-#-------------------------------------------------------------------
-
-
-
-run_GVAR() {
-    local preprocessing_data=$1
-    local seed=$2
-    local window_size_item=$3
-
-    local lrs=("1e-4")
-    local arch="GVAR"
-    local main_model="aerca_based"
-    local attention_dim=256
-    local heads=2
-    local outer_att_dim_val=256
-    local outer_heads_val=2
-
-                                echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model"
-
-                                cmd="python3 main.py \
-                                        --correlated_KL=0 --mean_std_recon_loss=0 --AMOC_Loss=0 \
-                                        --encoder_gamma=$GAMMA_VAL --decoder_gamma=$GAMMA_VAL \
-                                        --encoder_lambda=$LAMBDA_VAL --decoder_lambda=$LAMBDA_VAL --beta=$BETA_VAL \
-
-                                    --main_model=$main_model \
-                                    --coeff_architecture="$arch" \
-                                    --time_freq_representation="mag_phase" \
-
-                                    --lr="$lrs" \
-                                    --seed="$seed" \
-                                    --dataset="$dataset" \
-                                    --window_size="$window_size_item" \
-
-                                    --training_aerca=1 \
-                                    --epochs=200 \
-                                    --early_stopping=0 \
-                                    --preprocessing_data=$preprocessing_data \
-                                    --combine_method="attention" \
-                                    --results_csv="RQ_1_gaia_allmodels_50vars.csv" \
-
-                                    --attention_dim="$attention_dim" \
-                                    --num_attention_heads="$heads" \
-                                    --outer_heads_num="$outer_heads_val" \
-                                    --outer_hidden_dim="$outer_att_dim_val" \
-
-                                       "
-
-                                eval $cmd
-                        
-            
-}
-
-
-#-------------------------------------------------------------------
-#-----------------------------GVAR----------------------------------
-#-------------------------------------------------------------------
-
-
-
-run_cLSTM() {
-    local preprocessing_data=$1
-    local seed=$2
-    local window_size_item=$3
-
-    local lrs=("1e-4")
-    local arch="cLSTM"
-    local main_model="aerca_based"
-    local attention_dim=256
-    local heads=2
-    local outer_att_dim_val=256
-    local outer_heads_val=2
-
-                                echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model"
-
-                                cmd="python3 main.py \
-                                        --correlated_KL=0 --mean_std_recon_loss=0 --AMOC_Loss=0 \
-                                        --encoder_gamma=$GAMMA_VAL --decoder_gamma=$GAMMA_VAL \
-                                        --encoder_lambda=$LAMBDA_VAL --decoder_lambda=$LAMBDA_VAL --beta=$BETA_VAL \
-
-                                    --main_model=$main_model \
-                                    --coeff_architecture="$arch" \
-                                    --time_freq_representation="mag_phase" \
-
-                                    --lr="$lrs" \
-                                    --seed="$seed" \
-                                    --dataset="$dataset" \
-                                    --window_size="$window_size_item" \
-
-                                    --training_aerca=1 \
-                                    --epochs=200 \
-                                    --early_stopping=0 \
-                                    --preprocessing_data=$preprocessing_data \
-                                    --combine_method="attention" \
-                                    --results_csv="RQ_1_gaia_allmodels_50vars.csv" \
-
-                                    --attention_dim="$attention_dim" \
-                                    --num_attention_heads="$heads" \
-                                    --outer_heads_num="$outer_heads_val" \
-                                    --outer_hidden_dim="$outer_att_dim_val" \
-
-                                       "
+                                    --hidden_layer_size="$hidden_layer_size" \
+                                "
 
                                 eval $cmd
                         
@@ -177,63 +57,8 @@ run_cLSTM() {
 }
 
 #-------------------------------------------------------------------
-#-----------------------------causalrca-----------------------------
-#-------------------------------------------------------------------
-
-
-
-run_causalrca() {
-
-    local preprocessing_data=$1
-    local seed=$2
-    local window_size_item=$3
-
-    local arch="causalrca"
-    local main_model="aerca_based"
-    local attention_dim=256
-    local heads=2
-    local outer_att_dim_val=256
-    local outer_heads_val=2
-
-                                echo "Running: dataset=$dataset | seed=$seed | window_size=$window_size_item | lr=$lrs | main_model=$main_model"
-
-                                cmd="python3 main.py \
-                                        --correlated_KL=0 --mean_std_recon_loss=0 --AMOC_Loss=0 \
-                                        --encoder_gamma=$GAMMA_VAL --decoder_gamma=$GAMMA_VAL \
-                                        --encoder_lambda=$LAMBDA_VAL --decoder_lambda=$LAMBDA_VAL --beta=$BETA_VAL \
-
-                                    --main_model=$main_model \
-                                    --coeff_architecture="$arch" \
-                                    --time_freq_representation="mag_phase" \
-
-                                    --lr="$lrs" \
-                                    --seed="$seed" \
-                                    --dataset="$dataset" \
-                                    --window_size="$window_size_item" \
-
-                                    --training_aerca=1 \
-                                    --epochs=200 \
-                                    --early_stopping=0 \
-                                    --preprocessing_data=$preprocessing_data \
-                                    --combine_method="attention" \
-                                    --results_csv="RQ_1_gaia_allmodels_50vars.csv" \
-
-                                    --attention_dim="$attention_dim" \
-                                    --num_attention_heads="$heads" \
-                                    --outer_heads_num="$outer_heads_val" \
-                                    --outer_hidden_dim="$outer_att_dim_val" \
-
-                                       "
-
-                                eval $cmd
-                        
-            
-}
-
-#-------------------------------------------------------------------
-#-----------------------------rcd & epsilon diagnosis---------------
-#-------------------------------------------------------------------
-
+#-----------------------------experiment_baselines------------------
+#-------------------------------------------------------------------	
 
 
 run_experiment_baselines() {
@@ -242,10 +67,10 @@ run_experiment_baselines() {
     local window_size_item=$3
 
     local coeff_architecture=("torai" "baro" "rcd")
-    local main_model="aerca_based" # Changed from array to string
+    local main_model="aerca_based"
 
     for arch in "${coeff_architecture[@]}"; do
-        echo "Running: dataset=$dataset | seed=$seed | arch=$arch | window_size=$window_size_item"
+        echo "Running: arch=$arch | dataset=$dataset | seed=$seed | arch=$arch | window_size=$window_size_item |  preprocessing_data=$preprocessing_data"
         # only run preprocessing for the first coeff_architecture to avoid redundant preprocessing
         if [ $arch == "torai" ]; then
             preprocessing_flag=$preprocessing_data
@@ -260,7 +85,7 @@ run_experiment_baselines() {
             --window_size=$window_size_item \
             --main_model=$main_model \
             --training_aerca=0 \
-            --results_csv=RQ_1_gaia_allmodels_50vars.csv" # Removed the comment/backslash error here
+            --results_csv=$results_csv" 
 
         eval $cmd
     done
@@ -268,44 +93,35 @@ run_experiment_baselines() {
 
 
 
-#-------------------------------------------------------------------
-#-----------------------------GAIA experiments-------------------------
-#-------------------------------------------------------------------
 
-for window_size_item in "${window_size[@]}"; do
-    for seed in "${seeds[@]}"; do
-        if [ $seed -eq 2 ]; then
-            preprocessing_data=1
-        else
-            preprocessing_data=0
-        fi
-        #run_vlinear $preprocessing_data $seed $window_size_item
-        run_cLSTM $preprocessing_data $seed $window_size_item
-        if [ $preprocessing_data -eq 1 ]; then
-            preprocessing_data=0
-        fi
-        #run_GVAR $preprocessing_data $seed $window_size_item
+#---------------------------------------------------------------------------
+#-----------------------------run experiments-------------------------------
+#---------------------------------------------------------------------------
+seeds=(1)
+window_size=(12)
+for seed in "${seeds[@]}"; do
+    for window_size_item in "${window_size[@]}"; do
+        preprocessing_data=1
+        run_deep_models $preprocessing_data $seed $window_size_item "cLSTM"
+        preprocessing_data=0
         
+        
+        #run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS"
+    done
+done
+
+
+window_size=(14)
+for seed in "${seeds[@]}"; do
+    for window_size_item in "${window_size[@]}"; do
+        preprocessing_data=1
+        run_deep_models $preprocessing_data $seed $window_size_item "GVAR"
+        preprocessing_data=0
+        run_deep_models $preprocessing_data $seed $window_size_item "cLSTM"
+        run_experiment_baselines $preprocessing_data $seed $window_size_item
     done
 done
 
 
 
-#seeds=(1 2 3)
-#dataset="gaia"
-#window_size=(8)
-#lrs=("1e-4")
-#
-#for window_size_item in "${window_size[@]}"; do
-#    for seed in "${seeds[@]}"; do
-#        if [ $seed -eq 1 ]; then
-#            preprocessing_data=1
-#        else
-#            preprocessing_data=0
-#        fi
-#        run_experiment_baselines $preprocessing_data $seed $window_size_item
-#        if [ $preprocessing_data -eq 1 ]; then
-#            preprocessing_data=0
-#        fi        
-#    done
-#done
+
