@@ -39,7 +39,8 @@ run_vlinear() {
                                     --main_model=$main_model \
                                     --coeff_architecture="$arch" \
                                     --time_freq_representation="mag_phase" \
-
+                                    --temporal_mixer=1 \
+                                    
                                     --preprocessing_data="$preprocessing_data" \
 
                                     --lr="$lrs" \
@@ -272,8 +273,8 @@ run_CUTS_PLUS_SMD() {
 }
 
 
-seeds=(1 2 3)
-window_size=(4 6 10 20 30)
+seeds=(2 3)
+window_size=(4 6 10 20)
 
 for seed in "${seeds[@]}"; do
     for window_size_item in "${window_size[@]}"; do
@@ -281,8 +282,8 @@ for seed in "${seeds[@]}"; do
         run_vlinear $preprocessing_data $seed $window_size_item
             preprocessing_data=0
         run_GVAR $preprocessing_data $seed $window_size_item
-        run_cLSTM $preprocessing_data $seed $window_size_item
-        run_experiment_baselines $preprocessing_data $seed $window_size_item        
+        run_experiment_baselines $preprocessing_data $seed $window_size_item  
+        run_cLSTM $preprocessing_data $seed $window_size_item              
         run_CUTS_PLUS_SMD $preprocessing_data $seed $window_size_item   
     done
 done
