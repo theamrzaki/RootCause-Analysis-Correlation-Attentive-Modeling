@@ -473,8 +473,8 @@ class aiops:
         # =========================================================
         # 4. LOG / TRACE DIMENSION CONTROL (SAFE NOW)
         # =========================================================
-        log_keep = self.options.get("log_features", 10)
-        trace_keep = self.options.get("trace_features", 10)
+        log_keep = self.options.get("log_features", self.options.get("num_log_features", 10))
+        trace_keep = self.options.get("trace_features", self.options.get("num_trace_features", 10))
 
         if log_df is not None:
             log_df = log_df.loc[:, log_df.std() > 1e-6]

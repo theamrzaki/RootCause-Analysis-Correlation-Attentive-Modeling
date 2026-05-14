@@ -28,12 +28,12 @@
                 "--window_size", "10",
 
                 "--training_aerca", "1",
-                "--epochs", "60",
-                "--preprocessing_data", "1",
+                "--epochs", "100",
+                "--preprocessing_data", "0",
                 "--include_logs_and_traces", "1",
                 "--results_csv", "RQ_1_smd.csv",
 
-                "--hidden_layer_size", "256",
+                "--hidden_layer_size", "128",
             ]
 ,
             "console": "integratedTerminal"

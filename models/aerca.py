@@ -245,8 +245,32 @@ class AERCA(nn.Module):
         print(final_msg)
 
     def _sparsity_loss(self, coeffs, alpha):
+
+        # -------------------------
+        # MULTIMODAL MODE
+        # -------------------------
+        if isinstance(coeffs, dict):
+            loss = 0.0
+            n = 0
+
+            for k, v in coeffs.items():
+                if v is None:
+                    continue
+
+                norm2 = torch.mean(torch.norm(v, dim=1, p=2))
+                norm1 = torch.mean(torch.norm(v, dim=1, p=1))
+
+                loss = loss + (1 - alpha) * norm2 + alpha * norm1
+                n += 1
+
+            return loss / max(n, 1)
+
+        # -------------------------
+        # SINGLE MODE (metrics only)
+        # -------------------------
         norm2 = torch.mean(torch.norm(coeffs, dim=1, p=2))
         norm1 = torch.mean(torch.norm(coeffs, dim=1, p=1))
+
         return (1 - alpha) * norm2 + alpha * norm1
 
     def _sparsity_loss_cLSTM(self, W, alpha):
@@ -254,17 +278,38 @@ class AERCA(nn.Module):
         return torch.sum(group_norm)
 
     def _smoothness_loss(self, coeffs):
-        # coeffs shape: [Batch, Sensors, Sensors] -> [64, 30, 30]
+
+        # -------------------------
+        # MULTIMODAL MODE
+        # -------------------------
+        if isinstance(coeffs, dict):
+            loss = 0.0
+            n = 0
+
+            for k, v in coeffs.items():
+                if v is None:
+                    continue
+
+                if v.dim() == 3:
+                    diff = v[1:] - v[:-1]
+                    loss = loss + torch.norm(diff, dim=(1, 2)).mean()
+                else:
+                    loss = loss + torch.norm(
+                        v[:, 1:] - v[:, :-1], dim=1
+                    ).mean()
+
+                n += 1
+
+            return loss / max(n, 1)
+
+        # -------------------------
+        # SINGLE MODE (metrics only)
+        # -------------------------
         if coeffs.dim() == 3:
-            # Subtract the coefficient matrix of sample 'j' from sample 'j+1'
-            # This represents the change in sensor relationships over 1 timestep
-            diff = coeffs[1:, :, :] - coeffs[:-1, :, :]
-            
-            # Calculate the norm and mean
+            diff = coeffs[1:] - coeffs[:-1]
             return torch.norm(diff, dim=(1, 2)).mean()
-        
-        # Fallback for 4D if you ever switch back
-        return torch.norm(coeffs[:, 1:, :, :] - coeffs[:, :-1, :, :], dim=1).mean()
+
+        return torch.norm(coeffs[:, 1:] - coeffs[:, :-1], dim=1).mean()
 
     def encoding(self, xs):
         if isinstance(xs, np.ndarray):
@@ -677,6 +722,10 @@ class AERCA(nn.Module):
             for x in xs:
                 us = self._testing_step(x)[-2]
                 us_list.append(us.cpu().numpy())
+        if "include_logs_and_traces" in self.options and self.options["include_logs_and_traces"] == 1:
+            self.num_vars = self.options["num_vars"] + self.options["num_log_features"] + self.options["num_trace_features"]
+        else:
+            self.num_vars = self.options["num_vars"]
         us_all = np.concatenate(us_list, axis=0).reshape(-1, self.num_vars)
         self.lower_encoder = np.quantile(us_all, (1 - self.root_cause_threshold_encoder) / 2, axis=0)
         self.upper_encoder = np.quantile(us_all, 1 - (1 - self.root_cause_threshold_encoder) / 2, axis=0)

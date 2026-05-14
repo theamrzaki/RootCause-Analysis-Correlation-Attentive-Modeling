@@ -215,62 +215,68 @@ class vlinear(nn.Module):
 
         return preds, coeffs_time, coeffs_freq
     
-
-
 class MultiModalVLinear(nn.Module):
     def __init__(self, metric_dim, log_dim, trace_dim,
                  order, hidden_dim=128, device="cpu", options=None):
 
         super().__init__()
+
         self.md, self.ld, self.td = metric_dim, log_dim, trace_dim
         self.total = metric_dim + log_dim + trace_dim
 
         self.metric_orth = (options or {}).get("orth_transformer", None)
 
-        # adapters (map -> metric space)
-        self.ma = nn.Sequential(nn.Linear(metric_dim, metric_dim), nn.LayerNorm(metric_dim))
-        self.la = nn.Sequential(nn.Linear(log_dim, metric_dim), nn.LayerNorm(metric_dim))
-        self.ta = nn.Sequential(nn.Linear(trace_dim, metric_dim), nn.LayerNorm(metric_dim))
+        inner_hidden = hidden_dim // 2
 
-        # shared backbone
+        # ---- adapters ----
+        self.ma = nn.Sequential(nn.Linear(metric_dim, inner_hidden),
+                                nn.LayerNorm(inner_hidden),
+                                nn.GELU())
+
+        self.la = nn.Sequential(nn.Linear(log_dim, inner_hidden),
+                                nn.LayerNorm(inner_hidden),
+                                nn.GELU())
+
+        self.ta = nn.Sequential(nn.Linear(trace_dim, inner_hidden),
+                                nn.LayerNorm(inner_hidden),
+                                nn.GELU())
+
         opts = dict(options or {})
         opts["orth_transformer"] = None
 
-        self.backbone = vlinear(
-            num_vars=metric_dim,
-            order=order,
-            hidden_dim=hidden_dim,
-            device=device,
-            options=opts,
-        )
+        # ---- CRITICAL CHANGE: independent backbones ----
+        self.backbone_m = vlinear(inner_hidden, order, hidden_dim, device, opts)
+        self.backbone_l = vlinear(inner_hidden, order, hidden_dim, device, opts)
+        self.backbone_t = vlinear(inner_hidden, order, hidden_dim, device, opts)
 
-        # fusion + output
-        self.attn = nn.Linear(hidden_dim, 1)
-        self.out = nn.Linear(metric_dim, self.total)
-
+        # ---- fusion ----
+        self.fuse_proj = nn.Linear(inner_hidden, hidden_dim)
+        self.out = nn.Linear(hidden_dim, self.total)
+        self.modality_pool = nn.Parameter(torch.zeros(3))  # or M if fixed
     # ---------------- utils ----------------
 
     def split(self, x):
         m, l = self.md, self.md + self.ld
         return x[..., :m], x[..., m:l], x[..., l:]
 
-    def enc(self, x):
-        return self.backbone(x)
-          # [B,P,H]
+    # ---------------- fusion ----------------
 
     def fuse_linear_attn(self, zs):
-        z = torch.stack(zs, dim=1)  # [B, M, P]
+        z = torch.stack(zs, dim=1)  # [B, M, H]
 
-        q = torch.nn.functional.elu(z) + 1
-        k = torch.nn.functional.elu(z) + 1
+        q = torch.nn.functional.elu(z) + 1  # [B, M, H]
+        k = torch.nn.functional.elu(z) + 1  # [B, M, H]
 
-        scores = torch.einsum('bmp,bnp->bmpn', q, k)  # [B, M, P, M]
-        attn = torch.softmax(scores, dim=-1)
+        # modality attention scores
+        scores = torch.einsum('bmh,bnh->bmn', q, k)  # [B, M, M]
 
-        z_fused = torch.einsum('bmpn,bnp->bmp', attn, z)
-        
-        return z_fused.mean(dim=1), attn
+        attn = torch.softmax(scores, dim=-1)  # [B, M, M]
 
+        # weighted sum over modalities
+        z_fused = torch.einsum('bmn,bnh->bmh', attn, z)  # [B, M, H]
+        w = torch.softmax(self.modality_pool, dim=0)  # [M]
+        z_out = (z_fused * w[None, :, None]).sum(dim=1)
+        return z_out, attn
     # ---------------- forward ----------------
 
     def forward(self, x):
@@ -280,18 +286,35 @@ class MultiModalVLinear(nn.Module):
         if self.metric_orth is not None:
             xm = self.metric_orth(xm)
 
-        xm, xl, xt = self.ma(xm), self.la(xl), self.ta(xt)
+        xm = self.ma(xm)
+        xl = self.la(xl)
+        xt = self.ta(xt)
 
-        pm, coeff_time_m, coeff_freq_m = self.enc(xm)
-        pl, coeff_time_l, coeff_freq_l = self.enc(xl)
-        pt, coeff_time_t, coeff_freq_t = self.enc(xt)
+        pm, coeff_tm_m, coeff_fm_m = self.backbone_m(xm)
+        pl, coeff_tm_l, coeff_fm_l = self.backbone_l(xl)
+        pt, coeff_tm_t, coeff_fm_t = self.backbone_t(xt)
 
         zf, attn = self.fuse_linear_attn([pm, pl, pt])
 
+        zf = self.fuse_proj(zf)
+
         pred = self.out(zf)
 
-        # --- aggregate coefficients ---
-        coeff_time = (coeff_time_m + coeff_time_l + coeff_time_t) / 3
-        coeff_freq = (coeff_freq_m + coeff_freq_l + coeff_freq_t) / 3
+        coeff_time = {
+            "metric": coeff_tm_m,
+            "log": coeff_tm_l,
+            "trace": coeff_tm_t
+        }
+
+        coeff_freq = {
+            "metric": coeff_fm_m,
+            "log": coeff_fm_l,
+            "trace": coeff_fm_t
+        }
 
         return pred, coeff_time, coeff_freq
+    
+
+
+
+
