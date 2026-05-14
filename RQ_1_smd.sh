@@ -274,6 +274,23 @@ run_CUTS_PLUS_SMD() {
 
 
 seeds=(2 3)
+window_size=(20)
+
+for seed in "${seeds[@]}"; do
+    for window_size_item in "${window_size[@]}"; do
+            preprocessing_data=1
+        run_vlinear $preprocessing_data $seed $window_size_item
+            preprocessing_data=0
+        run_GVAR $preprocessing_data $seed $window_size_item
+        run_experiment_baselines $preprocessing_data $seed $window_size_item  
+        run_cLSTM $preprocessing_data $seed $window_size_item              
+        run_CUTS_PLUS_SMD $preprocessing_data $seed $window_size_item   
+    done
+done
+
+
+
+seeds=(3)
 window_size=(4 6 10 20)
 
 for seed in "${seeds[@]}"; do

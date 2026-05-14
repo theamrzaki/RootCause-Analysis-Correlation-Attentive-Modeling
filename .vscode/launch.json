@@ -29,9 +29,9 @@
 
                 "--training_aerca", "1",
                 "--epochs", "100",
-                "--preprocessing_data", "0",
+                "--preprocessing_data", "1",
                 "--include_logs_and_traces", "1",
-                "--results_csv", "RQ_1_smd.csv",
+                "--results_csv", "aiops_debugging.csv",
 
                 "--hidden_layer_size", "128",
             ]

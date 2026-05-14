@@ -1,6 +1,8 @@
+import gc
 import os
 import shutil
 import json
+import time
 import torch
 import pandas as pd
 import numpy as np
@@ -148,89 +150,293 @@ class aiops:
         return pdf
 
     def get_wide_table(self):
-        date_dirs = sorted([d for d in glob(os.path.join(self.data_dir, "2022-*")) if os.path.isdir(d)])
-        all_date_frames = []
 
+        import gc
+        import numpy as np
+        import pandas as pd
+
+        date_dirs = sorted([
+            d for d in glob(os.path.join(self.data_dir, "2022-*"))
+            if os.path.isdir(d)
+        ])
+
+        # =========================================================
+        # STEP 1: PROCESS EACH DAY
+        # =========================================================
         for d_dir in tqdm(date_dirs, desc="Processing Date Folders"):
+
+            date_name = os.path.basename(d_dir)
+
+            temp_path = os.path.join(
+                self.data_dir,
+                f"temp_window{self.window_size}_{date_name}.pkl"
+            )
+
+            # -----------------------------------------------------
+            # SKIP IF ALREADY PREPROCESSED
+            # -----------------------------------------------------
+            if os.path.exists(temp_path):
+
+                print(f"Skipping existing pickle: {temp_path}")
+                continue
+
             metric_base = os.path.join(d_dir, "cloudbed", "metric")
+
             day_metric_frames = []
 
-            # A. Process Metrics
+            # =====================================================
+            # A. PROCESS METRICS
+            # =====================================================
             for m_type in self.metric_types:
+
                 type_path = os.path.join(metric_base, m_type)
-                if not os.path.exists(type_path): continue
+
+                if not os.path.exists(type_path):
+                    continue
 
                 csv_files = glob(os.path.join(type_path, "*.csv"))
-                for f in tqdm(csv_files, desc="Processing CSV Files", leave=False):
-                    metric_name = os.path.basename(f).replace(".csv", "").replace("kpi_", "")
-                    df = pd.read_csv(f).drop_duplicates(keep='first')
+
+                for f in tqdm(csv_files,
+                            desc="Processing CSV Files",
+                            leave=False):
+
+                    metric_name = (
+                        os.path.basename(f)
+                        .replace(".csv", "")
+                        .replace("kpi_", "")
+                    )
 
                     try:
-                        pivoted = df.pivot_table(index='timestamp', columns='cmdb_id', values='value', aggfunc='max')
-                        pivoted.columns = [f"{col}_{metric_name}" for col in pivoted.columns]
+
+                        df = pd.read_csv(f).drop_duplicates(keep='first')
+
+                        required_cols = {
+                            'timestamp',
+                            'cmdb_id',
+                            'value'
+                        }
+
+                        if not required_cols.issubset(df.columns):
+
+                            print(f"Skipping malformed file {f}")
+                            continue
+
+                        # -------------------------------------------------
+                        # FASTER + LIGHTER THAN pivot_table
+                        # -------------------------------------------------
+                        pivoted = (
+                            df.set_index(['timestamp', 'cmdb_id'])['value']
+                            .unstack()
+                        )
+
+                        pivoted.columns = [
+                            f"{col}_{metric_name}"
+                            for col in pivoted.columns
+                        ]
+
+                        # -------------------------------------------------
+                        # CONVERT TO SPARSE IMMEDIATELY
+                        # -------------------------------------------------
+                        for col in pivoted.columns:
+
+                            pivoted[col] = pivoted[col].astype(
+                                pd.SparseDtype("float32", np.nan)
+                            )
+
                         day_metric_frames.append(pivoted)
+
+                        del df
+                        gc.collect()
+
                     except Exception as e:
+
                         print(f"Error processing {f}: {e}")
 
-            print(f"num metric features for {d_dir}: {sum(len(df.columns) for df in day_metric_frames)}")
+            print(
+                f"num metric features for {d_dir}: "
+                f"{sum(len(df.columns) for df in day_metric_frames)}"
+            )
 
-            # =========================
+            # =====================================================
             # MODALITY CONTAINER
-            # =========================
+            # =====================================================
             day_modality = {
                 "metrics": None,
                 "logs": None,
                 "traces": None
             }
 
+            # =====================================================
+            # METRICS
+            # =====================================================
             if day_metric_frames:
-                day_modality["metrics"] = pd.concat(day_metric_frames, axis=1)
 
-            # =========================
-            # LOGS + TRACES (OPTIONAL)
-            # =========================
+                print(f"Concatenating metric frames for {date_name}...")
+
+                day_modality["metrics"] = pd.concat(
+                    day_metric_frames,
+                    axis=1,
+                    copy=False,
+                    join="outer"
+                )
+
+            del day_metric_frames
+            gc.collect()
+
+            # =====================================================
+            # OPTIONAL LOGS + TRACES
+            # =====================================================
             if self.include_logs_and_traces:
 
                 log_features = self.get_log_features(d_dir)
+
                 if log_features is not None:
+
+                    for col in log_features.columns:
+
+                        log_features[col] = log_features[col].astype(
+                            pd.SparseDtype("float32", np.nan)
+                        )
+
                     day_modality["logs"] = log_features
 
                 trace_features = self.get_trace_features(d_dir)
+
                 if trace_features is not None:
+
+                    for col in trace_features.columns:
+
+                        trace_features[col] = trace_features[col].astype(
+                            pd.SparseDtype("float32", np.nan)
+                        )
+
                     day_modality["traces"] = trace_features
 
-            # =========================
-            # SAFE FLATTENING FOR TRAINING
-            # =========================
-            if self.include_logs_and_traces:
+            # =====================================================
+            # FLATTEN MULTIMODAL FEATURES
+            # =====================================================
+            parts = []
 
-                # IMPORTANT: do NOT append dict to concat later
-                parts = []
+            if day_modality["metrics"] is not None:
+                parts.append(day_modality["metrics"])
 
-                if day_modality["metrics"] is not None:
-                    parts.append(day_modality["metrics"])
+            if day_modality["logs"] is not None:
+                parts.append(day_modality["logs"])
 
-                if day_modality["logs"] is not None:
-                    parts.append(day_modality["logs"])
+            if day_modality["traces"] is not None:
+                parts.append(day_modality["traces"])
 
-                if day_modality["traces"] is not None:
-                    parts.append(day_modality["traces"])
+            if len(parts) == 0:
 
-                if len(parts) > 0:
-                    day_wide = pd.concat(parts, axis=1).fillna(0)
-                    all_date_frames.append(day_wide)
+                print(f"No data found for {d_dir}")
+                continue
 
-            else:
-                # metric-only fallback (UNCHANGED behavior)
-                if day_modality["metrics"] is not None:
-                    all_date_frames.append(day_modality["metrics"].fillna(0))
-            break #TODO TODO TODO TODO TODO remove this break after testing the first date folder
+            # -----------------------------------------------------
+            # SORT INDEXES BEFORE CONCAT
+            # REDUCES ALIGNMENT COST
+            # -----------------------------------------------------
+            for p in parts:
+                p.sort_index(inplace=True)
 
+            print(f"Concatenating modalities for {date_name}...")
 
+            day_wide = pd.concat(
+                parts,
+                axis=1,
+                copy=False,
+                join="outer"
+            )
+
+            # -----------------------------------------------------
+            # CLEAN COLUMN TYPES
+            # -----------------------------------------------------
+            day_wide.columns = day_wide.columns.astype(str)
+
+            print(
+                f"Saving pickle: {temp_path} "
+                f"shape={day_wide.shape}"
+            )
+
+            day_wide.to_pickle(temp_path)
+
+            # =====================================================
+            # CLEANUP
+            # =====================================================
+            del parts
+            del day_modality
+            del day_wide
+
+            gc.collect()
+
+        # =========================================================
+        # STEP 2: RELOAD TEMP PICKLES
+        # =========================================================
+        print("Reloading temporary pickles...")
+
+        pickle_files = sorted(
+            glob(
+                os.path.join(
+                    self.data_dir,
+                    f"temp_window{self.window_size}_2022-*.pkl"
+                )
+            )
+        )
+
+        all_date_frames = []
+
+        for pf in pickle_files:
+
+            print(f"Loading {pf}")
+
+            df = pd.read_pickle(pf)
+
+            # -----------------------------------------------------
+            # ENSURE SPARSE AFTER LOADING
+            # -----------------------------------------------------
+            for col in df.columns:
+
+                if not isinstance(df[col].dtype, pd.SparseDtype):
+
+                    df[col] = df[col].astype(
+                        pd.SparseDtype("float32", np.nan)
+                    )
+
+            all_date_frames.append(df)
+
+            gc.collect()
+
+        # =========================================================
+        # STEP 3: FINAL GLOBAL CONCAT
+        # =========================================================
         print("Finalizing global alignment...")
-        full_df = pd.concat(all_date_frames, axis=0).sort_index().fillna(0)
-        return full_df
 
+        full_df = pd.concat(
+            all_date_frames,
+            axis=0,
+            copy=False,
+            ignore_index=True
+        )
+
+        del all_date_frames
+        gc.collect()
+
+        # =========================================================
+        # FINAL MEMORY REPORT
+        # =========================================================
+        print(
+            "Final sparse memory:",
+            round(
+                full_df.memory_usage(deep=True).sum() / 1024**3,
+                3
+            ),
+            "GB"
+        )
+
+        print(f"Final dataframe shape: {full_df.shape}")
+
+        return full_df
+    
+    
     def parse_json_groundtruth(self, full_df):
         """
         Maps JSON event points to the Wide-Table binary label matrix.
@@ -427,64 +633,137 @@ class aiops:
         metric_cols = [c for c in all_cols if any(m in c for m in self.metric_types)]
         log_cols = [c for c in all_cols if "envoy" in c or "svc_" in c or "conn_" in c]
         trace_cols = [c for c in all_cols if "span_" in c or "trace" in c]
-
+        print(f"metric step ..")
         metric_df = df[metric_cols]
+
+        print(f"log step ..")
         log_df = df[log_cols] if len(log_cols) > 0 else None
+
+        print(f"trace step ..")
         trace_df = df[trace_cols] if len(trace_cols) > 0 else None
 
         # =========================================================
-        # 2. RESAMPLE ALL MODALITIES (THIS FIXES ROW EXPLOSION)
+        # 2. FEATURE SELECTION (SAMPLE-BASED ONLY FOR METRICS)
         # =========================================================
+        print("selecting top metric features based on volatility ...")
 
-        metric_df = metric_df.resample(freq).mean()
+        sample_metric_df = metric_df.iloc[:1000]
 
-        if log_df is not None:
-            log_df = log_df.resample(freq).sum()
+        # convert ONCE to numpy (avoids Sparse + pandas overhead)
+        X = sample_metric_df.to_numpy(dtype=np.float32)
 
-        if trace_df is not None:
-            trace_df = trace_df.resample(freq).mean()
+        # remove near-constant columns (fast vector op)
+        std = np.nanstd(X, axis=0)
+        mean = np.nanmean(X, axis=0)
 
-        # fill missing after alignment
-        metric_df = metric_df.fillna(0)
-        if log_df is not None:
-            log_df = log_df.fillna(0)
-        if trace_df is not None:
-            trace_df = trace_df.fillna(0)
+        valid_mask = std > 1e-2
 
-        # =========================================================
-        # 3. METRIC FEATURE SELECTION (UNCHANGED LOGIC)
-        # =========================================================
-        metric_df = metric_df.loc[:, (metric_df.std() > 1e-2)]
-        volatility = metric_df.std() / (metric_df.mean() + 1e-6)
-        volatility = volatility[volatility > 0]
+        X = X[:, valid_mask]
 
-        important_cols = volatility.sort_values(ascending=False).head(self.num_vars).index
+        std = std[valid_mask]
+        mean = mean[valid_mask]
 
-        self.idx_to_feature = {i: name for i, name in enumerate(important_cols)}
+        # volatility score (CV-style)
+        volatility = std / (np.abs(mean) + 1e-6)
 
-        mapping_path = os.path.join(self.data_dir, 'idx_to_feature.json')
-        with open(mapping_path, 'w') as f:
+        # remove invalid entries
+        valid_vol = volatility > 0
+        volatility = volatility[valid_vol]
+
+        cols = np.array(metric_df.columns)[valid_mask]
+        cols = cols[valid_vol]
+
+        # top-k selection
+        top_idx = np.argsort(volatility)[::-1][:self.num_vars]
+        important_cols = cols[top_idx]
+
+        # store mapping
+        self.idx_to_feature = {
+            i: name for i, name in enumerate(important_cols)
+        }
+
+        with open(os.path.join(self.data_dir, 'idx_to_feature.json'), 'w') as f:
             json.dump(self.idx_to_feature, f)
 
-        metric_df = np.log1p(metric_df[important_cols])
+        # reduce full dataset early
+        metric_df = metric_df[important_cols]
 
         print(f"[METRICS] selected: {len(important_cols)}")
-
-        # =========================================================
-        # 4. LOG / TRACE DIMENSION CONTROL (SAFE NOW)
-        # =========================================================
-        log_keep = self.options.get("log_features", self.options.get("num_log_features", 10))
-        trace_keep = self.options.get("trace_features", self.options.get("num_trace_features", 10))
+        # reduce logs/traces EARLY (IMPORTANT FIX)
+        print("selecting top log and trace features based on volatility ...")
+        log_keep = self.options.get("log_features", 10)
+        trace_keep = self.options.get("trace_features", 10)
 
         if log_df is not None:
-            log_df = log_df.loc[:, log_df.std() > 1e-6]
-            log_df = log_df.loc[:, log_df.std().sort_values(ascending=False).head(log_keep).index]
-            log_df = np.log1p(log_df.clip(upper=1e6))
+            print("selecting top log features ...")
+
+            X = log_df.to_numpy(dtype=np.float32)
+
+            # remove near-constant columns
+            std = np.nanstd(X, axis=0)
+
+            valid_mask = std > 1e-6
+            X = X[:, valid_mask]
+            std = std[valid_mask]
+
+            cols = np.array(log_df.columns)[valid_mask]
+
+            # rank by variance (logs usually better than CV)
+            top_idx = np.argsort(std)[::-1][:log_keep]
+            log_cols_keep = cols[top_idx]
+
+            log_df = log_df[log_cols_keep]
+
+            print(f"[LOGS] selected: {len(log_cols_keep)}")
 
         if trace_df is not None:
-            trace_df = trace_df.loc[:, trace_df.std() > 1e-6]
-            trace_df = trace_df.loc[:, trace_df.std().sort_values(ascending=False).head(trace_keep).index]
-            trace_df = np.log1p(trace_df.clip(upper=1e6))
+            print("selecting top trace features ...")
+
+            X = trace_df.to_numpy(dtype=np.float32)
+
+            std = np.nanstd(X, axis=0)
+
+            valid_mask = std > 1e-6
+            X = X[:, valid_mask]
+            std = std[valid_mask]
+
+            cols = np.array(trace_df.columns)[valid_mask]
+
+            top_idx = np.argsort(std)[::-1][:trace_keep]
+            trace_cols_keep = cols[top_idx]
+
+            trace_df = trace_df[trace_cols_keep]
+
+            print(f"[TRACES] selected: {len(trace_cols_keep)}")
+
+        # =========================================================
+        # 3. UNIFIED TIME BINNING (FAST + CONSISTENT)
+        # =========================================================
+        print("resampling all modalities ...")
+        print("now the shapes of metric, logs, and traces after col reduction but BEFORE resampling are:", metric_df.shape, log_df.shape, trace_df.shape)
+        t = df.index.floor(freq)
+        print("metric resampling ...", "with shape of ", metric_df.shape)
+        metric_df = metric_df.groupby(t).mean()
+
+        if log_df is not None:
+            print("log resampling ...", "with shape of ", log_df.shape)
+            log_df = log_df.groupby(t).sum()
+
+        if trace_df is not None:
+            print("trace resampling ...", "with shape of ", trace_df.shape)
+            trace_df = trace_df.groupby(t).mean()
+
+        # =========================================================
+        # 4. FINAL CLEANUP
+        # =========================================================
+        metric_df = np.log1p(metric_df.fillna(0))
+
+        if log_df is not None:
+            log_df = np.log1p(log_df.fillna(0).clip(upper=1e6))
+
+        if trace_df is not None:
+            trace_df = np.log1p(trace_df.fillna(0).clip(upper=1e6))
+
 
         # =========================================================
         # 5. FINAL CONCAT (NOW TEMPORALLY CONSISTENT)
@@ -549,7 +828,8 @@ class aiops:
         if os.path.exists(orth_matrix_dir):
             print(f"Removing old orthogonal transform metadata at {orth_matrix_dir}")
             shutil.rmtree(orth_matrix_dir)
-
+        
+    
     def save_data(self):
         if not os.path.exists(self.data_dir): os.makedirs(self.data_dir)
         for key in ['x_n_list', 'x_ab_list', 'label_list']:
