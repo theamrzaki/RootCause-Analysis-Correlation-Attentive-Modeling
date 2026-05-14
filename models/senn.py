@@ -2,7 +2,7 @@ import torch.nn as nn
 import torch
 
 
-from layers.vlinear_arch import vlinear
+from layers.vlinear_arch import vlinear,MultiModalVLinear
 from layers.cLSTM import cLSTM
 from layers.CUTS_PLUS import CUTS_PLUS_Wrapper
 class SENNGC(nn.Module):
@@ -37,13 +37,25 @@ class SENNGC(nn.Module):
             print(f"Total parameters for {order} lags: {total_params}")
         
         if args["coeff_architecture"] in "vlinear":
-            self.coeff_net = vlinear(
-                num_vars=num_vars,
-                hidden_dim=hidden_layer_size,
-                order=order,
-                device=device,
-                options = args  # default to None if not specified
-            )
+            if self.args["include_logs_and_traces"] == 0:
+                self.coeff_net = vlinear(
+                    num_vars=num_vars,
+                    hidden_dim=hidden_layer_size,
+                    order=order,
+                    device=device,
+                    options = args  # default to None if not specified
+                )
+            elif self.args["include_logs_and_traces"] == 1:
+                self.coeff_net = MultiModalVLinear(
+                    metric_dim=num_vars,
+                    log_dim=10,
+                    trace_dim=10,
+                    hidden_dim=hidden_layer_size,
+                    order=order,
+                    device=torch.device,
+                    options = args  # default to None if not specified
+                )
+
 
         if args["coeff_architecture"] == "cLSTM":
             self.coeff_net = cLSTM(num_vars, hidden_layer_size)

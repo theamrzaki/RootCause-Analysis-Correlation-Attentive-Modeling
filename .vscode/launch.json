@@ -24,12 +24,13 @@
 
                 "--lr", "1e-4",
                 "--seed", "7",
-                "--dataset", "gaia",
-                "--window_size", "8",
+                "--dataset", "aiops",
+                "--window_size", "10",
 
                 "--training_aerca", "1",
                 "--epochs", "60",
                 "--preprocessing_data", "1",
+                "--include_logs_and_traces", "1",
                 "--results_csv", "RQ_1_smd.csv",
 
                 "--hidden_layer_size", "256",
