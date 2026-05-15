@@ -14,7 +14,7 @@ import pandas as pd
 from scipy.signal import welch
 from layers.vlinear_arch import OrthTransform 
 
-class aiops:
+class aiops_multi_modality:
     def __init__(self, options):
         self.options = options
         self.data_dict = {}
@@ -196,60 +196,31 @@ class aiops:
 
                 csv_files = glob(os.path.join(type_path, "*.csv"))
 
-                for f in tqdm(csv_files,
-                            desc="Processing CSV Files",
-                            leave=False):
+                for f in csv_files:
+                    
+                    # e.g., 'container_cpu_system'
+                    metric_name = os.path.basename(f).replace(".csv", "").replace("kpi_", "")
+                    # DIMENSIONALITY REDUCTION: Only keep essential metrics
+                    #if not any(key in metric_name for key in self.essential_keywords):
+                    #    continue
+                    df = pd.read_csv(f)
+                    
+                    # Keep the first occurrence of each (timestamp, cmdb_id) pair
+                    df = df.drop_duplicates(keep='first')
 
-                    metric_name = (
-                        os.path.basename(f)
-                        .replace(".csv", "")
-                        .replace("kpi_", "")
-                    )
-
+                    # Core Logic: Pivot the data
+                    # Original: [timestamp, cmdb_id, value]
+                    # Pivoted: Index=timestamp, Columns=cmdb_id_metric_name
                     try:
-
-                        df = pd.read_csv(f).drop_duplicates(keep='first')
-
-                        required_cols = {
-                            'timestamp',
-                            'cmdb_id',
-                            'value'
-                        }
-
-                        if not required_cols.issubset(df.columns):
-
-                            print(f"Skipping malformed file {f}")
-                            continue
-
-                        # -------------------------------------------------
-                        # FASTER + LIGHTER THAN pivot_table
-                        # -------------------------------------------------
-                        pivoted = (
-                            df.set_index(['timestamp', 'cmdb_id'])['value']
-                            .unstack()
+                        pivoted = df.pivot_table(
+                            index='timestamp', 
+                            columns='cmdb_id', 
+                            values='value', 
+                            aggfunc='max' 
                         )
-
-                        pivoted.columns = [
-                            f"{col}_{metric_name}"
-                            for col in pivoted.columns
-                        ]
-
-                        # -------------------------------------------------
-                        # CONVERT TO SPARSE IMMEDIATELY
-                        # -------------------------------------------------
-                        for col in pivoted.columns:
-
-                            pivoted[col] = pivoted[col].astype(
-                                pd.SparseDtype("float32", np.nan)
-                            )
-
+                        pivoted.columns = [f"{col}_{metric_name}" for col in pivoted.columns]
                         day_metric_frames.append(pivoted)
-
-                        del df
-                        gc.collect()
-
                     except Exception as e:
-
                         print(f"Error processing {f}: {e}")
 
             print(
@@ -275,9 +246,7 @@ class aiops:
 
                 day_modality["metrics"] = pd.concat(
                     day_metric_frames,
-                    axis=1,
-                    copy=False,
-                    join="outer"
+                    axis=1
                 )
 
             del day_metric_frames
@@ -414,7 +383,7 @@ class aiops:
             all_date_frames,
             axis=0,
             copy=False,
-            ignore_index=True
+            ignore_index=False
         )
 
         del all_date_frames
@@ -443,19 +412,6 @@ class aiops:
 
         gt_files = glob(os.path.join(self.data_dir, "groundtruth", "*.json"))
 
-        # ----------------------------------------------------------
-        # PRECOMPUTE CMDB → COLUMN INDICES
-        # ----------------------------------------------------------
-        cmdb_to_indices = {}
-        for idx, col in enumerate(full_df.columns):
-            cmdb = col.split("_")[0]
-            cmdb_to_indices.setdefault(cmdb, []).append(idx)
-
-        # ----------------------------------------------------------
-        # DETERMINE MODE
-        # ----------------------------------------------------------
-        use_bins = self.include_logs_and_traces
-
         # SAFE INDEX ACCESS
         idx_array = np.arange(full_df.shape[0])
 
@@ -469,35 +425,18 @@ class aiops:
             for i in range(len(timestamps)):
 
                 cmdb_id = cmdb_ids[i]
-                faulty_indices = cmdb_to_indices.get(cmdb_id, [])
-
-                if not faulty_indices:
-                    continue
-
+                faulty_indices = [idx for idx, col in enumerate(full_df.columns) 
+                                 if col.startswith(cmdb_id)]
+                
                 onset = timestamps[i]
 
-                # --------------------------------------------------
-                # METRICS-ONLY MODE (RAW TIMESTAMPS)
-                # --------------------------------------------------
-                if not use_bins:
+                onset_bin = (onset - self.global_start_time) // 60
+                duration_bins = 600 // 60
 
-                    time_mask = (
-                        (idx_array >= onset) &
-                        (idx_array <= onset + 600)
-                    )
-
-                # --------------------------------------------------
-                # FULL PIPELINE MODE (BIN SPACE)
-                # --------------------------------------------------
-                else:
-
-                    onset_bin = (onset - self.global_start_time) // 60
-                    duration_bins = 600 // 60
-
-                    time_mask = (
-                        (idx_array >= onset_bin) &
-                        (idx_array <= onset_bin + duration_bins)
-                    )
+                time_mask = (
+                    (idx_array >= onset_bin) &
+                    (idx_array <= onset_bin + duration_bins)
+                )
 
                 # --------------------------------------------------
                 # APPLY LABELS
@@ -522,104 +461,7 @@ class aiops:
         return np.array(flags)
 
     def generate_example(self):
-        if self.include_logs_and_traces:
-            self.generate_example_metrics_logs_traces()
-        else:
-            self.generate_example_metrics_only()
-
-    def generate_example_metrics_only(self):
-        df = self.get_wide_table()
-        
-        df = df.iloc[::1, :]  # Resample the data based on the suggested interval (assuming original is 1 minute)
-        
-        # 2. Top-K Volatility (Coefficient of Variation)
-        # 1. Calculate volatility as usual
-        # 1. Drop anything that is virtually a flat line
-        # Increase the threshold slightly to catch 'noisy' dead sensors
-        df = df.loc[:, (df.std() > 1e-2)] 
-
-        # 2. Calculate volatility
-        volatility = df.std() / (df.mean() + 1e-6)
-
-        # 3. Explicitly exclude sensors that are constant
-        volatility = volatility[volatility > 0]
-        print(f"Total metrics after filtering: {volatility.sort_values(ascending=False).head(20)}")
-        important_cols = volatility.sort_values(ascending=False).head(self.num_vars).index
-        # KEY ADDITION: Create the index-to-name mapping
-        # This ensures Index 0 always matches important_cols[0]
-        self.idx_to_feature = {i: name for i, name in enumerate(important_cols)}
-        
-        # Optional: Save this mapping to disk alongside your .npy files
-        # so the testing script can load it later.
-        mapping_path = os.path.join(self.data_dir, 'idx_to_feature.json')
-        with open(mapping_path, 'w') as f:
-            json.dump(self.idx_to_feature, f)
-
-        df_subset = df[important_cols]
-        df_subset = np.log1p(df_subset)
-        df_subset.columns = important_cols
-        print(f"Total metrics after filtering: {important_cols}", len(important_cols))
-
-        print(f"Final wide table shape: {df_subset.shape}")
-        
-        # 3. Label Processing
-        label_matrix = self.parse_json_groundtruth(df_subset)
-        
-        data = df_subset.values
-        split = int(len(data) * 0.8)
-        
-        # 2. Use RobustScaler instead of StandardScaler
-        scaler = RobustScaler() 
-        train_data_raw = data[:split]
-        test_data_raw = data[split:]
-        test_labels_raw = label_matrix[split:]
-        
-        scaler.fit(train_data_raw)
-        train_scaled = scaler.transform(train_data_raw)
-        test_scaled = scaler.transform(test_data_raw)
-
-        # 4. Temporal Chunking (Normal/Train)
-        # Using your suggested chunk_size and step
-        x_n_list = []
-        step = 1
-        chunk_size = (1 * self.window_size) #+1 
-        
-        for i in range(0, len(train_scaled) - chunk_size, step):
-            x_n_list.append(train_scaled[i : i + chunk_size])
-            
-        # 5. Temporal Windowing (Abnormal/Test)
-        # For testing, we typically use a sliding window to get a prediction for each step
-        x_ab_list = []
-        y_ab_list = []
-        
-        # We use chunk_size here to match the training shape
-        for i in range(0, len(test_scaled) - chunk_size, step):
-            x_ab_list.append(test_scaled[i : i + chunk_size])
-            y_ab_list.append(test_labels_raw[i : i + chunk_size])
-
-        # Convert to Numpy Arrays for the OrthTransform
-        self.data_dict['x_n_list'] = np.array(x_n_list)
-        self.data_dict['x_ab_list'] = np.array(x_ab_list)
-        self.data_dict['label_list'] = np.array(y_ab_list)
-
-        # 6. Binary Flags (Required for your OrthTransform logic)
-        # Identifies columns that are strictly binary (0 or 1)
-        self.binary_flags = np.array([
-            1 if train_data_raw[:, c].max() - train_data_raw[:, c].min() == 1 
-            and np.unique(train_data_raw[:, c]).size <= 2 else 0 
-            for c in range(train_data_raw.shape[1])
-        ])
-        
-        print(f"Dataset generated: x_n {self.data_dict['x_n_list'].shape}, "
-              f"x_ab {self.data_dict['x_ab_list'].shape}")
-        
-        self.save_data()
-        # delete orth folder if exists to avoid confusion with old orth matrices
-        orth_matrix_dir = os.path.join(self.data_dir, 'orth_transform_meta')
-        if os.path.exists(orth_matrix_dir):
-            print(f"Removing old orthogonal transform metadata at {orth_matrix_dir} to avoid confusion.")
-            shutil.rmtree(orth_matrix_dir)
-
+        self.generate_example_metrics_logs_traces()
 
     def generate_example_metrics_logs_traces(self):
         df = self.get_wide_table()
@@ -661,7 +503,7 @@ class aiops:
         # =========================================================
         print("selecting top metric features based on volatility ...")
 
-        sample_metric_df = metric_df.iloc[:1000]
+        sample_metric_df = metric_df#.iloc[:1000]
 
         # convert ONCE to numpy (avoids Sparse + pandas overhead)
         X = sample_metric_df.to_numpy(dtype=np.float32)
@@ -790,11 +632,11 @@ class aiops:
         # =========================================================
         dfs = [metric_df]
 
-        if log_df is not None:
-            dfs.append(log_df)
-
-        if trace_df is not None:
-            dfs.append(trace_df)
+        ####if log_df is not None:
+        ####    dfs.append(log_df)
+####
+        ####if trace_df is not None:
+        ####    dfs.append(trace_df)
 
         df_subset = pd.concat(dfs, axis=1).fillna(0)
         df_subset = df_subset.reset_index(drop=True)
@@ -928,7 +770,6 @@ class aiops:
             time_lag=self.window_size,
             save_path=save_path, 
             device=device,
-            metric_length=self.metric_num_cols if self.include_logs_and_traces else -1,#if -1 means use all features, otherwise only use the metric features for orthogonalization
         )
         x_n_tensor = torch.from_numpy(self.data_dict['x_n_list']).float().to(device)
         with torch.no_grad():

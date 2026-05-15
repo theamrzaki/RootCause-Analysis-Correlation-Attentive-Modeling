@@ -215,7 +215,7 @@ class vlinear(nn.Module):
 
         return preds, coeffs_time, coeffs_freq
     
-class MultiModalVLinear(nn.Module):
+class MultiModalVLinear_old(nn.Module):
     def __init__(self, metric_dim, log_dim, trace_dim,
                  order, hidden_dim=128, device="cpu", options=None):
 
@@ -318,3 +318,68 @@ class MultiModalVLinear(nn.Module):
 
 
 
+import torch
+import torch.nn as nn
+
+class MultiModalVLinear(nn.Module):
+    def __init__(self, metric_dim, log_dim, trace_dim,
+                 order, hidden_dim=128, device="cpu", options=None):
+        super().__init__()
+
+        self.md, self.ld, self.td = metric_dim, log_dim, trace_dim
+        self.total_vars = metric_dim + log_dim + trace_dim
+        self.device = device
+
+        # ---- 1. Shared Latent Projector ----
+        # We project each individual sensor into the hidden_dim
+        # This ensures that a 'log count' and a 'metric value' share the same math space
+        self.feature_projector = nn.Linear(1, hidden_dim)
+        
+        # Optional: Modality-specific biases to help the model distinguish types
+        self.modality_embed = nn.Parameter(torch.randn(1, self.total_vars, hidden_dim))
+
+        # ---- 2. Unified Backbone ----
+        # Using a single backbone allows the PxP correlation matrix to 
+        # look across ALL 50 variables simultaneously.
+        opts = dict(options or {})
+        # We pass the total count of sensors as num_vars
+        self.backbone = vlinear(self.total_vars, order, hidden_dim, device, opts)
+
+    def forward(self, x):
+        """
+        x: [Batch, Window, Total_Vars] -> [B, 10, 50]
+        """
+        B, W, V = x.shape
+        
+        # --- Step 1: Feature Embedding ---
+        # Reshape to treat every sensor value as a feature to be projected
+        # [B, W, V] -> [B, W, V, 1]
+        x_expanded = x.unsqueeze(-1) 
+        
+        # Project into H-space: [B, W, V, H]
+        # This replaces your separate ma, la, ta adapters with a shared mapping
+        z = self.feature_projector(x_expanded) 
+        
+        # Add modality embeddings so the model knows 'which sensor is which type'
+        z = z + self.modality_embed.unsqueeze(1) # Broadcast over Batch and Window
+        
+        # --- Step 2: Unified Temporal/Spatial Processing ---
+        # We pass the latent representation directly into the backbone
+        # NOTE: You may need to slightly modify your vlinear.forward to accept 
+        # pre-embedded [B, W, V, H] or simply pass the raw 'x' if vlinear 
+        # handles its own embedding. 
+        
+        # If your vlinear expects raw [B, W, V], use this:
+        pred, coeff_time, coeff_freq = self.backbone(x)
+
+        return pred, coeff_time, coeff_freq
+
+    def get_rca_scores(self, x):
+        """
+        Helper to extract the attribution scores for RCA evaluation.
+        """
+        pred, coeff_time, _ = self.forward(x)
+        # In vlinear, RCA is typically derived from the reconstruction error
+        # per sensor or the magnitude of the time-coefficients.
+        recon_error = torch.abs(x[:, -1, :] - pred) 
+        return recon_error

@@ -4,7 +4,7 @@ import logging
 import argparse
 import numpy as np
 
-from datasets import linear, lotka_volterra, lorenz96, swat, nonlinear, msds, smd, wadi, aiops, gaia
+from datasets import linear, lotka_volterra, lorenz96, swat, nonlinear, msds, smd, wadi, aiops, gaia, aiops_multi_modality
 from args import linear_args, lotka_volterra_args, lorenz96_args, swat_args, msds_args, nonlinear_args, smd_args, wadi_args, aiops_args, gaia_args
 from models import aerca
 from utils import utils
@@ -90,6 +90,12 @@ def main(argv):
         "aiops": {
             "args": aiops_args.create_arg_parser,
             "dataset_class": aiops.aiops,
+            "log_file": "aiops.log",
+            "use_slice": False
+        },
+        "aiops_multi_modality": {
+            "args": aiops_args.create_arg_parser,
+            "dataset_class":  aiops_multi_modality.aiops_multi_modality,
             "log_file": "aiops.log",
             "use_slice": False
         },
@@ -230,7 +236,8 @@ def main(argv):
     if options['dataset_name'] == 'aiops':
         aerca_model._testing_root_cause(test_x_ab, test_label)
         if options['coeff_architecture'] not in ['BARO', 'torai', 'rcd']:
-            aerca_model._testing_root_cause_services_metrics(test_x_ab, test_label)
+            if "include_logs_and_traces" in options and options["include_logs_and_traces"]:
+                aerca_model._testing_root_cause_services_metrics(test_x_ab, test_label)
     else:
         aerca_model._testing_root_cause(test_x_ab, test_label)
     print('Done testing for root cause analysis')

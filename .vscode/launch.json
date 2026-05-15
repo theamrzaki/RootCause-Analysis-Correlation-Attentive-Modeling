@@ -5,7 +5,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "AIOps - vlinear",
+            "name": "AIOps (Multi) - vlinear",
             "type": "debugpy",
             "request": "launch",
             "program": "main.py",
@@ -24,13 +24,13 @@
 
                 "--lr", "1e-4",
                 "--seed", "7",
-                "--dataset", "aiops",
+                "--dataset", "aiops_multi_modality",
                 "--window_size", "10",
 
                 "--training_aerca", "1",
                 "--epochs", "100",
-                "--preprocessing_data", "1",
-                "--include_logs_and_traces", "1",
+                "--preprocessing_data", "0",
+                "--include_logs_and_traces", "0",
                 "--results_csv", "aiops_debugging.csv",
 
                 "--hidden_layer_size", "128",

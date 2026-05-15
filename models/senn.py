@@ -46,13 +46,20 @@ class SENNGC(nn.Module):
                     options = args  # default to None if not specified
                 )
             elif self.args["include_logs_and_traces"] == 1:
-                self.coeff_net = MultiModalVLinear(
-                    metric_dim=num_vars,
-                    log_dim=10,
-                    trace_dim=10,
+                #self.coeff_net = MultiModalVLinear(
+                #    metric_dim=num_vars,
+                #    log_dim=10,
+                #    trace_dim=10,
+                #    hidden_dim=hidden_layer_size,
+                #    order=order,
+                #    device=torch.device,
+                #    options = args  # default to None if not specified
+                #)
+                self.coeff_net = vlinear(
+                    num_vars=num_vars,
                     hidden_dim=hidden_layer_size,
                     order=order,
-                    device=torch.device,
+                    device=device,
                     options = args  # default to None if not specified
                 )
 
