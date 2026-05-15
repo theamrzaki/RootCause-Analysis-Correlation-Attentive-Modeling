@@ -457,7 +457,7 @@ class aiops:
         use_bins = self.include_logs_and_traces
 
         # SAFE INDEX ACCESS
-        idx_array = full_df.index.to_numpy()
+        idx_array = np.arange(full_df.shape[0])
 
         for f in gt_files:
             with open(f, "r") as jfile:
@@ -491,7 +491,7 @@ class aiops:
                 # --------------------------------------------------
                 else:
 
-                    onset_bin = onset // 60
+                    onset_bin = (onset - self.global_start_time) // 60
                     duration_bins = 600 // 60
 
                     time_mask = (
@@ -758,7 +758,7 @@ class aiops:
         t = df.index.floor(freq)
         ts = df.index.view("int64") // 1_000_000_000
         bin_id = ts // 60  # if 1-minute bins
-
+        self.global_start_time = df.index.min().timestamp()
         print("metric resampling ...", "with shape of ", metric_df.shape)
         metric_df = metric_df.groupby(bin_id).mean()
         metric_df.index = metric_df.index.astype(int)
@@ -797,7 +797,7 @@ class aiops:
             dfs.append(trace_df)
 
         df_subset = pd.concat(dfs, axis=1).fillna(0)
-        df_subset.index = df_subset.index.astype(int)
+        df_subset = df_subset.reset_index(drop=True)
 
         print(f"Final shape (AFTER RESAMPLING FIX): {df_subset.shape}")
 
