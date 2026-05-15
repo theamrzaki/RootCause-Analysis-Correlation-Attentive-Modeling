@@ -438,59 +438,73 @@ class aiops:
     
     
     def parse_json_groundtruth(self, full_df):
-        """
-        Maps JSON event points to the Wide-Table binary label matrix.
-        Assumes fault lasts 10 minutes (600s) if duration is not provided.
-        """
+
         label_matrix = np.zeros(full_df.shape)
-        gt_path = os.path.join(self.data_dir, "groundtruth", "*.json")
-        gt_files = glob(gt_path)
+
+        gt_files = glob(os.path.join(self.data_dir, "groundtruth", "*.json"))
+
+        # ----------------------------------------------------------
+        # PRECOMPUTE CMDB → COLUMN INDICES
+        # ----------------------------------------------------------
+        cmdb_to_indices = {}
+        for idx, col in enumerate(full_df.columns):
+            cmdb = col.split("_")[0]
+            cmdb_to_indices.setdefault(cmdb, []).append(idx)
+
+        # ----------------------------------------------------------
+        # DETERMINE MODE
+        # ----------------------------------------------------------
+        use_bins = self.include_logs_and_traces
+
+        # SAFE INDEX ACCESS
+        idx_array = full_df.index.to_numpy()
 
         for f in gt_files:
-            with open(f, 'r') as jfile:
+            with open(f, "r") as jfile:
                 gt_data = json.load(jfile)
-            
-            # Iterating through the JSON lists provided in your snippet
-            for i in range(len(gt_data['timestamp'])):
 
-                cmdb_id = gt_data['cmdb_id'][i]
+            timestamps = gt_data["timestamp"]
+            cmdb_ids = gt_data["cmdb_id"]
 
-                # ======================================================
-                # OLD PIPELINE (keep exact behavior)
-                # ======================================================
-                if not self.include_logs_and_traces:
+            for i in range(len(timestamps)):
 
-                    onset = gt_data['timestamp'][i]  # int (keep legacy)
+                cmdb_id = cmdb_ids[i]
+                faulty_indices = cmdb_to_indices.get(cmdb_id, [])
+
+                if not faulty_indices:
+                    continue
+
+                onset = timestamps[i]
+
+                # --------------------------------------------------
+                # METRICS-ONLY MODE (RAW TIMESTAMPS)
+                # --------------------------------------------------
+                if not use_bins:
 
                     time_mask = (
-                        (full_df.index >= onset) &
-                        (full_df.index <= onset + 600)
+                        (idx_array >= onset) &
+                        (idx_array <= onset + 600)
                     )
 
-                # ======================================================
-                # NEW PIPELINE (datetime-safe)
-                # ======================================================
+                # --------------------------------------------------
+                # FULL PIPELINE MODE (BIN SPACE)
+                # --------------------------------------------------
                 else:
 
-                    onset = pd.to_datetime(gt_data['timestamp'][i], unit='s')
-                    duration = pd.Timedelta(seconds=600)
+                    onset_bin = onset // 60
+                    duration_bins = 600 // 60
 
                     time_mask = (
-                        (full_df.index >= onset) &
-                        (full_df.index <= onset + duration)
+                        (idx_array >= onset_bin) &
+                        (idx_array <= onset_bin + duration_bins)
                     )
 
-                # ======================================================
-                # COMMON LABEL APPLICATION (FIXED)
-                # ======================================================
-                faulty_indices = [
-                    idx for idx, col in enumerate(full_df.columns)
-                    if col.startswith(cmdb_id)
-                ]
+                # --------------------------------------------------
+                # APPLY LABELS
+                # --------------------------------------------------
+                for col_idx in faulty_indices:
+                    label_matrix[time_mask, col_idx] = 1
 
-                for idx in faulty_indices:
-                    label_matrix[time_mask, idx] = 1
-                                                        
         return label_matrix
     
     def get_binary_flags(self, df):
@@ -742,17 +756,23 @@ class aiops:
         print("resampling all modalities ...")
         print("now the shapes of metric, logs, and traces after col reduction but BEFORE resampling are:", metric_df.shape, log_df.shape, trace_df.shape)
         t = df.index.floor(freq)
+        ts = df.index.view("int64") // 1_000_000_000
+        bin_id = ts // 60  # if 1-minute bins
+
         print("metric resampling ...", "with shape of ", metric_df.shape)
-        metric_df = metric_df.groupby(t).mean()
+        metric_df = metric_df.groupby(bin_id).mean()
+        metric_df.index = metric_df.index.astype(int)
 
         if log_df is not None:
             print("log resampling ...", "with shape of ", log_df.shape)
-            log_df = log_df.groupby(t).sum()
+            log_df = log_df.groupby(bin_id).sum()
+            log_df.index = log_df.index.astype(int)
 
         if trace_df is not None:
             print("trace resampling ...", "with shape of ", trace_df.shape)
-            trace_df = trace_df.groupby(t).mean()
-
+            trace_df = trace_df.groupby(bin_id).mean()
+            trace_df.index = trace_df.index.astype(int)
+        
         # =========================================================
         # 4. FINAL CLEANUP
         # =========================================================
@@ -777,6 +797,7 @@ class aiops:
             dfs.append(trace_df)
 
         df_subset = pd.concat(dfs, axis=1).fillna(0)
+        df_subset.index = df_subset.index.astype(int)
 
         print(f"Final shape (AFTER RESAMPLING FIX): {df_subset.shape}")
 
