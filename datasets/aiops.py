@@ -1,8 +1,6 @@
-import gc
 import os
 import shutil
 import json
-import time
 import torch
 import pandas as pd
 import numpy as np
@@ -12,499 +10,161 @@ from sklearn.preprocessing import StandardScaler, RobustScaler
 import numpy as np
 import pandas as pd
 from scipy.signal import welch
-#from layers.vlinear_arch import OrthTransform 
+from layers.vlinear_arch import OrthTransform 
 
 class aiops:
     def __init__(self, options):
         self.options = options
         self.data_dict = {}
         self.seed = options.get('seed', 1)
-        self.num_vars = options.get('num_vars', 30)
+        self.num_vars = options.get('num_vars', 200)
         self.data_dir = options['data_dir']
         self.window_size = options['window_size']
         self.shuffle = options.get('shuffle', False)
         self.metric_types = ['container', 'istio', 'jvm', 'node', 'service']
-        self.include_logs_and_traces = options.get('include_logs_and_traces', False)
-        if not self.include_logs_and_traces:
-            print("INFO: ONLY metric")
+
+
+    def predict_best_sampling_rate(self, df, current_interval_sec=60):
+        """
+        Analyzes the wide table to suggest an optimal sampling interval.
+        
+        Args:
+            df: The wide table (full_df) from get_wide_table()
+            current_interval_sec: The existing time delta between rows (default 60s)
+            
+        Returns:
+            Suggested interval in seconds and a rationale.
+        """
+        # 1. Variance Check: Identify "Fast" vs "Slow" columns
+        # We look at the Power Spectral Density (PSD)
+        sampling_recommendations = []
+        
+        # We sample a subset of columns to save time
+        sample_cols = df.columns[np.random.choice(len(df.columns), min(20, len(df.columns)))]
+        
+        for col in sample_cols:
+            series = df[col].values
+            # Compute the frequency components
+            freqs, psd = welch(series, fs=1/current_interval_sec)
+            
+            # Find the frequency below which 90% of the power resides
+            cumulative_psd = np.cumsum(psd)
+            total_power = cumulative_psd[-1]
+            if total_power == 0: continue
+            
+            # Nyquist frequency needed for this specific metric
+            idx_90 = np.where(cumulative_psd >= 0.90 * total_power)[0][0]
+            f_max = freqs[idx_90]
+            
+            # Sampling interval = 1 / (2 * f_max)
+            if f_max > 0:
+                sampling_recommendations.append(1 / (2 * f_max))
+
+        if not sampling_recommendations:
+            return current_interval_sec, "Insufficient variance to determine rate."
+
+        avg_suggested_interval = np.median(sampling_recommendations)
+        
+        # Logic-based clamping
+        if avg_suggested_interval < current_interval_sec:
+            reason = "High-frequency noise/spikes detected. Consider higher resolution if available."
+        elif avg_suggested_interval > current_interval_sec * 2:
+            reason = "Data is redundant. You can downsample to save memory."
         else:
-            print("INFO: INCLUDING logs and traces. This will increase feature count significantly.")
+            reason = "Current sampling rate is optimal for the signal-to-noise ratio."
 
-    def get_log_features(self, date_dir):
-        log_base = os.path.join(date_dir, "cloudbed", "log", "all")
-        if not os.path.exists(log_base):
-            return None
-
-        day_log_frames = []
-        chunksize = 50000
-
-        # =========================
-        # 1. Envoy Logs
-        # =========================
-        envoy_path = os.path.join(log_base, "log_filebeat-testbed-log-envoy.csv")
-
-        if os.path.exists(envoy_path):
-            chunks = []
-
-            envoy_iter = pd.read_csv(
-                envoy_path,
-                usecols=['timestamp', 'cmdb_id', 'value'],
-                chunksize=chunksize
-            )
-
-            for chunk in tqdm(envoy_iter, desc=f"Envoy logs ({os.path.basename(date_dir)})"):
-                val_parts = chunk['value'].str.rsplit('"', n=1).str[-1].str.split()
-
-                chunk['is_error'] = val_parts.str[0].str.startswith(('4', '5')).fillna(0).astype(int)
-                chunk['latency'] = pd.to_numeric(val_parts.str[4], errors='coerce').fillna(0)
-
-                chunks.append(chunk)
-
-            df = pd.concat(chunks, axis=0)
-
-            pdf = df.pivot_table(
-                index='timestamp',
-                columns='cmdb_id',
-                values=['is_error', 'latency'],
-                aggfunc={'is_error': 'sum', 'latency': 'mean'}
-            ).fillna(0)
-
-            pdf.columns = [
-                f"{c[1]}_{'envoy_err' if c[0]=='is_error' else 'avg_lat'}"
-                for c in pdf.columns
-            ]
-
-            day_log_frames.append(pdf)
-
-        # =========================
-        # 2. Service Logs
-        # =========================
-        service_path = os.path.join(log_base, "log_filebeat-testbed-log-service.csv")
-
-        if os.path.exists(service_path):
-            chunks = []
-
-            service_iter = pd.read_csv(
-                service_path,
-                usecols=['timestamp', 'cmdb_id', 'value'],
-                chunksize=chunksize
-            )
-
-            for chunk in tqdm(service_iter, desc=f"Service logs ({os.path.basename(date_dir)})"):
-                vals = chunk['value'].str.lower().values.astype(str)
-
-                chunk['is_error'] = np.char.find(vals, 'error') >= 0
-                chunk['is_error'] |= np.char.find(vals, 'fail') >= 0
-                chunk['is_error'] |= np.char.find(vals, 'exception') >= 0
-
-                chunk['is_conn'] = np.char.find(vals, 'timeout') >= 0
-                chunk['is_conn'] |= np.char.find(vals, 'connect') >= 0
-
-                chunks.append(chunk)
-
-            df_svc = pd.concat(chunks, axis=0)
-
-            pdf_svc = df_svc.pivot_table(
-                index='timestamp',
-                columns='cmdb_id',
-                values=['is_error', 'is_conn'],
-                aggfunc='sum'
-            ).fillna(0)
-
-            pdf_svc.columns = [
-                f"{c[1]}_{'svc_err' if c[0]=='is_error' else 'conn_fail'}"
-                for c in pdf_svc.columns
-            ]
-
-            day_log_frames.append(pdf_svc)
-
-        # =========================
-        # Final merge
-        # =========================
-        if not day_log_frames:
-            return None
-
-        return pd.concat(day_log_frames, axis=1)
-
-    def get_trace_features(self, date_dir):
-        trace_path = os.path.join(date_dir, "cloudbed", "trace", "all", "trace_jaeger-span.csv")
-        if not os.path.exists(trace_path): return None
-
-        # Load only what we need and use int32/float32 to save memory
-        df = pd.read_csv(trace_path, usecols=['timestamp', 'cmdb_id', 'duration', 'status_code'])
-        
-        # 1. Vectorized Timestamp Scaling
-        df['timestamp'] = (df['timestamp'] // 1000).astype(int)
-
-        # 2. Vectorized Status Check (Avoid .apply())
-        # status_code 0, Ok, 200 are successes. Everything else is error.
-        success_codes = {'0', 'ok', '200', 0}
-        df['is_trace_err'] = (~df['status_code'].astype(str).str.lower().isin(success_codes)).astype(int)
-
-        # 3. Single Pivot for speed
-        pdf = df.pivot_table(index='timestamp', columns='cmdb_id', 
-                            values=['duration', 'is_trace_err'],
-                            aggfunc={'duration': 'mean', 'is_trace_err': 'sum'}).fillna(0)
-        
-        pdf.columns = [f"{c[1]}_{'span_dur' if c[0]=='duration' else 'span_err'}" for c in pdf.columns]
-        return pdf
+        return round(avg_suggested_interval), reason
 
     def get_wide_table(self):
+        """
+        Flattens the entire directory tree into a single Wide Table.
+        """
+        # Find all date directories (e.g., 2022-05-01)
+        date_dirs = sorted([d for d in glob(os.path.join(self.data_dir, "2022-*")) if os.path.isdir(d)])
+        
+        all_date_frames = []
 
-        import gc
-        import numpy as np
-        import pandas as pd
-
-        date_dirs = sorted([
-            d for d in glob(os.path.join(self.data_dir, "2022-*"))
-            if os.path.isdir(d)
-        ])
-
-        # =========================================================
-        # STEP 1: PROCESS EACH DAY
-        # =========================================================
         for d_dir in tqdm(date_dirs, desc="Processing Date Folders"):
-
-            date_name = os.path.basename(d_dir)
-
-            temp_path = os.path.join(
-                self.data_dir,
-                f"temp_window{self.window_size}_{date_name}.pkl"
-            )
-
-            # -----------------------------------------------------
-            # SKIP IF ALREADY PREPROCESSED
-            # -----------------------------------------------------
-            if os.path.exists(temp_path):
-
-                print(f"Skipping existing pickle: {temp_path}")
-                continue
-
+            # Path: root/2022-05-01/cloudbed/metric/
             metric_base = os.path.join(d_dir, "cloudbed", "metric")
+            day_frames = []
 
-            day_metric_frames = []
-
-            # =====================================================
-            # A. PROCESS METRICS
-            # =====================================================
             for m_type in self.metric_types:
-
                 type_path = os.path.join(metric_base, m_type)
-
                 if not os.path.exists(type_path):
                     continue
 
                 csv_files = glob(os.path.join(type_path, "*.csv"))
+                for f in csv_files:
+                    
+                    # e.g., 'container_cpu_system'
+                    metric_name = os.path.basename(f).replace(".csv", "").replace("kpi_", "")
+                    # DIMENSIONALITY REDUCTION: Only keep essential metrics
+                    #if not any(key in metric_name for key in self.essential_keywords):
+                    #    continue
+                    df = pd.read_csv(f)
+                    
+                    # Keep the first occurrence of each (timestamp, cmdb_id) pair
+                    df = df.drop_duplicates(keep='first')
 
-                for f in tqdm(csv_files,
-                            desc="Processing CSV Files",
-                            leave=False):
-
-                    metric_name = (
-                        os.path.basename(f)
-                        .replace(".csv", "")
-                        .replace("kpi_", "")
-                    )
-
+                    # Core Logic: Pivot the data
+                    # Original: [timestamp, cmdb_id, value]
+                    # Pivoted: Index=timestamp, Columns=cmdb_id_metric_name
                     try:
-
-                        df = pd.read_csv(f).drop_duplicates(keep='first')
-
-                        required_cols = {
-                            'timestamp',
-                            'cmdb_id',
-                            'value'
-                        }
-
-                        if not required_cols.issubset(df.columns):
-
-                            print(f"Skipping malformed file {f}")
-                            continue
-
-                        # -------------------------------------------------
-                        # FASTER + LIGHTER THAN pivot_table
-                        # -------------------------------------------------
-                        pivoted = (
-                            df.set_index(['timestamp', 'cmdb_id'])['value']
-                            .unstack()
+                        pivoted = df.pivot_table(
+                            index='timestamp', 
+                            columns='cmdb_id', 
+                            values='value', 
+                            aggfunc='max' 
                         )
-
-                        pivoted.columns = [
-                            f"{col}_{metric_name}"
-                            for col in pivoted.columns
-                        ]
-
-                        # -------------------------------------------------
-                        # CONVERT TO SPARSE IMMEDIATELY
-                        # -------------------------------------------------
-                        for col in pivoted.columns:
-
-                            pivoted[col] = pivoted[col].astype(
-                                pd.SparseDtype("float32", np.nan)
-                            )
-
-                        day_metric_frames.append(pivoted)
-
-                        del df
-                        gc.collect()
-
+                        pivoted.columns = [f"{col}_{metric_name}" for col in pivoted.columns]
+                        day_frames.append(pivoted)
                     except Exception as e:
-
                         print(f"Error processing {f}: {e}")
 
-            print(
-                f"num metric features for {d_dir}: "
-                f"{sum(len(df.columns) for df in day_metric_frames)}"
-            )
+            if day_frames:
+                # Merge all metrics for this specific day
+                day_wide = pd.concat(day_frames, axis=1)
+                all_date_frames.append(day_wide)
 
-            # =====================================================
-            # MODALITY CONTAINER
-            # =====================================================
-            day_modality = {
-                "metrics": None,
-                "logs": None,
-                "traces": None
-            }
-
-            # =====================================================
-            # METRICS
-            # =====================================================
-            if day_metric_frames:
-
-                print(f"Concatenating metric frames for {date_name}...")
-
-                day_modality["metrics"] = pd.concat(
-                    day_metric_frames,
-                    axis=1,
-                    copy=False,
-                    join="outer"
-                )
-
-            del day_metric_frames
-            gc.collect()
-
-            # =====================================================
-            # OPTIONAL LOGS + TRACES
-            # =====================================================
-            if self.include_logs_and_traces:
-
-                log_features = self.get_log_features(d_dir)
-
-                if log_features is not None:
-
-                    for col in log_features.columns:
-
-                        log_features[col] = log_features[col].astype(
-                            pd.SparseDtype("float32", np.nan)
-                        )
-
-                    day_modality["logs"] = log_features
-
-                trace_features = self.get_trace_features(d_dir)
-
-                if trace_features is not None:
-
-                    for col in trace_features.columns:
-
-                        trace_features[col] = trace_features[col].astype(
-                            pd.SparseDtype("float32", np.nan)
-                        )
-
-                    day_modality["traces"] = trace_features
-
-            # =====================================================
-            # FLATTEN MULTIMODAL FEATURES
-            # =====================================================
-            parts = []
-
-            if day_modality["metrics"] is not None:
-                parts.append(day_modality["metrics"])
-
-            if day_modality["logs"] is not None:
-                parts.append(day_modality["logs"])
-
-            if day_modality["traces"] is not None:
-                parts.append(day_modality["traces"])
-
-            if len(parts) == 0:
-
-                print(f"No data found for {d_dir}")
-                continue
-
-            # -----------------------------------------------------
-            # SORT INDEXES BEFORE CONCAT
-            # REDUCES ALIGNMENT COST
-            # -----------------------------------------------------
-            for p in parts:
-                p.sort_index(inplace=True)
-
-            print(f"Concatenating modalities for {date_name}...")
-
-            day_wide = pd.concat(
-                parts,
-                axis=1,
-                copy=False,
-                join="outer"
-            )
-
-            # -----------------------------------------------------
-            # CLEAN COLUMN TYPES
-            # -----------------------------------------------------
-            day_wide.columns = day_wide.columns.astype(str)
-
-            print(
-                f"Saving pickle: {temp_path} "
-                f"shape={day_wide.shape}"
-            )
-
-            day_wide.to_pickle(temp_path)
-
-            # =====================================================
-            # CLEANUP
-            # =====================================================
-            del parts
-            del day_modality
-            del day_wide
-
-            gc.collect()
-
-        # =========================================================
-        # STEP 2: RELOAD TEMP PICKLES
-        # =========================================================
-        print("Reloading temporary pickles...")
-
-        pickle_files = sorted(
-            glob(
-                os.path.join(
-                    self.data_dir,
-                    f"temp_window{self.window_size}_2022-*.pkl"
-                )
-            )
-        )
-
-        all_date_frames = []
-
-        for pf in pickle_files:
-
-            print(f"Loading {pf}")
-
-            df = pd.read_pickle(pf)
-
-            # -----------------------------------------------------
-            # ENSURE SPARSE AFTER LOADING
-            # -----------------------------------------------------
-            for col in df.columns:
-
-                if not isinstance(df[col].dtype, pd.SparseDtype):
-
-                    df[col] = df[col].astype(
-                        pd.SparseDtype("float32", np.nan)
-                    )
-
-            all_date_frames.append(df)
-
-            gc.collect()
-
-        # =========================================================
-        # STEP 3: FINAL GLOBAL CONCAT
-        # =========================================================
+        # Final Vertical Concatenation of all days
         print("Finalizing global alignment...")
-
-        full_df = pd.concat(
-            all_date_frames,
-            axis=0,
-            copy=False,
-            ignore_index=True
-        )
-
-        del all_date_frames
-        gc.collect()
-
-        # =========================================================
-        # FINAL MEMORY REPORT
-        # =========================================================
-        print(
-            "Final sparse memory:",
-            round(
-                full_df.memory_usage(deep=True).sum() / 1024**3,
-                3
-            ),
-            "GB"
-        )
-
-        print(f"Final dataframe shape: {full_df.shape}")
-
+        full_df = pd.concat(all_date_frames, axis=0).sort_index()
+        
+        # Topology-Agnostic Handling: 
+        # If a metric didn't exist at a certain time (e.g., a container wasn't scaled up), fill with 0.
+        full_df = full_df.fillna(0)
+        
         return full_df
-    
-    
+
     def parse_json_groundtruth(self, full_df):
-
+        """
+        Maps JSON event points to the Wide-Table binary label matrix.
+        Assumes fault lasts 10 minutes (600s) if duration is not provided.
+        """
         label_matrix = np.zeros(full_df.shape)
-
-        gt_files = glob(os.path.join(self.data_dir, "groundtruth", "*.json"))
-
-        # ----------------------------------------------------------
-        # PRECOMPUTE CMDB → COLUMN INDICES
-        # ----------------------------------------------------------
-        cmdb_to_indices = {}
-        for idx, col in enumerate(full_df.columns):
-            cmdb = col.split("_")[0]
-            cmdb_to_indices.setdefault(cmdb, []).append(idx)
-
-        # ----------------------------------------------------------
-        # DETERMINE MODE
-        # ----------------------------------------------------------
-        use_bins = self.include_logs_and_traces
-
-        # SAFE INDEX ACCESS
-        idx_array = np.arange(full_df.shape[0])
+        gt_path = os.path.join(self.data_dir, "groundtruth", "*.json")
+        gt_files = glob(gt_path)
 
         for f in gt_files:
-            with open(f, "r") as jfile:
+            with open(f, 'r') as jfile:
                 gt_data = json.load(jfile)
-
-            timestamps = gt_data["timestamp"]
-            cmdb_ids = gt_data["cmdb_id"]
-
-            for i in range(len(timestamps)):
-
-                cmdb_id = cmdb_ids[i]
-                faulty_indices = cmdb_to_indices.get(cmdb_id, [])
-
-                if not faulty_indices:
-                    continue
-
-                onset = timestamps[i]
-
-                # --------------------------------------------------
-                # METRICS-ONLY MODE (RAW TIMESTAMPS)
-                # --------------------------------------------------
-                if not use_bins:
-
-                    time_mask = (
-                        (idx_array >= onset) &
-                        (idx_array <= onset + 600)
-                    )
-
-                # --------------------------------------------------
-                # FULL PIPELINE MODE (BIN SPACE)
-                # --------------------------------------------------
-                else:
-
-                    onset_bin = (onset - self.global_start_time) // 60
-                    duration_bins = 600 // 60
-
-                    time_mask = (
-                        (idx_array >= onset_bin) &
-                        (idx_array <= onset_bin + duration_bins)
-                    )
-
-                # --------------------------------------------------
-                # APPLY LABELS
-                # --------------------------------------------------
-                for col_idx in faulty_indices:
-                    label_matrix[time_mask, col_idx] = 1
-
+            
+            # Iterating through the JSON lists provided in your snippet
+            for i in range(len(gt_data['timestamp'])):
+                onset = gt_data['timestamp'][i]
+                cmdb_id = gt_data['cmdb_id'][i]
+                
+                # Window: Label as abnormal for 10 minutes starting from the timestamp
+                time_mask = (full_df.index >= onset) & (full_df.index <= onset + 600)
+                
+                # Find all columns associated with this cmdb_id that survived filtering
+                faulty_indices = [idx for idx, col in enumerate(full_df.columns) 
+                                 if col.startswith(cmdb_id)]
+                
+                for idx in faulty_indices:
+                    label_matrix[time_mask, idx] = 1
+                    
         return label_matrix
     
     def get_binary_flags(self, df):
@@ -522,15 +182,11 @@ class aiops:
         return np.array(flags)
 
     def generate_example(self):
-        if self.include_logs_and_traces:
-            self.generate_example_metrics_logs_traces()
-        else:
-            self.generate_example_metrics_only()
-
-    def generate_example_metrics_only(self):
         df = self.get_wide_table()
+        avg_suggested_interval, reason = self.predict_best_sampling_rate(df)  # Optional: Get sampling rate suggestions based on the data
         
         df = df.iloc[::1, :]  # Resample the data based on the suggested interval (assuming original is 1 minute)
+        print(f"Data resampled to every {avg_suggested_interval} seconds. Reason: {reason}")
         
         # 2. Top-K Volatility (Coefficient of Variation)
         # 1. Calculate volatility as usual
@@ -620,237 +276,6 @@ class aiops:
             print(f"Removing old orthogonal transform metadata at {orth_matrix_dir} to avoid confusion.")
             shutil.rmtree(orth_matrix_dir)
 
-
-    def generate_example_metrics_logs_traces(self):
-        df = self.get_wide_table()
-
-        df = df.iloc[::1, :]  # keep your current sampling choice
-
-        # =========================================================
-        # 0. FORCE UNIFIED TEMPORAL GRID (CRITICAL FIX)
-        # =========================================================
-        df.index = pd.to_datetime(df.index, unit='s')
-        df = df.sort_index()
-
-        # infer base resolution (fallback = 1min)
-        inferred_freq = pd.infer_freq(df.index[:100])
-        if inferred_freq is None:
-            freq = "1min"
-        else:
-            freq = inferred_freq
-
-        # =========================================================
-        # 1. STRICT MODALITY SPLIT
-        # =========================================================
-        all_cols = df.columns
-
-        metric_cols = [c for c in all_cols if any(m in c for m in self.metric_types)]
-        log_cols = [c for c in all_cols if "envoy" in c or "svc_" in c or "conn_" in c]
-        trace_cols = [c for c in all_cols if "span_" in c or "trace" in c]
-        print(f"metric step ..")
-        metric_df = df[metric_cols]
-
-        print(f"log step ..")
-        log_df = df[log_cols] if len(log_cols) > 0 else None
-
-        print(f"trace step ..")
-        trace_df = df[trace_cols] if len(trace_cols) > 0 else None
-
-        # =========================================================
-        # 2. FEATURE SELECTION (SAMPLE-BASED ONLY FOR METRICS)
-        # =========================================================
-        print("selecting top metric features based on volatility ...")
-
-        sample_metric_df = metric_df.iloc[:1000]
-
-        # convert ONCE to numpy (avoids Sparse + pandas overhead)
-        X = sample_metric_df.to_numpy(dtype=np.float32)
-
-        # remove near-constant columns (fast vector op)
-        std = np.nanstd(X, axis=0)
-        mean = np.nanmean(X, axis=0)
-
-        valid_mask = std > 1e-2
-
-        X = X[:, valid_mask]
-
-        std = std[valid_mask]
-        mean = mean[valid_mask]
-
-        # volatility score (CV-style)
-        volatility = std / (np.abs(mean) + 1e-6)
-
-        # remove invalid entries
-        valid_vol = volatility > 0
-        volatility = volatility[valid_vol]
-
-        cols = np.array(metric_df.columns)[valid_mask]
-        cols = cols[valid_vol]
-
-        # top-k selection
-        top_idx = np.argsort(volatility)[::-1][:self.num_vars]
-        important_cols = cols[top_idx]
-
-        # store mapping
-        self.idx_to_feature = {
-            i: name for i, name in enumerate(important_cols)
-        }
-
-        with open(os.path.join(self.data_dir, 'idx_to_feature.json'), 'w') as f:
-            json.dump(self.idx_to_feature, f)
-
-        # reduce full dataset early
-        metric_df = metric_df[important_cols]
-
-        print(f"[METRICS] selected: {len(important_cols)}")
-        # reduce logs/traces EARLY (IMPORTANT FIX)
-        print("selecting top log and trace features based on volatility ...")
-        log_keep = self.options.get("log_features", 10)
-        trace_keep = self.options.get("trace_features", 10)
-
-        if log_df is not None:
-            print("selecting top log features ...")
-
-            X = log_df.to_numpy(dtype=np.float32)
-
-            # remove near-constant columns
-            std = np.nanstd(X, axis=0)
-
-            valid_mask = std > 1e-6
-            X = X[:, valid_mask]
-            std = std[valid_mask]
-
-            cols = np.array(log_df.columns)[valid_mask]
-
-            # rank by variance (logs usually better than CV)
-            top_idx = np.argsort(std)[::-1][:log_keep]
-            log_cols_keep = cols[top_idx]
-
-            log_df = log_df[log_cols_keep]
-
-            print(f"[LOGS] selected: {len(log_cols_keep)}")
-
-        if trace_df is not None:
-            print("selecting top trace features ...")
-
-            X = trace_df.to_numpy(dtype=np.float32)
-
-            std = np.nanstd(X, axis=0)
-
-            valid_mask = std > 1e-6
-            X = X[:, valid_mask]
-            std = std[valid_mask]
-
-            cols = np.array(trace_df.columns)[valid_mask]
-
-            top_idx = np.argsort(std)[::-1][:trace_keep]
-            trace_cols_keep = cols[top_idx]
-
-            trace_df = trace_df[trace_cols_keep]
-
-            print(f"[TRACES] selected: {len(trace_cols_keep)}")
-
-        # =========================================================
-        # 3. UNIFIED TIME BINNING (FAST + CONSISTENT)
-        # =========================================================
-        print("resampling all modalities ...")
-        print("now the shapes of metric, logs, and traces after col reduction but BEFORE resampling are:", metric_df.shape, log_df.shape, trace_df.shape)
-        t = df.index.floor(freq)
-        ts = df.index.view("int64") // 1_000_000_000
-        bin_id = ts // 60  # if 1-minute bins
-        self.global_start_time = df.index.min().timestamp()
-        print("metric resampling ...", "with shape of ", metric_df.shape)
-        metric_df = metric_df.groupby(bin_id).mean()
-        metric_df.index = metric_df.index.astype(int)
-
-        if log_df is not None:
-            print("log resampling ...", "with shape of ", log_df.shape)
-            log_df = log_df.groupby(bin_id).sum()
-            log_df.index = log_df.index.astype(int)
-
-        if trace_df is not None:
-            print("trace resampling ...", "with shape of ", trace_df.shape)
-            trace_df = trace_df.groupby(bin_id).mean()
-            trace_df.index = trace_df.index.astype(int)
-        
-        # =========================================================
-        # 4. FINAL CLEANUP
-        # =========================================================
-        metric_df = np.log1p(metric_df.fillna(0))
-
-        if log_df is not None:
-            log_df = np.log1p(log_df.fillna(0).clip(upper=1e6))
-
-        if trace_df is not None:
-            trace_df = np.log1p(trace_df.fillna(0).clip(upper=1e6))
-
-
-        # =========================================================
-        # 5. FINAL CONCAT (NOW TEMPORALLY CONSISTENT)
-        # =========================================================
-        dfs = [metric_df]
-
-        if log_df is not None:
-            dfs.append(log_df)
-
-        if trace_df is not None:
-            dfs.append(trace_df)
-
-        df_subset = pd.concat(dfs, axis=1).fillna(0)
-        df_subset = df_subset.reset_index(drop=True)
-
-        print(f"Final shape (AFTER RESAMPLING FIX): {df_subset.shape}")
-
-        # =========================================================
-        # 6. LABEL + SCALING (UNCHANGED)
-        # =========================================================
-        label_matrix = self.parse_json_groundtruth(df_subset)
-
-        data = df_subset.values
-        split = int(len(data) * 0.8)
-
-        scaler = RobustScaler()
-
-        train_data_raw = data[:split]
-        test_data_raw = data[split:]
-        test_labels_raw = label_matrix[split:]
-
-        scaler.fit(train_data_raw)
-        train_scaled = scaler.transform(train_data_raw)
-        test_scaled = scaler.transform(test_data_raw)
-
-        # =========================================================
-        # 7. WINDOWING (UNCHANGED)
-        # =========================================================
-        x_n_list = []
-        x_ab_list = []
-        y_ab_list = []
-
-        step = 1
-        chunk_size = self.window_size
-
-        for i in range(0, len(train_scaled) - chunk_size, step):
-            x_n_list.append(train_scaled[i:i + chunk_size])
-
-        for i in range(0, len(test_scaled) - chunk_size, step):
-            x_ab_list.append(test_scaled[i:i + chunk_size])
-            y_ab_list.append(test_labels_raw[i:i + chunk_size])
-
-        self.data_dict['x_n_list'] = np.array(x_n_list)
-        self.data_dict['x_ab_list'] = np.array(x_ab_list)
-        self.data_dict['label_list'] = np.array(y_ab_list)
-
-        print(f"Dataset generated: x_n {self.data_dict['x_n_list'].shape}, "
-            f"x_ab {self.data_dict['x_ab_list'].shape}")
-
-        self.save_data()
-
-        orth_matrix_dir = os.path.join(self.data_dir, 'orth_transform_meta')
-        if os.path.exists(orth_matrix_dir):
-            print(f"Removing old orthogonal transform metadata at {orth_matrix_dir}")
-            shutil.rmtree(orth_matrix_dir)
-        
-    
     def save_data(self):
         if not os.path.exists(self.data_dir): os.makedirs(self.data_dir)
         for key in ['x_n_list', 'x_ab_list', 'label_list']:
@@ -863,7 +288,7 @@ class aiops:
         self.data_dict['label_list'] = np.load(os.path.join(self.data_dir, 'label_list.npy'))
         orth_matrix_dir = os.path.join(self.data_dir, 'orth_transform_meta')
         self.pipeline_sanity_check()  # Run the sanity check before applying the orthogonal transform
-        return None #self.apply_orthogonal_transform(save_path=orth_matrix_dir, device='cpu')
+        return self.apply_orthogonal_transform(save_path=orth_matrix_dir, device='cpu')
 
     def pipeline_sanity_check(self):
         print("\n--- Starting Data Pipeline Sanity Check ---")
@@ -927,8 +352,7 @@ class aiops:
             dataset_obj=self, 
             time_lag=self.window_size,
             save_path=save_path, 
-            device=device,
-            metric_length=self.metric_num_cols if self.include_logs_and_traces else -1,#if -1 means use all features, otherwise only use the metric features for orthogonalization
+            device=device
         )
         x_n_tensor = torch.from_numpy(self.data_dict['x_n_list']).float().to(device)
         with torch.no_grad():
@@ -943,35 +367,7 @@ if __name__ == "__main__":
         'data_dir': '/home/db2003/Desktop/Amr/Tests/Medicine/dataset/aiops22-pre/初赛评分数据',
         'seed': 1,
         'window_size': 10,
-        'shuffle': True,
-        'include_logs_and_traces': True
+        'shuffle': True
     }
     dataset = aiops(options)
     dataset.generate_example()
-    dataset.pipeline_sanity_check()
-
-
-"""
-    wwith logs and traces
-        --- Starting Data Pipeline Sanity Check ---
-        Normal Data Shape: (68014, 10, 50)
-        Abnormal Data Shape: (16997, 10, 50)
-        Anomaly Coverage Check: Found 220790 anomaly samples.
-        Feature Statistics -> Min: -2.2264, Max: 2188498.2526, Mean: 3.8117
-        INFO: Data has high variance (Robust Scaling active). Good for RCA signal.
-        CRITICAL: Sensors [ 0  1  2  3  7  9 10 26 27 29 31 36 37] have zero variance. This will cause KL collapse!
-        --- Sanity Check Passed ---
-"""
-
-
-"""
-    with metrics only 
-        --- Starting Data Pipeline Sanity Check ---
-        Normal Data Shape: (1142, 10, 30)
-        Abnormal Data Shape: (278, 10, 30)
-        Anomaly Coverage Check: Found 2300 anomaly samples.
-        Feature Statistics -> Min: -1.0886, Max: 10.0648, Mean: -0.0002
-        INFO: Data has high variance (Robust Scaling active). Good for RCA signal.
-        CRITICAL: Sensors [ 0  1  2  3  5  6  7 18 21] have zero variance. This will cause KL collapse!
-        --- Sanity Check Passed ---
-"""
