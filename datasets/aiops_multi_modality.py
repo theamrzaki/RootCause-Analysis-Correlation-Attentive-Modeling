@@ -552,8 +552,8 @@ class aiops_multi_modality:
         # METRICS-DRIVEN SELECTION FOR LOGS & TRACES
         # ---------------------------------------------------------
         print("Aligning log and trace features with volatile metric components...")
-        log_keep = self.options.get("log_features", 10)
-        trace_keep = self.options.get("trace_features", 10)
+        log_keep = self.options.get("num_log_features", 10)
+        trace_keep = self.options.get("num_trace_features", 10)
 
         # Regex captures: service-0, service2-0, and keywords like ingressgateway / egressgateway
         # Matches alphanumeric sequences optionally ending in numbers, followed by a dash and replica id
@@ -641,10 +641,10 @@ class aiops_multi_modality:
         metric_df = np.log1p(metric_df.fillna(0))
 
         if log_df is not None:
-            log_df = np.log1p(log_df.fillna(0).clip(upper=1e6))
+            log_df = log_df #np.log1p(log_df.fillna(0).clip(upper=1e6))
 
         if trace_df is not None:
-            trace_df = np.log1p(trace_df.fillna(0).clip(upper=1e6))
+            trace_df = np.power(trace_df.fillna(0), 0.25) #np.log1p(trace_df.fillna(0).clip(upper=1e6))
 
 
         # =========================================================
