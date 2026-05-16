@@ -274,29 +274,29 @@ run_CUTS_PLUS_SMD() {
 
 
 seeds=(3)
-window_size=(20)
+window_size=(4 6 10)  # NOT 20 — 20 is already done except CUTS_PLUS
 
 for seed in "${seeds[@]}"; do
     for window_size_item in "${window_size[@]}"; do
-            preprocessing_data=1
+        preprocessing_data=1 # from your data, CUTS_PLUS uses preprocessing_data=0
+        # All baselines missing for seed3 windows 4,6,10
         run_vlinear $preprocessing_data $seed $window_size_item
-            preprocessing_data=0
+        preprocessing_data=0 
         run_GVAR $preprocessing_data $seed $window_size_item
-        run_experiment_baselines $preprocessing_data $seed $window_size_item  
-        run_cLSTM $preprocessing_data $seed $window_size_item              
-        #run_CUTS_PLUS_SMD $preprocessing_data $seed $window_size_item   
+        run_experiment_baselines $preprocessing_data $seed $window_size_item  # torai, baro, rcd
+        run_cLSTM $preprocessing_data $seed $window_size_item
+        #run_CUTS_PLUS_SMD 0 $seed $window_size_item
     done
 done
 
 
-
-seeds=(2 3)
-window_size=(10 20)
+seeds=(3)
+window_size=(20)
 
 for seed in "${seeds[@]}"; do
     for window_size_item in "${window_size[@]}"; do
-            preprocessing_data=1          
-        run_CUTS_PLUS_SMD $preprocessing_data $seed $window_size_item   
-            preprocessing_data=0
+        # CUTS_PLUS is the ONLY one missing for seed3 window20
+        preprocessing_data=1  # from your data, CUTS_PLUS uses preprocessing_data=0
+        run_CUTS_PLUS_SMD $preprocessing_data $seed $window_size_item
     done
 done
