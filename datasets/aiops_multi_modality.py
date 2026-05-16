@@ -3,6 +3,7 @@ import os
 import shutil
 import json
 import time
+import re
 import torch
 import pandas as pd
 import numpy as np
@@ -503,7 +504,7 @@ class aiops_multi_modality:
         # =========================================================
         print("selecting top metric features based on volatility ...")
 
-        sample_metric_df = metric_df#.iloc[:1000]
+        sample_metric_df = metric_df.iloc[:10000]
 
         # convert ONCE to numpy (avoids Sparse + pandas overhead)
         X = sample_metric_df.to_numpy(dtype=np.float32)
@@ -547,50 +548,69 @@ class aiops_multi_modality:
         print(f"[METRICS] selected: {len(important_cols)}")
         # reduce logs/traces EARLY (IMPORTANT FIX)
         print("selecting top log and trace features based on volatility ...")
+# ---------------------------------------------------------
+        # METRICS-DRIVEN SELECTION FOR LOGS & TRACES
+        # ---------------------------------------------------------
+        print("Aligning log and trace features with volatile metric components...")
         log_keep = self.options.get("log_features", 10)
         trace_keep = self.options.get("trace_features", 10)
 
+        # Regex captures: service-0, service2-0, and keywords like ingressgateway / egressgateway
+        # Matches alphanumeric sequences optionally ending in numbers, followed by a dash and replica id
+        service_pattern = re.compile(r'([a-zA-Z0-9\-]+gateway|[a-zA-Z0-9\-]+-[0-9])')
+
+        # Extract unique structural tokens from the important metric columns
+        metric_tokens = set()
+        for col in important_cols:
+            matches = service_pattern.findall(col)
+            if matches:
+                metric_tokens.update(matches)
+
+        print(f"[ALIGNMENT] Found {len(metric_tokens)} distinct service/resource targets in top metrics.")
+        print(f"[ALIGNMENT] Targets: {metric_tokens}")
+
+        # 1. ALIGNED LOG SELECTION
         if log_df is not None:
-            print("selecting top log features ...")
+            matched_log_cols = [
+                col for col in log_df.columns 
+                if any(token in col for token in metric_tokens)
+            ]
+            
+            if not matched_log_cols:
+                print("[LOGS] Warning: No structural overlap found. Using variance fallback.")
+                matched_log_cols = list(log_df.columns)
 
-            X = log_df.to_numpy(dtype=np.float32)
+            sub_log_df = log_df[matched_log_cols]
+            X_log = sub_log_df.to_numpy(dtype=np.float32)
+            log_std = np.nanstd(X_log, axis=0)
 
-            # remove near-constant columns
-            std = np.nanstd(X, axis=0)
-
-            valid_mask = std > 1e-6
-            X = X[:, valid_mask]
-            std = std[valid_mask]
-
-            cols = np.array(log_df.columns)[valid_mask]
-
-            # rank by variance (logs usually better than CV)
-            top_idx = np.argsort(std)[::-1][:log_keep]
-            log_cols_keep = cols[top_idx]
+            top_log_idx = np.argsort(log_std)[::-1][:log_keep]
+            log_cols_keep = np.array(matched_log_cols)[top_log_idx]
 
             log_df = log_df[log_cols_keep]
+            print(f"[LOGS] Finalized selection: {len(log_cols_keep)} columns.")
 
-            print(f"[LOGS] selected: {len(log_cols_keep)}")
-
+        # 2. ALIGNED TRACE SELECTION
         if trace_df is not None:
-            print("selecting top trace features ...")
+            matched_trace_cols = [
+                col for col in trace_df.columns 
+                if any(token in col for token in metric_tokens)
+            ]
+            
+            if not matched_trace_cols:
+                print("[TRACES] Warning: No structural overlap found. Using variance fallback.")
+                matched_trace_cols = list(trace_df.columns)
 
-            X = trace_df.to_numpy(dtype=np.float32)
+            sub_trace_df = trace_df[matched_trace_cols]
+            X_trace = sub_trace_df.to_numpy(dtype=np.float32)
+            trace_std = np.nanstd(X_trace, axis=0)
 
-            std = np.nanstd(X, axis=0)
-
-            valid_mask = std > 1e-6
-            X = X[:, valid_mask]
-            std = std[valid_mask]
-
-            cols = np.array(trace_df.columns)[valid_mask]
-
-            top_idx = np.argsort(std)[::-1][:trace_keep]
-            trace_cols_keep = cols[top_idx]
+            # Rank by variance within the aligned trace columns
+            top_trace_idx = np.argsort(trace_std)[::-1][:trace_keep]
+            trace_cols_keep = np.array(matched_trace_cols)[top_trace_idx]
 
             trace_df = trace_df[trace_cols_keep]
-
-            print(f"[TRACES] selected: {len(trace_cols_keep)}")
+            print(f"[TRACES] Finalized selection: {len(trace_cols_keep)} columns.")
 
         # =========================================================
         # 3. UNIFIED TIME BINNING (FAST + CONSISTENT)
@@ -632,11 +652,11 @@ class aiops_multi_modality:
         # =========================================================
         dfs = [metric_df]
 
-        ####if log_df is not None:
-        ####    dfs.append(log_df)
-####
-        ####if trace_df is not None:
-        ####    dfs.append(trace_df)
+        if log_df is not None:
+            dfs.append(log_df)
+        
+        if trace_df is not None:
+            dfs.append(trace_df)
 
         df_subset = pd.concat(dfs, axis=1).fillna(0)
         df_subset = df_subset.reset_index(drop=True)
@@ -705,7 +725,7 @@ class aiops_multi_modality:
         self.data_dict['label_list'] = np.load(os.path.join(self.data_dir, 'label_list.npy'))
         orth_matrix_dir = os.path.join(self.data_dir, 'orth_transform_meta')
         self.pipeline_sanity_check()  # Run the sanity check before applying the orthogonal transform
-        return self.apply_orthogonal_transform(save_path=orth_matrix_dir, device='cpu')
+        return None #self.apply_orthogonal_transform(save_path=orth_matrix_dir, device='cpu')
 
     def pipeline_sanity_check(self):
         print("\n--- Starting Data Pipeline Sanity Check ---")
