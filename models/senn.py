@@ -46,22 +46,28 @@ class SENNGC(nn.Module):
                     options = args  # default to None if not specified
                 )
             elif self.args["include_logs_and_traces"] == 1:
-                #self.coeff_net = MultiModalVLinear(
-                #    metric_dim=num_vars,
-                #    log_dim=10,
-                #    trace_dim=10,
-                #    hidden_dim=hidden_layer_size,
-                #    order=order,
-                #    device=torch.device,
-                #    options = args  # default to None if not specified
-                #)
-                self.coeff_net = vlinear(
-                    num_vars=num_vars,
-                    hidden_dim=hidden_layer_size,
+                num_pods = args["num_pods"]
+
+                md = args["num_metrics"]
+                ld = args["num_log_features"]
+                td = args["num_trace_features"]
+                self.coeff_net = MultiModalVLinear(
+                    md=md,
+                    ld=ld,
+                    td=td,
+                    N=num_pods,
+                    h=hidden_layer_size,
                     order=order,
                     device=device,
-                    options = args  # default to None if not specified
+                    opt=args
                 )
+                #self.coeff_net = vlinear(
+                #    num_vars=num_vars,
+                #    hidden_dim=hidden_layer_size,
+                #    order=order,
+                #    device=device,
+                #    options = args  # default to None if not specified
+                #)
 
 
         if args["coeff_architecture"] == "cLSTM":

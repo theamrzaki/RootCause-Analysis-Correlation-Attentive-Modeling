@@ -4,6 +4,7 @@ import numpy as np
 import os
 from numpy.linalg import eigh
 import pandas as pd
+import torch.nn.functional as F
 
 import torch
 import torch.nn as nn
@@ -107,6 +108,67 @@ class OrthTransform(nn.Module):
         
         return out.transpose(1, 2)
   
+class OrthTransform_multi_modal(nn.Module):
+    def __init__(self,dataset_obj,save_path,time_lag,device):
+        super().__init__()
+        self.device=device
+        self.time_lag=time_lag
+
+        self.paths={"m":os.path.join(save_path,f"Q_m_lag{time_lag}.npy"),
+                    "l":os.path.join(save_path,f"Q_l_lag{time_lag}.npy"),
+                    "t":os.path.join(save_path,f"Q_t_lag{time_lag}.npy")}
+        
+        self.Qm=self._load_or_compute(dataset_obj.data_dict["x_n_list_m"],self.paths["m"],save_path)
+        self.Ql=self._load_or_compute(dataset_obj.data_dict["x_n_list_l"],self.paths["l"],save_path)
+        self.Qt=self._load_or_compute(dataset_obj.data_dict["x_n_list_t"],self.paths["t"],save_path)
+
+        self.register_buffer("Qm_torch",torch.from_numpy(self.Qm.astype(np.float32)))
+        self.register_buffer("Ql_torch",torch.from_numpy(self.Ql.astype(np.float32)))
+        self.register_buffer("Qt_torch",torch.from_numpy(self.Qt.astype(np.float32)))
+
+    def _load_or_compute(self,data,path,save_path):
+        if os.path.isfile(path): return np.load(path)
+        os.makedirs(save_path,exist_ok=True)
+        S,W,V=data.shape
+        sigma_list=[]
+        for i in range(V):
+            x=data[:,:,i]
+            cov=np.cov(x.T)
+            d=np.diag(cov)
+            if np.any(d<1e-6): continue
+            cov=cov/(np.sqrt(np.outer(d,d))+1e-9)
+            sigma_list.append(cov)
+        if len(sigma_list)==0: raise ValueError("OrthTransform failed")
+        sigma=np.mean(sigma_list,axis=0)
+        eigvals,eigvecs=np.linalg.eigh(sigma)
+        Q=np.flip(eigvecs.T,axis=0)
+        np.save(path,Q)
+        return Q
+    
+    def forward(self,x,mode):
+        Q={"m":self.Qm_torch,"l":self.Ql_torch,"t":self.Qt_torch}[mode]
+        B,T,C=x.shape
+        if T<Q.shape[0]:
+            x=F.pad(x,(0,0,Q.shape[0]-T,0))
+        out=torch.einsum("btc,vt->bvc",x,Q)
+        return out[:,-T:,:].transpose(1,2)
+    
+    def inverse(self, x, mode):
+        Q = {
+            "m": self.Qm_torch,
+            "l": self.Ql_torch,
+            "t": self.Qt_torch
+        }[mode]
+
+        B, C, T = x.shape
+
+        # DO NOT truncate Q blindly
+        Qs = Q[:C, :C]
+
+        out = torch.einsum("bct,tc->btc", x, Qs)
+
+        return out.transpose(1, 2)
+
 
 class vlinear(nn.Module):
     def __init__(self, num_vars, order, hidden_dim=128, device="cpu", options=None):#128 for SMD
@@ -114,8 +176,18 @@ class vlinear(nn.Module):
         self.num_vars = num_vars  
         self.order = order*1  -1      
         self.device = device
-        
-        self.orth_transformer = options.get('orth_transformer') 
+        self.options = options or {}
+        if "orth_transformer_multi_modality" in options and options["orth_transformer_multi_modality"]:
+            self.multi_modal = True
+            self.orth_transformer = OrthTransform_multi_modal(
+                dataset_obj=options['dataset_obj'],
+                save_path=options['save_path'],
+                time_lag=options['time_lag'],
+                device=device
+            )
+        else:
+            self.multi_modal = False
+            self.orth_transformer = options.get('orth_transformer') 
         
         # 1. Delta Biases (Faithful to Model logic)
         # These act as "Learned Context" for the orthogonal domain
@@ -162,7 +234,20 @@ class vlinear(nn.Module):
         if self.orth_transformer is None:
             x_orth = inputs.transpose(1, 2) # [B, 51, 2]
         else:
-            x_orth = self.orth_transformer(inputs) # [B, 51, 2]
+            if self.multi_modal:
+                md, ld, td = self.md, self.ld, self.td
+
+                xm = inputs[:, :, :md]
+                xl = inputs[:, :, md:md+ld]
+                xt = inputs[:, :, md+ld:md+ld+td]
+
+                xm, xl, xt = self.orth_transformer(xm, xl, xt)
+
+                assert xm.shape[1] == xl.shape[1] == xt.shape[1], "Orth mismatch in time axis"
+
+                x_orth = torch.cat([xm, xl, xt], dim=1)
+            else:
+                x_orth = self.orth_transformer(inputs)
         
         # --- 2. Apply Delta1 Latent Bias ---
         # Project delta_latent1 [1, P, H] -> [1, P, Order]
@@ -214,175 +299,158 @@ class vlinear(nn.Module):
         coeffs_freq = coeffs_time[:, 0, :, :] # First step coefficients
 
         return preds, coeffs_time, coeffs_freq
-    
-class MultiModalVLinear_old(nn.Module):
-    def __init__(self, metric_dim, log_dim, trace_dim,
-                 order, hidden_dim=128, device="cpu", options=None):
-
-        super().__init__()
-
-        self.md, self.ld, self.td = metric_dim, log_dim, trace_dim
-        self.total = metric_dim + log_dim + trace_dim
-
-        self.metric_orth = (options or {}).get("orth_transformer", None)
-
-        inner_hidden = hidden_dim // 2
-
-        # ---- adapters ----
-        self.ma = nn.Sequential(nn.Linear(metric_dim, inner_hidden),
-                                nn.LayerNorm(inner_hidden),
-                                nn.GELU())
-
-        self.la = nn.Sequential(nn.Linear(log_dim, inner_hidden),
-                                nn.LayerNorm(inner_hidden),
-                                nn.GELU())
-
-        self.ta = nn.Sequential(nn.Linear(trace_dim, inner_hidden),
-                                nn.LayerNorm(inner_hidden),
-                                nn.GELU())
-
-        opts = dict(options or {})
-        opts["orth_transformer"] = None
-
-        # ---- CRITICAL CHANGE: independent backbones ----
-        self.backbone_m = vlinear(inner_hidden, order, hidden_dim, device, opts)
-        self.backbone_l = vlinear(inner_hidden, order, hidden_dim, device, opts)
-        self.backbone_t = vlinear(inner_hidden, order, hidden_dim, device, opts)
-
-        # ---- fusion ----
-        self.fuse_proj = nn.Linear(inner_hidden, hidden_dim)
-        self.out = nn.Linear(hidden_dim, self.total)
-        self.modality_pool = nn.Parameter(torch.zeros(3))  # or M if fixed
-    # ---------------- utils ----------------
-
-    def split(self, x):
-        m, l = self.md, self.md + self.ld
-        return x[..., :m], x[..., m:l], x[..., l:]
-
-    # ---------------- fusion ----------------
-
-    def fuse_linear_attn(self, zs):
-        z = torch.stack(zs, dim=1)  # [B, M, H]
-
-        q = torch.nn.functional.elu(z) + 1  # [B, M, H]
-        k = torch.nn.functional.elu(z) + 1  # [B, M, H]
-
-        # modality attention scores
-        scores = torch.einsum('bmh,bnh->bmn', q, k)  # [B, M, M]
-
-        attn = torch.softmax(scores, dim=-1)  # [B, M, M]
-
-        # weighted sum over modalities
-        z_fused = torch.einsum('bmn,bnh->bmh', attn, z)  # [B, M, H]
-        w = torch.softmax(self.modality_pool, dim=0)  # [M]
-        z_out = (z_fused * w[None, :, None]).sum(dim=1)
-        return z_out, attn
-    # ---------------- forward ----------------
-
-    def forward(self, x):
-
-        xm, xl, xt = self.split(x)
-
-        if self.metric_orth is not None:
-            xm = self.metric_orth(xm)
-
-        xm = self.ma(xm)
-        xl = self.la(xl)
-        xt = self.ta(xt)
-
-        pm, coeff_tm_m, coeff_fm_m = self.backbone_m(xm)
-        pl, coeff_tm_l, coeff_fm_l = self.backbone_l(xl)
-        pt, coeff_tm_t, coeff_fm_t = self.backbone_t(xt)
-
-        zf, attn = self.fuse_linear_attn([pm, pl, pt])
-
-        zf = self.fuse_proj(zf)
-
-        pred = self.out(zf)
-
-        coeff_time = {
-            "metric": coeff_tm_m,
-            "log": coeff_tm_l,
-            "trace": coeff_tm_t
-        }
-
-        coeff_freq = {
-            "metric": coeff_fm_m,
-            "log": coeff_fm_l,
-            "trace": coeff_fm_t
-        }
-
-        return pred, coeff_time, coeff_freq
-    
-
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-
 class MultiModalVLinear(nn.Module):
-    def __init__(self, md, ld, td, order, h=128, device="cpu", opt=None):
+    def __init__(self, md, ld, td, N, order, h=128, device="cpu", opt=None):
         super().__init__()
 
         self.md, self.ld, self.td = md, ld, td
-        self.V = md + ld + td
+        self.N = N
         self.h = h
 
-        enc = lambda act: nn.Sequential(
-            nn.Linear(1, h // 2), act, nn.Linear(h // 2, h)
+        # -----------------------------
+        # Encoders (node-wise)
+        # -----------------------------
+        self.enc_m = nn.Sequential(
+            nn.Linear(md, h), nn.GELU(), nn.Linear(h, h)
+        )
+        self.enc_l = nn.Sequential(
+            nn.Linear(ld, h), nn.ReLU(), nn.Linear(h, h)
+        )
+        self.enc_t = nn.Sequential(
+            nn.Linear(td, h), nn.GELU(), nn.Linear(h, h)
         )
 
-        self.enc_m = enc(nn.GELU())
-        self.enc_l = enc(nn.ReLU())
-        self.enc_t = enc(nn.GELU())
+        # modality embedding
+        self.type_emb = nn.Parameter(torch.randn(1, 1, 1, 3, h))
 
-        self.type_emb = nn.Parameter(torch.randn(1, 1, self.V, h))
-
+        # -----------------------------
+        # temporal + modality attention
+        # -----------------------------
         self.q = nn.Linear(h, h)
         self.k = nn.Linear(h, h)
         self.v = nn.Linear(h, h)
 
         self.fuse = nn.Sequential(
-            nn.Linear(h, h), nn.GELU(), nn.Linear(h, h)
+            nn.Linear(h, h),
+            nn.GELU(),
+            nn.Linear(h, h)
         )
 
-        self.to_x = nn.Linear(h, 1)
+        # node-level projection
+        latent_per_pod = opt.get("latent_per_pod")
+        self.node_out = nn.Linear(h, latent_per_pod)
+
         self.gate = nn.Parameter(torch.tensor(0.1))
 
-        self.backbone = vlinear(self.V, order, h, device, opt or {})
+        # backbone (keeps your V-linear structure)
+        self.backbone = vlinear(N*latent_per_pod, order, h, device, opt or {})
 
+        self.total_features = md + ld + td
+
+        self.decoder = nn.Sequential(
+            nn.Linear(latent_per_pod, h),
+            nn.GELU(),
+            nn.Linear(h, self.total_features)
+        )
+
+    # -----------------------------
+    # split concatenated input
+    # -----------------------------
     def split(self, x):
         m, l = self.md, self.md + self.ld
         return x[..., :m], x[..., m:l], x[..., l:]
 
+    # -----------------------------
+    # attention over modalities
+    # -----------------------------
     def attn(self, z):
-        q, k, v = F.elu(self.q(z)) + 1, F.elu(self.k(z)) + 1, self.v(z)
+        """
+        z: (B, T, N, M, H)
+        M = modalities (3)
+        """
 
-        kv = torch.einsum("bwvh,bwvk->bhk", k, v)
-        zc = 1 / (torch.einsum("bwvh,bh->bwv", q, k.sum((1, 2))) + 1e-6)
+        q = F.elu(self.q(z)) + 1
+        k = F.elu(self.k(z)) + 1
+        v = self.v(z)
 
-        return self.fuse(torch.einsum("bwvh,bhk,bwv->bwvk", q, kv, zc))
+        # pool over (T, M)
+        kv = torch.einsum("btnmd,btnme->bnde", k, v)
 
+        k_sum = k.sum(dim=(1, 3))  # (B, N, H)
+
+        norm = 1 / (torch.einsum("btnmh,bnh->btnm", q, k_sum) + 1e-6)
+
+        out = torch.einsum("btnmh,bnhh,btnm->btnmh", q, kv, norm)
+
+        return self.fuse(out)
+
+    # -----------------------------
+    # forward
+    # -----------------------------
     def forward(self, x):
+        """
+        x: (B, T, N, Fm+Fl+Ft)
+        """
+
         xm, xl, xt = self.split(x)
 
-        z = torch.cat([
-            self.enc_m(xm.unsqueeze(-1)),
-            self.enc_l(xl.unsqueeze(-1)),
-            self.enc_t(xt.unsqueeze(-1))
-        ], dim=2) + self.type_emb
+        # -------------------------------------------------
+        # modality encoders
+        # -------------------------------------------------
+        m = self.enc_m(xm)   # (B,T,N,H)
+        l = self.enc_l(xl)   # (B,T,N,H)
+        t = self.enc_t(xt)   # (B,T,N,H)
 
-        z = self.attn(z)
-        x = x + self.gate * self.to_x(z).squeeze(-1)
+        # -------------------------------------------------
+        # stack modalities
+        # -------------------------------------------------
+        z = torch.stack([m, l, t], dim=3)  # (B,T,N,3,H)
 
-        return self.backbone(x)
+        z = z + self.type_emb
+
+        # -------------------------------------------------
+        # modality attention
+        # -------------------------------------------------
+        z = self.attn(z)  # (B,T,N,3,H)
+
+        # -------------------------------------------------
+        # collapse modality dimension
+        # -------------------------------------------------
+        z = z.mean(dim=3)  # (B,T,N,H)
+
+        # -------------------------------------------------
+        # richer pod latent representation
+        # -------------------------------------------------
+        x_nodes = self.node_out(z)  # (B,T,N,D)
+
+        B, T, N, D = x_nodes.shape
+
+        # optional residual stabilization
+        residual = x.mean(dim=-1, keepdim=True)  # (B,T,N,1)
+
+        x_nodes = x_nodes + self.gate * residual
+
+        # -------------------------------------------------
+        # flatten pod latent space
+        # -------------------------------------------------
+        x_nodes = x_nodes.reshape(B, T, N * D)
+
+        # -------------------------------------------------
+        # backbone causal modeling
+        # -------------------------------------------------
+        pred_latent, coeffs_time, coeffs_freq = self.backbone(x_nodes)
+        pred_latent = pred_latent.view(B, N, D) #latent -> pod latent
+        pred = self.decoder(pred_latent)  # (B,N,F)
+
+        # -------------------------------------------------
+        # reshape coeffs back to pod structure
+        # -------------------------------------------------
+        coeffs_time = coeffs_time.view(B, T, N, D, N, D)
+
+        # aggregate latent interactions
+        coeffs_time = coeffs_time.mean(dim=(3, 5))  # (B,T,N,N)
+
+        coeffs_freq = coeffs_freq.view(B, N, D, N, D)
+        coeffs_freq = coeffs_freq.mean(dim=(2, 4))  # (B,N,N)
+
+        return pred, coeffs_time, coeffs_freq

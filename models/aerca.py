@@ -351,7 +351,11 @@ class AERCA(nn.Module):
     def forward(self, x,add_u=True):
         us, encoder_coeffs, nexts, winds, attn_weights, preds = self.encoding(x)
         try:
-            kl_div = compute_kl_divergence(us, self.device)
+            if "include_logs_and_traces" in self.options and self.options["include_logs_and_traces"]:
+                us_kl = us.mean(dim=1)
+                kl_div = compute_kl_divergence(us_kl, self.device)
+            else:
+                kl_div = compute_kl_divergence(us, self.device)
         except Exception as e:
             # In case of error, like when KL cannot be computed due to numerical issues, 
             # sometimes happens when lr is high (0.0005 for SWAT) instead of 0.0001

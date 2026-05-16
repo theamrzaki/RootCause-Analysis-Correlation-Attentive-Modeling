@@ -11,9 +11,9 @@ import json
 #make layers import work
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-from layers.vlinear_arch import OrthTransform
+from layers.vlinear_arch import OrthTransform_multi_modal
 
-class MSDSMultiModal:
+class MSDS_multi_modality:
     def __init__(self, options):
         self.opt=options
         self.data_dir=options["data_dir"]
@@ -37,12 +37,10 @@ class MSDSMultiModal:
         self.trace_df=pd.read_csv(os.path.join(self.data_dir,"trace.csv"))
         self.labels=pickle.load(open(os.path.join(self.data_dir,"label.pkl"),"rb")).astype(np.float32)
         self.infer_pods()
-        self.cache_id=self.make_hash()
-        self.cache_dir=os.path.join(self.data_dir,f"cache_w{self.window}_{self.cache_id}")
+        self.cache_dir=os.path.join(self.data_dir,f"cache_w{self.window}")
         self.metric_p=os.path.join(self.cache_dir,"metrics.pkl")
         self.log_p=os.path.join(self.cache_dir,"logs.pkl")
         self.trace_p=os.path.join(self.cache_dir,"traces.pkl")
-        self.window_p=os.path.join(self.cache_dir,"windows.pkl")
 
     def infer_pods(self):
         cols=[c for c in self.metric_df.columns if c!="now"]
@@ -118,53 +116,59 @@ class MSDSMultiModal:
     ###########################################################################
     # TRACES
     ###########################################################################
-
     def process_traces(self):
-        df=self.trace_df.sort_values("end_time")
 
-        timestamps=sorted(df["end_time"].unique())
-        trace_types=sorted(df["stats"].unique())
+        df = self.trace_df.sort_values("end_time")
 
-        ts2idx={t:i for i,t in enumerate(timestamps)}
-        type2idx={t:i for i,t in enumerate(trace_types)}
+        timestamps = sorted(df["end_time"].unique())
+        trace_types = sorted(df["stats"].unique())
 
-        X=np.zeros(
-            (
-                len(timestamps),
-                len(self.pods),
-                len(self.pods),
-                len(trace_types)
-            ),
-            dtype=np.float32
-        )
+        ts2idx = {t: i for i, t in enumerate(timestamps)}
+        type2idx = {t: i for i, t in enumerate(trace_types)}
 
-        for _,row in tqdm(df.iterrows(),total=len(df),desc="traces"):
+        T = len(timestamps)
+        N = len(self.pods)
+        K = len(trace_types)
 
-            src=row["cmbd_id"]
-            dst=row["fatherpod"]
+        # node-level trace signals (NO window dimension here)
+        in_X = np.zeros((T, N, K), dtype=np.float32)
+        out_X = np.zeros((T, N, K), dtype=np.float32)
+
+        for _, row in tqdm(df.iterrows(), total=len(df), desc="traces"):
+
+            src = row["cmbd_id"]
+            dst = row["fatherpod"]
 
             if src not in self.pods or dst not in self.pods:
                 continue
 
-            ts=row["end_time"]
-
+            ts = row["end_time"]
             if ts not in ts2idx:
                 continue
 
-            tr=row["stats"]
+            tr = row["stats"]
 
-            t=ts2idx[ts]
-            i=self.pods.index(src)
-            j=self.pods.index(dst)
-            k=type2idx[tr]
+            t = ts2idx[ts]
+            k = type2idx[tr]
 
-            X[t,i,j,k]+=row["duration"]
+            i = self.pods.index(src)
+            j = self.pods.index(dst)
 
-        X=X/(X.mean(axis=0,keepdims=True)*10+1e-6)
+            val = row["duration"]
 
-        self.trace_tensor=X
+            # outgoing + incoming signal
+            out_X[t, i, k] += val
+            in_X[t, j, k] += val
 
-        print("trace tensor:",self.trace_tensor.shape)
+        # concatenate directional signals
+        X = np.concatenate([in_X, out_X], axis=-1)  # (T, N, 2K)
+
+        # stabilize scale (important for RCA stability)
+        X = X / (np.mean(X, axis=0, keepdims=True) * 10 + 1e-6)
+
+        self.trace_tensor = X
+
+        print("trace tensor:", self.trace_tensor.shape)
 
     ###########################################################################
     # WINDOWING
@@ -244,7 +248,6 @@ class MSDSMultiModal:
     def pipeline_sanity_check(self):
 
         print("\n--- Starting MSDS Sanity Check ---")
-
         Xm=self.data_dict["x_metric"]
         Xl=self.data_dict["x_log"]
         Xt=self.data_dict["x_trace"]
@@ -337,107 +340,100 @@ class MSDSMultiModal:
     # ORTHOGONAL TRANSFORMS
     ###########################################################################
 
-    def apply_orthogonal_transform(self):
+    def apply_orthogonal_transform(self, save_path, device='cpu'):
 
-        if not self.use_orth:
-            return
+        os.makedirs(save_path, exist_ok=True)
 
-        print("\nApplying modality-specific orthogonal transforms...")
+        self.orth_transformer = OrthTransform_multi_modal(
+            dataset_obj=self,
+            save_path=save_path,
+            time_lag=self.window,
+            device=device
+        )
 
-        #######################################################################
-        # METRICS
-        #######################################################################
+        with torch.no_grad():
 
-        Xm=torch.from_numpy(
-            self.data_dict["x_metric"]
-        ).float().to(self.device)
+            xm = torch.from_numpy(self.data_dict['x_metric']).float().to(device)
+            xl = torch.from_numpy(self.data_dict['x_log']).float().to(device)
+            xt = torch.from_numpy(self.data_dict['x_trace']).float().to(device)
 
-        B,W,N,F=Xm.shape
+            xm_orth = self.orth_transformer.forward(xm, mode="m")
+            xl_orth = self.orth_transformer.forward(xl, mode="l")
+            xt_orth = self.orth_transformer.forward(xt, mode="t")
 
-        Xm_flat=Xm.reshape(B*W*N,F)
+            self.data_dict['x_metric_orth'] = xm_orth.cpu().numpy()
+            self.data_dict['x_log_orth'] = xl_orth.cpu().numpy()
+            self.data_dict['x_trace_orth'] = xt_orth.cpu().numpy()
 
-        Qm=torch.linalg.qr(torch.randn(F,F,device=self.device))[0]
-
-        Xm_orth=(Xm_flat@Qm).reshape(B,W,N,F)
-
-        self.data_dict["x_metric_orth"]=Xm_orth.cpu().numpy()
-
-        #######################################################################
-        # LOGS
-        #######################################################################
-
-        Xl=torch.from_numpy(
-            self.data_dict["x_log"]
-        ).float().to(self.device)
-
-        B,W,N,F=Xl.shape
-
-        Xl_flat=Xl.reshape(B*W*N,F)
-
-        Ql=torch.linalg.qr(torch.randn(F,F,device=self.device))[0]
-
-        Xl_orth=(Xl_flat@Ql).reshape(B,W,N,F)
-
-        self.data_dict["x_log_orth"]=Xl_orth.cpu().numpy()
-
-        #######################################################################
-        # TRACES
-        #######################################################################
-
-        Xt=torch.from_numpy(
-            self.data_dict["x_trace"]
-        ).float().to(self.device)
-
-        B,W,N1,N2,F=Xt.shape
-
-        Xt_flat=Xt.reshape(B*W*N1*N2,F)
-
-        Qt=torch.linalg.qr(torch.randn(F,F,device=self.device))[0]
-
-        Xt_orth=(Xt_flat@Qt).reshape(B,W,N1,N2,F)
-
-        self.data_dict["x_trace_orth"]=Xt_orth.cpu().numpy()
-
-        print("Orthogonal transforms complete")
+        return self.orth_transformer
 
     ###########################################################################
     # SAVE
     ###########################################################################
 
     def save(self):
+        save_dir = os.path.join(self.data_dir, "processed_multimodal")
+        os.makedirs(save_dir, exist_ok=True)
 
-        save_dir=os.path.join(
-            self.data_dir,
-            "processed_multimodal"
+        # --------------------------------------------------------
+        # 1. Build canonical multimodal tensor (NORMAL ONLY)
+        # --------------------------------------------------------
+        xm = self.data_dict["x_metric"]
+        xl = self.data_dict["x_log"]
+        xt = self.data_dict["x_trace"]
+
+        self.data_dict["x_n_list"] = np.concatenate([xm, xl, xt], axis=-1)
+
+        np.save(
+            os.path.join(save_dir, "x_n_list.npy"),
+            self.data_dict["x_n_list"]
         )
 
-        os.makedirs(save_dir,exist_ok=True)
+        # --------------------------------------------------------
+        # 2. Labels (THE true supervision signal)
+        # --------------------------------------------------------
+        if "labels" in self.data_dict:
+            self.data_dict["label_list"] = self.data_dict["labels"]
+            np.save(
+                os.path.join(save_dir, "label_list.npy"),
+                self.data_dict["label_list"]
+            )
 
-        for k,v in self.data_dict.items():
-            np.save(os.path.join(save_dir,f"{k}.npy"),v)
+        # --------------------------------------------------------
+        # 3. IMPORTANT: no x_ab_list unless you define anomalies
+        # --------------------------------------------------------
+        self.data_dict["x_ab_list"] = np.zeros_like(self.data_dict["x_n_list"])
+        np.save(
+            os.path.join(save_dir, "x_ab_list.npy"),
+            self.data_dict["x_ab_list"]
+        )
+
+        # --------------------------------------------------------
+        # 4. Metadata (CRITICAL for OrthTransform)
+        # --------------------------------------------------------
+        meta = {
+            "md": self.data_dict["x_metric"].shape[-1],
+            "ld": self.data_dict["x_log"].shape[-1],
+            "td": self.data_dict["x_trace"].shape[-1],
+            "window": self.window,
+            "step": self.step,
+        }
+
+        np.save(os.path.join(save_dir, "meta.npy"), meta)
 
         print(f"Saved to {save_dir}")
+
 
     def save_pickle(self, obj, path):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "wb") as f:
             pickle.dump(obj, f)
 
-    def make_hash(self):
-        cfg={
-            "window":self.window,
-            "step":self.step,
-            "pods":self.pods,
-            "log_len":self.log_len
-        }
-        return hashlib.md5(json.dumps(cfg,sort_keys=True).encode()).hexdigest()
-
     def check_pickle_cache(self):
         return (
             os.path.exists(self.metric_p) and
             os.path.exists(self.log_p) and
-            os.path.exists(self.trace_p) and
-            os.path.exists(self.window_p)
+            os.path.exists(self.trace_p) 
         )
 
     def load_from_pickle(self):
@@ -450,9 +446,6 @@ class MSDSMultiModal:
         with open(self.trace_p,"rb") as f:
             self.trace_tensor=pickle.load(f)
 
-        with open(self.window_p,"rb") as f:
-            self.data_dict=pickle.load(f)
-
         print("Loaded cache:",
             self.metric_tensor.shape,
             self.log_tensor.shape,
@@ -461,7 +454,14 @@ class MSDSMultiModal:
     ###########################################################################
     # PIPELINE
     ###########################################################################
-
+    def load_data(self):
+        self.data_dict['x_n_list'] = np.load(os.path.join(self.data_dir, 'x_n_list.npy'))
+        self.data_dict['x_ab_list'] = np.load(os.path.join(self.data_dir, 'x_ab_list.npy'))
+        self.data_dict['label_list'] = np.load(os.path.join(self.data_dir, 'label_list.npy'))
+        orth_matrix_dir = os.path.join(self.data_dir, 'orth_transform_meta')
+        #self.pipeline_sanity_check()
+        return None#self.apply_orthogonal_transform(save_path=orth_matrix_dir, device='cpu')
+    
     def generate(self):
 
         self.load_raw()
@@ -483,13 +483,18 @@ class MSDSMultiModal:
             self.save_pickle(self.trace_tensor, self.trace_p)
 
 
+        print("Building windows...")
         self.build_windows()
 
+        print("Performing sanity check...")
         self.pipeline_sanity_check()
 
-        self.apply_orthogonal_transform()
-
+        print("Saving results...")
         self.save()
+
+        print("Applying orthogonal transforms...")
+        #self.apply_orthogonal_transform(save_path=os.path.join(self.data_dir,"orth_transforms"), device=self.device)
+
 
 ###############################################################################
 # MAIN
@@ -502,7 +507,7 @@ if __name__=="__main__":
         "data_dir":
         "/home/db2003/Desktop/Amr/MicroService_Twin_Original/data/MSDS-pre",
 
-        "window_size":10,
+        "window_size":2,
 
         "step":1,
 
@@ -521,6 +526,6 @@ if __name__=="__main__":
         ]
     }
 
-    dataset=MSDSMultiModal(options)
+    dataset=MSDS_multi_modality(options)
 
     dataset.generate()
