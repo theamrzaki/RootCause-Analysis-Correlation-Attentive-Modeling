@@ -5,7 +5,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "AIOps (Multi) - vlinear",
+            "name": "MSDS (Multi) - vlinear",
             "type": "debugpy",
             "request": "launch",
             "program": "main.py",
@@ -24,14 +24,14 @@
 
                 "--lr", "1e-4",
                 "--seed", "7",
-                "--dataset", "aiops_multi_modality",
-                "--window_size", "10",
+                "--dataset", "msds_multi_modality",
+                "--window_size", "2",
 
                 "--training_aerca", "1",
-                "--epochs", "100",
+                "--epochs", "200",
                 "--preprocessing_data", "0",
-                "--include_logs_and_traces", "0",
-                "--results_csv", "aiops_debugging.csv",
+                "--include_logs_and_traces", "1",
+                "--results_csv", "msds_debugging.csv",
 
                 "--hidden_layer_size", "128",
             ]

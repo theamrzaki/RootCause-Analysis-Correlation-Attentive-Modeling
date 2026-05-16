@@ -18,8 +18,8 @@ def create_arg_parser():
     parser.add_argument('--shuffle', type=int, default=1, help='Flag for shuffling data (default: 1)')
     parser.add_argument('--main_model', type=str, default='aerca', help='Main model to use (default: aerca)')
     parser.add_argument('--include_logs_and_traces', type=int, default=0, help='Flag for including logs and traces (default: 0)')
-    parser.add_argument('--num_log_features', type=int, default=0, help='Number of log features (default: 10)')
-    parser.add_argument('--num_trace_features', type=int, default=0, help='Number of trace features (default: 10)')
+    parser.add_argument('--num_log_features', type=int, default=20, help='Number of log features (default: 10)')
+    parser.add_argument('--num_trace_features', type=int, default=20, help='Number of trace features (default: 10)')
 
     # Meta arguments
     parser.add_argument('--seed', type=int, default=4, help='Random seed (default: 4)')
