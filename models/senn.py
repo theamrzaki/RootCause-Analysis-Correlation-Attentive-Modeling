@@ -5,9 +5,12 @@ import torch
 from layers.vlinear_arch import vlinear,MultiModalVLinear
 from layers.cLSTM import cLSTM
 from layers.CUTS_PLUS import CUTS_PLUS_Wrapper
+from layers.Eadro import MainModel as Eadro 
+from layers.Anofusion import AnoFusionWrapper as Anofusion
 class SENNGC(nn.Module):
     def __init__(self, num_vars: int, order: int, hidden_layer_size: int, num_hidden_layers: int,
-                 args: dict,  device: torch.device):
+                 graph_structure: torch.Tensor, 
+                 args: dict, device: torch.device):
         """
         Generalised VAR (GVAR) model based on self-explaining neural networks.
         @param num_vars: number of variables (p).
@@ -18,7 +21,7 @@ class SENNGC(nn.Module):
         """
         super(SENNGC, self).__init__()
         self.args = args
-
+        self.graph_structure = graph_structure #only used for Topology-aware models (Eadro)
         if args["coeff_architecture"] == "deep_mlp" or args["coeff_architecture"] == "GVAR":
             # Networks for amortising generalised coefficient matrices.
             self.coeff_nets = nn.ModuleList()
@@ -32,7 +35,7 @@ class SENNGC(nn.Module):
                 modules.extend(nn.Sequential(nn.Linear(hidden_layer_size, num_vars**2), nn.Tanh()))
                 self.coeff_nets.append(nn.Sequential(*modules))
      
-        if args["coeff_architecture"] not in  ["ht","epsilon_diagnosis","rcd","TemporalGNN","cross_time_freq","cross_attention_single_coeff_network","TemporalGNN_Attention","trend_seasonal","rcd","TemporalGNN_Attention_fourier","TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced","causalrca","cuts_mlp","cuts_lstm","GVAR","vlinear","nsigma","baro","circa","torai","cLSTM","CUTS_PLUS"]:
+        if args["coeff_architecture"] not in  ["ht","epsilon_diagnosis","rcd","TemporalGNN","cross_time_freq","cross_attention_single_coeff_network","TemporalGNN_Attention","trend_seasonal","rcd","TemporalGNN_Attention_fourier","TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced","causalrca","cuts_mlp","cuts_lstm","GVAR","vlinear","nsigma","baro","circa","torai","cLSTM","CUTS_PLUS","Eadro","Anofusion"]:
             total_params = sum(p.numel() for net in self.coeff_nets for p in net.parameters())
             print(f"Total parameters for {order} lags: {total_params}")
         
@@ -61,15 +64,49 @@ class SENNGC(nn.Module):
                     device=device,
                     opt=args
                 )
-                #self.coeff_net = vlinear(
-                #    num_vars=num_vars,
-                #    hidden_dim=hidden_layer_size,
-                #    order=order,
-                #    device=device,
-                #    options = args  # default to None if not specified
-                #)
+        if args["coeff_architecture"] == "Art": #works for multi-modality data
+            graph = graph_structure.to(device)
+            md = args["num_metrics"]
+            ld = args["num_log_features"]
+            td = args["num_trace_features"]
+            hidden_layer_size = args["hidden_layer_size"]
+            self.coeff_net = ARTWrapper(
+                adj=graph, 
+                raw_metric=md,
+                raw_logs=ld,
+                raw_traces=td,
+                feature_metric=hidden_layer_size,
+                feature_logs=hidden_layer_size,
+                feature_traces=hidden_layer_size
+            )   
 
+        if args["coeff_architecture"] == "Eadro": #works for multi-modality data
+            event_num = args['num_log_features']
+            metric_num = args['num_metrics']
+            node_num = args['num_trace_features']
 
+            self.coeff_net = Eadro(
+                event_num=event_num,
+                metric_num=metric_num,
+                node_num=node_num,
+                hidden_dim=hidden_layer_size,
+            )   
+
+        if args["coeff_architecture"] == "Anofusion": #works for multi-modality data
+            event_num = args['num_log_features']
+            metric_num = args['num_metrics']
+            node_num = args['num_trace_features']
+
+            self.coeff_net = Anofusion(
+				num_services=args["num_pods"],
+				window_size=args['window_size']-1,  # because we use K-1 lags as input
+				metric_dim=metric_num,
+				log_dim=event_num,
+				trace_dim=node_num,
+				hidden_dim= hidden_layer_size,  
+			)
+
+                
         if args["coeff_architecture"] == "cLSTM":
             self.coeff_net = cLSTM(num_vars, hidden_layer_size)
 
@@ -130,7 +167,22 @@ class SENNGC(nn.Module):
         """
         Simple forward pass for next-step prediction without returning coefficients.
         """
-        preds,_ = self.coeff_net(inputs)
+        if self.args["coeff_architecture"] in ["Eadro","Anofusion"]:
+             
+            graph = torch.from_numpy(self.graph_structure).to(self.device)
+
+            B, T, N, F = inputs.shape
+            x = inputs  # KEEP FULL TIME
+
+            md = self.args["num_metrics"]
+            ld = self.args["num_log_features"]
+            td = self.args["num_trace_features"]  
+            metrics = x[:, :, :, :md]                     # [B,T,N,md]
+            logs    = x[:, :, :, md:md+ld]                # [B,T,N,ld]
+            traces  = x[:, :, :, md+ld:md+ld+td]          # [B,T,N,2K]
+            preds, _ = self.coeff_net(graph,metrics,logs,traces)
+        else:
+            preds,_ = self.coeff_net(inputs)
         return preds
     
     def forward(self, inputs: torch.Tensor):
@@ -140,5 +192,5 @@ class SENNGC(nn.Module):
         elif self.args["coeff_architecture"] in ["vlinear","CUTS_PLUS"]:
             return self.forward_temporal(inputs)
         
-        elif self.args["coeff_architecture"] == "cLSTM":
+        elif self.args["coeff_architecture"] in ["cLSTM","Eadro","Anofusion"]:
             return self.forward_simple_nextstep(inputs), None, None

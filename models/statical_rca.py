@@ -263,3 +263,225 @@ class StatisticalRCA:
             all_labels.append(current_labels)
 
         return StatisticalRCA._summarize(k_all, k_at_step_all, all_scores=all_scores, all_labels=all_labels)
+        
+    @staticmethod
+    def evaluate_torai_multi_modality(xs,labels,metric_dim=30,log_dim=10,trace_err_dim=0,trace_lat_dim=0,n_components=None):
+        from sklearn.mixture import GaussianMixture
+        from sklearn.preprocessing import StandardScaler
+
+        eps=1e-9
+        B,T,N,F=xs.shape
+        total=metric_dim+log_dim+trace_err_dim+trace_lat_dim
+        assert total<=F
+
+        metric_slice=slice(0,metric_dim)
+        log_slice=slice(metric_dim,metric_dim+log_dim)
+        trace_err_slice=slice(metric_dim+log_dim,metric_dim+log_dim+trace_err_dim)
+        trace_lat_slice=slice(metric_dim+log_dim+trace_err_dim,metric_dim+log_dim+trace_err_dim+trace_lat_dim)
+
+        def fine2coarse_addup(fine_ranks):
+            score_dict={}
+            for svc,score in fine_ranks:
+                score_dict[svc]=score_dict.get(svc,0)+score
+            coarse=[(svc,s) for svc,s in score_dict.items()]
+            coarse.sort(key=lambda x:x[1],reverse=True)
+            return coarse
+
+        def fine2coarse_highest(fine_ranks):
+            if len(fine_ranks)==0:
+                return []
+            fine_ranks=sorted(fine_ranks,key=lambda x:x[1],reverse=True)
+            coarse=[]
+            seen=set()
+            for svc,score in fine_ranks:
+                if svc not in seen:
+                    coarse.append((svc,score))
+                    seen.add(svc)
+            s=sum(x[1] for x in coarse)+eps
+            return [(svc,score/s) for svc,score in coarse]
+
+        k_all=[]
+        k_at_step_all=[]
+        all_scores=[]
+        all_labels=[]
+
+        for i in tqdm(range(B),desc="TORAI MultiModal"):
+
+            x=xs[i]
+            normal_part=x[:-1]
+            anomal_part=x[-1]
+
+            metric_ranks=[]
+            log_ranks=[]
+            trace_err_ranks=[]
+            trace_lat_ranks=[]
+
+            for svc in range(N):
+                for feat in range(metric_dim):
+                    a=normal_part[:,svc,metric_slice][:,feat]
+                    b=anomal_part[svc,metric_slice][feat]
+                    if len(a)==0:
+                        continue
+                    scaler=StandardScaler().fit(a.reshape(-1,1))
+                    z=np.abs(scaler.transform(np.array([[b]]))[:,0])
+                    metric_ranks.append(((svc,feat),float(np.max(z))))
+
+            metric_ranks.sort(key=lambda x:x[1],reverse=True)
+            s=sum(x[1] for x in metric_ranks)+eps
+            metric_ranks=[((svc,feat),score/s) for ((svc,feat),score) in metric_ranks]
+
+            for svc in range(N):
+                for feat in range(log_dim):
+                    a=normal_part[:,svc,log_slice][:,feat]
+                    b=anomal_part[svc,log_slice][feat]
+                    if len(a)==0:
+                        continue
+                    scaler=StandardScaler().fit(a.reshape(-1,1))
+                    z=np.abs(scaler.transform(np.array([[b]]))[:,0])
+                    log_ranks.append(((svc,feat),float(np.max(z))))
+
+            log_ranks.sort(key=lambda x:x[1],reverse=True)
+            s=sum(x[1] for x in log_ranks)+eps
+            log_ranks=[((svc,feat),score/s) for ((svc,feat),score) in log_ranks]
+
+            if trace_err_dim>0:
+                for svc in range(N):
+                    for feat in range(trace_err_dim):
+                        a=normal_part[:,svc,trace_err_slice][:,feat]
+                        b=anomal_part[svc,trace_err_slice][feat]
+                        if len(a)==0:
+                            continue
+                        scaler=StandardScaler().fit(a.reshape(-1,1))
+                        z=np.abs(scaler.transform(np.array([[b]]))[:,0])
+                        score=float(np.max(z))
+                        if scaler.mean_[0]==0 and scaler.var_[0]==0:
+                            score*=1e9
+                        trace_err_ranks.append(((svc,feat),score))
+
+                trace_err_ranks.sort(key=lambda x:x[1],reverse=True)
+                s=sum(x[1] for x in trace_err_ranks)+eps
+                trace_err_ranks=[((svc,feat),score/s) for ((svc,feat),score) in trace_err_ranks]
+
+            if trace_lat_dim>0:
+                for svc in range(N):
+                    for feat in range(trace_lat_dim):
+                        a=normal_part[:,svc,trace_lat_slice][:,feat]
+                        b=anomal_part[svc,trace_lat_slice][feat]
+                        if len(a)==0:
+                            continue
+                        scaler=StandardScaler().fit(a.reshape(-1,1))
+                        z=np.abs(scaler.transform(np.array([[b]]))[:,0])
+                        trace_lat_ranks.append(((svc,feat),float(np.max(z))))
+
+                trace_lat_ranks.sort(key=lambda x:x[1],reverse=True)
+                s=sum(x[1] for x in trace_lat_ranks)+eps
+                trace_lat_ranks=[((svc,feat),score/s) for ((svc,feat),score) in trace_lat_ranks]
+
+            svc_metric_ranks=fine2coarse_addup([(svc,score) for ((svc,_),score) in metric_ranks])
+            svc_log_ranks=fine2coarse_highest([(svc,score) for ((svc,_),score) in log_ranks])
+            svc_trace_err_ranks=fine2coarse_addup([(svc,score) for ((svc,_),score) in trace_err_ranks])
+            svc_trace_lat_ranks=fine2coarse_addup([(svc,score) for ((svc,_),score) in trace_lat_ranks])
+
+            m={}
+
+            for svc,score in svc_metric_ranks:
+                m.setdefault(svc,{})
+                m[svc]["metric"]=score
+
+            for svc,score in svc_log_ranks:
+                m.setdefault(svc,{})
+                m[svc]["log"]=score
+
+            for svc,score in svc_trace_err_ranks:
+                m.setdefault(svc,{})
+                m[svc]["trace_err"]=score
+
+            for svc,score in svc_trace_lat_ranks:
+                m.setdefault(svc,{})
+                m[svc]["trace_lat"]=score
+
+            service_list=sorted(m.keys())
+
+            X_train=np.asarray([
+                [
+                    m[svc].get("metric",0.0),
+                    m[svc].get("log",0.0),
+                    m[svc].get("trace_err",0.0),
+                    m[svc].get("trace_lat",0.0),
+                ]
+                for svc in service_list
+            ])
+
+            if len(service_list)==1:
+                final_order=[0]
+            else:
+                if n_components is None:
+                    bic_scores=[]
+                    n_range=range(1,min(len(service_list),10)+1)
+
+                    for n in n_range:
+                        try:
+                            estimator=GaussianMixture(n_components=n,covariance_type="full",max_iter=50,random_state=0)
+                            estimator.fit(X_train)
+                            bic_scores.append(estimator.bic(X_train))
+                        except:
+                            bic_scores.append(np.inf)
+
+                    n_comp_opt=n_range[np.argmin(bic_scores)]
+                else:
+                    n_comp_opt=n_components
+
+                estimator=GaussianMixture(n_components=n_comp_opt,covariance_type="full",max_iter=50,random_state=0)
+                estimator.fit(X_train)
+
+                y_pred=estimator.predict(X_train)
+                y_train=np.mean(X_train,axis=1)
+
+                cluster_info=[]
+
+                for c_idx in np.unique(y_pred):
+                    indices=np.where(y_pred==c_idx)[0]
+                    cluster_score=np.mean(y_train[indices])
+                    cluster_info.append((c_idx,cluster_score))
+
+                cluster_info.sort(key=lambda x:x[1],reverse=True)
+
+                final_order=[]
+
+                for c_idx,_ in cluster_info:
+                    indices=np.where(y_pred==c_idx)[0]
+                    internal_scores=[(idx,y_train[idx]) for idx in indices]
+                    internal_scores.sort(key=lambda x:x[1],reverse=True)
+
+                    for idx,_ in internal_scores:
+                        final_order.append(idx)
+
+            z_scores_final=np.zeros(N)
+
+            for rank,idx in enumerate(final_order):
+                svc=service_list[idx]
+                z_scores_final[svc]=N-rank
+
+            z_scores_exp=np.expand_dims(z_scores_final,axis=0)
+            current_labels = (np.asarray(labels[i]) > 0).astype(np.int32).reshape(1, -1)
+            # get indexes where sum >0
+            #current_label_indices = np.where(current_labels > 0)[0]
+            if np.sum(current_labels)==0:
+                continue
+
+            k_all.append(topk(z_scores_exp,current_labels,threshold=0.5))
+            k_at_step_all.append(topk_at_step(z_scores_exp,current_labels))
+
+            all_scores.append(z_scores_exp)
+            all_labels.append(current_labels)
+        print("k_all",k_all)
+        print("k_at_step_all",k_at_step_all)
+        return StatisticalRCA._summarize(
+            k_all,
+            k_at_step_all,
+            all_scores=all_scores,
+            all_labels=all_labels,
+        )
+
+
+

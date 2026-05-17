@@ -1,8 +1,8 @@
-import torch as t
+import torch 
 import sys
 sys.path.append('./')
-from src.inner_models.layers.GTblock import GTN
-from src.inner_models.layers.GATGRU import *
+from layers.layers.GTblock import GTN
+from layers.layers.GATGRU import *
 import torch.nn as nn
 
 class permute(nn.Module):
@@ -13,33 +13,33 @@ class permute(nn.Module):
 
 class AnoFusionWrapper(nn.Module):
     def __init__(self, num_services, window_size,
-                 metric_dim, log_dim,trace_dim, out_dim):
+                 metric_dim, log_dim,trace_dim, hidden_dim=64):
         super().__init__()
 
-        #TODO: they need to be the required features, not all 10
-        self.metric_proj = nn.Linear(metric_dim, 10)
-        self.log_proj    = nn.Linear(log_dim, 10)
-        self.trace_proj  = nn.Linear(trace_dim, 10)
+        self.metric_proj = nn.Linear(metric_dim, hidden_dim)
+        self.log_proj    = nn.Linear(log_dim, hidden_dim)
+        self.trace_proj  = nn.Linear(trace_dim, hidden_dim)
 
         #self.linear_x = nn.Linear(30, 20)
 
         self.anofusion = Net(
             node_num=num_services,
-            edge_types=2,
+            edge_types=1,
             window_samples_num=window_size,
             dropout=0.2
         )
 
         # FIX: explicit output projection
-        self.out_dim = out_dim
-        self.post_proj = nn.Linear(20, out_dim)  # adjust if GAT_GRU outputs != 20
+        self.out_dim = metric_dim + log_dim + trace_dim  # or any desired output dimension
+        self.post_proj = nn.Linear(hidden_dim, self.out_dim)  # adjust if GAT_GRU outputs != 20
 
-    def forward(self, graph, data_node, data_log, data_edge,device):
+    def forward(self, graph, data_node, data_log, data_edge):
         B, T, N, _ = data_node.shape
 
         dn = self.metric_proj(data_node)
         dl = self.log_proj(data_log)
-        tr = self.trace_proj(data_edge.mean(dim=3))
+        #tr = self.trace_proj(data_edge.mean(dim=3))
+        tr = self.trace_proj(data_edge)
 
         X = torch.cat([dn, dl, tr], dim=-1)  # [B,T,N,3]
         #X = self.linear_x(X)                 # [B,T,N,20]
@@ -49,14 +49,14 @@ class AnoFusionWrapper(nn.Module):
 
         A = graph.unsqueeze(0).unsqueeze(0).repeat(B, θ, 1, 1, 1)
 
-        Xw = Xw.view(B*θ, N, 30)
+        Xw = Xw.view(B*θ, N, -1)  # [Bθ,N,20]
         A  = A.view(B*θ, N, N, 1)
-
+        device = Xw.device
         X_pred = self.anofusion(Xw, A, device)       # [Bθ,N,F]
         X_pred = self.post_proj(X_pred)      # [Bθ,N,out_dim]
         X_pred = torch.relu(X_pred)        # <<< REQUIRED
 
-        return X_pred.view(B, θ, N, self.out_dim)
+        return X_pred,None#X_pred.view(B, θ, N, self.out_dim), None
 
 class Net(nn.Module):
     def __init__(self, node_num, edge_types, window_samples_num, dropout):

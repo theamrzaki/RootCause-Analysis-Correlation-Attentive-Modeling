@@ -155,17 +155,17 @@ class LogModel(nn.Module):
         return self.embedder(paras)
 
 class MultiSourceEncoder(nn.Module):
-    def __init__(self, event_num, metric_num, node_num, log_dim=64, fuse_dim=64, alpha=0.5, **kwargs):
+    def __init__(self, event_num, metric_num, node_num, hidden_dim=64, log_dim=64, fuse_dim=64, alpha=0.5, **kwargs):
         super(MultiSourceEncoder, self).__init__()
         self.node_num = node_num
         self.alpha = alpha
 
-        self.trace_model = TraceModel(node_num,**kwargs)
+        self.trace_model = TraceModel(node_num, trace_hiddens=[hidden_dim], trace_kernel_sizes=[3], **kwargs)
         trace_dim = self.trace_model.out_dim
-        self.log_model = LogModel(event_num, log_dim) 
-        self.metric_model = MetricModel(metric_num, **kwargs)
+        self.log_model = LogModel(event_num, hidden_dim) 
+        self.metric_model = MetricModel(metric_num, metric_hiddens=[hidden_dim], metric_kernel_sizes=[3], **kwargs)
         metric_dim = self.metric_model.out_dim
-        fuse_in = trace_dim+log_dim+metric_dim
+        fuse_in = hidden_dim*3 #trace_dim+log_dim+metric_dim
 
         if not fuse_dim % 2 == 0: fuse_dim += 1
         self.fuse = nn.Linear(fuse_in, fuse_dim)
@@ -181,9 +181,11 @@ class MultiSourceEncoder(nn.Module):
         try:
             #torch.Size([100, 10, 12, 12, 2])
             # trace_embedding: [B, T, N, N, D]
-            B, T, N, _, D = data_edge.shape
+            #B, T, N, _, D = data_edge.shape
             # drop the 4th dimension, as it is redundant
-            data_edge = data_edge.mean(dim=3)  # [B, T, N, D]
+            #data_edge = data_edge.mean(dim=3)  # [B, T, N, D]
+            # as my data is already in the shape of [B, T, N, D], I will just use it directly
+            B, T, N, D = data_edge.shape
 
             data_edge = data_edge.permute(0, 2, 1, 3)   # [B, N, T, D]
             data_edge = data_edge.reshape(B * N, T, D) # [B*N, T, D]
@@ -237,14 +239,14 @@ import numpy as np
 
 
 class MainModel(nn.Module):
-    def __init__(self, event_num, metric_num, node_num, debug=False, **kwargs):
+    def __init__(self, event_num, metric_num, node_num, hidden_dim=64, debug=False, **kwargs):
         super(MainModel, self).__init__()
 
         self.node_num = node_num
 
         # Encoder stays exactly as-is as the original Eadro model
         self.encoder = MultiSourceEncoder(
-            event_num, metric_num, node_num,
+            event_num, metric_num, node_num, hidden_dim=hidden_dim,
             debug=debug, **kwargs
         )
 
@@ -266,5 +268,5 @@ class MainModel(nn.Module):
         recon = F.softplus(recon)
         recon = recon.view(B, N, -1)
 
-        return recon  # [B, D]
+        return recon,None # [B, D], none for compatibility with cLSTM 
         

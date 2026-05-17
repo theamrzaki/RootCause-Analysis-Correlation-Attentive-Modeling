@@ -458,6 +458,7 @@ class MSDS_multi_modality:
         self.data_dict['x_n_list'] = np.load(os.path.join(self.data_dir, 'x_n_list.npy'))
         self.data_dict['x_ab_list'] = np.load(os.path.join(self.data_dir, 'x_ab_list.npy'))
         self.data_dict['label_list'] = np.load(os.path.join(self.data_dir, 'label_list.npy'))
+        self.data_dict['graph_structure'] = np.load(os.path.join(self.data_dir, 'trace_path.pkl'), allow_pickle=True)
         orth_matrix_dir = os.path.join(self.data_dir, 'orth_transform_meta')
         #self.pipeline_sanity_check()
         return None#self.apply_orthogonal_transform(save_path=orth_matrix_dir, device='cpu')

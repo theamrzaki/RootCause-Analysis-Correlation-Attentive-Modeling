@@ -188,6 +188,7 @@ def main(argv):
         risk=options['risk'],
         initial_level=options['initial_level'],
         num_candidates=options['num_candidates'],
+        graph_structure=data_class.data_dict['graph_structure'] if "graph_structure" in data_class.data_dict else None,
         options=options
     )
 

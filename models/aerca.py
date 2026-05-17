@@ -32,11 +32,11 @@ class AERCA(nn.Module):
                  recon_threshold: float = 0.95, data_name: str = 'ld',
                  causal_quantile: float = 0.80, root_cause_threshold_encoder: float = 0.95,
                  root_cause_threshold_decoder: float = 0.95, initial_z_score: float = 3.0,
-                 risk: float = 1e-2, initial_level: float = 0.98, num_candidates: int = 100, options=None):
+                 risk: float = 1e-2, initial_level: float = 0.98, num_candidates: int = 100, graph_structure=None, options=None):
         super(AERCA, self).__init__()
         self.device = device
         self.options = options if options is not None else {}
-        self.encoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers,args=options, device=device)
+        self.encoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers,args=options, graph_structure=graph_structure, device=device)
         self.num_vars = num_vars
         self.num_modalities = 3
         self.num_vars_mod = num_vars // self.num_modalities  # integer division
@@ -70,8 +70,8 @@ class AERCA(nn.Module):
         # For nexts: (B, num_vars)
         self.nexts_proj = nn.Linear(self.num_modalities * self.num_vars_mod, self.num_vars).to(device)
 
-        self.models_encoder_only = ["GVAR","vlinear","cLSTM","CUTS_PLUS"] 
-        self.models_simple_next_step = ["cLSTM"]#TODO i need to reenable the sparsity, make it simple vector sparisty for cLSTM -> already done 
+        self.models_encoder_only = ["GVAR","vlinear","cLSTM","CUTS_PLUS","Eadro","Anofusion"] 
+        self.models_simple_next_step = ["cLSTM","Eadro","Anofusion"]#TODO i need to reenable the sparsity, make it simple vector sparisty for cLSTM -> already done 
         if(self.options["coeff_architecture"] in self.models_encoder_only):
             self._log_and_print('Number of parameters in encoder: {}', self._count_parameters(self.encoder))
             self.total_params = (self._count_parameters(self.encoder)  )
@@ -369,8 +369,11 @@ class AERCA(nn.Module):
         us, encoder_coeffs, nexts, winds, attn_weights, preds = self.encoding(x)
         try:
             if "include_logs_and_traces" in self.options and self.options["include_logs_and_traces"]:
-                us_kl = us.mean(dim=1)
-                kl_div = compute_kl_divergence(us_kl, self.device)
+                if self.options["coeff_architecture"] in self.models_simple_next_step:
+                    kl_div = torch.tensor(0.0, device=self.device)
+                else:
+                    us_kl = us.mean(dim=1)
+                    kl_div = compute_kl_divergence(us_kl, self.device)
             else:
                 kl_div = compute_kl_divergence(us, self.device)
         except Exception as e:
@@ -1274,16 +1277,15 @@ class AERCA(nn.Module):
         coeff_architecture = self.options["coeff_architecture"]
 
         # 1. Baseline check
-        if coeff_architecture in ["rcd", "baro", "nsigma", "torai"]:
-            if coeff_architecture == "rcd":
-                res = StatisticalRCA.evaluate_rcd(xs, labels)
-            elif coeff_architecture == "baro":
-                res = StatisticalRCA.evaluate_baro(xs, labels)
-            elif coeff_architecture == "nsigma":
-                res = StatisticalRCA.evaluate_nsigma(xs, labels)
-            elif coeff_architecture == "torai":
-                res = StatisticalRCA.evaluate_torai(xs, labels)
-
+        if coeff_architecture in ["torai"]:
+            inference_times = []
+            if coeff_architecture == "torai":
+                #TODO 
+                #select first 100 samples just to test the pipeline
+                xs = xs[:1000]
+                labels = labels[:1000]
+                res = StatisticalRCA.evaluate_torai_multi_modality(xs, labels)
+                print(f"TORAI multi-modality evaluation results: {res}")
             if res:
                 k_at_step_all = res["avg_k_at_step"]
                 scores_list = res["scores"]
@@ -1293,7 +1295,7 @@ class AERCA(nn.Module):
                 hr1_list, hr3_list, hr5_list, hr10_list = [], [], [], []
 
                 for z_scores, current_labels in zip(scores_list, labels_list):
-
+                    start_time = time.time()
                     ranking = np.argsort(-z_scores[0])
                     true_idx = np.where(current_labels[0] == 1)[0]
 
@@ -1314,13 +1316,13 @@ class AERCA(nn.Module):
                     hr3_list.append(hit(3))
                     hr5_list.append(hit(5))
                     hr10_list.append(hit(10))
-
+                    inference_times.append(time.time() - start_time)
                 mrr = np.mean(mrr_list)
                 hr1, hr3, hr5, hr10 = map(
                     np.mean,
                     [hr1_list, hr3_list, hr5_list, hr10_list]
                 )
-
+                
                 auc_k = np.mean(k_at_step_all[:10])
                 std_ac = np.std(np.array(k_at_step_all))
                 self._log_and_print('Root cause analysis AC@1: {:.5f}', k_at_step_all[0])
@@ -1335,6 +1337,8 @@ class AERCA(nn.Module):
                 valid_samples = len(scores_list)
                 total_samples = len(xs)
                 coverage = valid_samples / total_samples if total_samples > 0 else 0.0
+                avg_time = np.mean(inference_times)
+                throughput = 1.0 / avg_time if avg_time > 0 else 0.0
                 write_results(
                     self.options,
                     self.local_model_name,
@@ -1351,8 +1355,8 @@ class AERCA(nn.Module):
                         "auc@10": auc_k,
                         "std_ac": std_ac,
                         "coverage": coverage,
-                        "avg_time": 0,
-                        "throughput": 0,
+                        "avg_time": avg_time,
+                        "throughput": throughput,
                         "model_mem_mb": 0,
                         "peak_mem_mb": 0,
                     },
