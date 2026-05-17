@@ -412,6 +412,24 @@ def topk_at_step(scores, labels, k_range=10):
                 k_lst.append(sum(count) / min(k, len(label_ind)))
     return np.array(k_lst).reshape(-1, k_range).mean(axis=0)
 
+def topk_at_step_multi_modality_new(scores, labels, k_range=10):
+
+    scores = np.asarray(scores).reshape(-1)
+    labels = np.asarray(labels).reshape(-1)
+
+    if np.sum(labels) == 0:
+        return np.zeros(k_range)
+
+    ranking = np.argsort(-scores)  # descending
+    label_ind = np.where(labels == 1)[0]
+
+    k_lst = []
+    for k in range(1, k_range + 1):
+        topk = ranking[:k]
+        hit = np.intersect1d(topk, label_ind).size
+        k_lst.append(hit / min(k, len(label_ind)))
+
+    return np.array(k_lst)
 
 def write_results(args, local_model_name, ac_at,k_at_step_all, total_params,file_name='result.csv',
                    metric_results=None,
@@ -526,3 +544,25 @@ def write_results(args, local_model_name, ac_at,k_at_step_all, total_params,file
     with open(file_path, 'a') as f:
         f.write(','.join([str(value) for value in row.values()]) + '\n')
 
+
+class XSDataset(torch.utils.data.Dataset):
+    def __init__(self, xs):
+        self.xs = xs  # keep as numpy or torch, but NOT pre-wrapped tensor dataset
+
+    def __len__(self):
+        return len(self.xs)
+
+    def __getitem__(self, idx):
+        x = self.xs[idx]
+
+        # convert here safely per worker
+        if not torch.is_tensor(x):
+            x = torch.tensor(x, dtype=torch.float32)
+
+        return x
+    
+    def __getitem__(self, idx):
+        x = self.xs[idx]
+        if not torch.is_tensor(x):
+            x = torch.tensor(x, dtype=torch.float32)
+        return (x,)

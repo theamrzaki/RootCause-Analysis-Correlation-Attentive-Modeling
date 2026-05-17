@@ -239,13 +239,16 @@ def main(argv):
         test_label = data_class.data_dict['label_list']
     print('Start testing AERCA model for root cause analysis...')
     # dataset is aiops
-    if options['dataset_name'] == 'aiops':
-        aerca_model._testing_root_cause(test_x_ab, test_label)
-        if options['coeff_architecture'] not in ['BARO', 'torai', 'rcd']:
-            if "include_logs_and_traces" in options and options["include_logs_and_traces"]:
-                aerca_model._testing_root_cause_services_metrics(test_x_ab, test_label)
+    if "include_logs_and_traces" in options and options["include_logs_and_traces"]:
+        aerca_model._testing_root_cause_multi_modality(test_x_ab, test_label)
     else:
-        aerca_model._testing_root_cause(test_x_ab, test_label)
+        if options['dataset_name'] == 'aiops':
+            aerca_model._testing_root_cause(test_x_ab, test_label)
+            if options['coeff_architecture'] not in ['BARO', 'torai', 'rcd']:
+                if "include_logs_and_traces" in options and options["include_logs_and_traces"]:
+                    aerca_model._testing_root_cause_services_metrics(test_x_ab, test_label)
+        else:
+            aerca_model._testing_root_cause(test_x_ab, test_label)
     print('Done testing for root cause analysis')
 
 

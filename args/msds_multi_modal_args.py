@@ -24,7 +24,7 @@ def create_arg_parser():
     parser.add_argument('--num_metrics', type=int, default=5, help='Number of metric features per pod (default: 5)')
     parser.add_argument('--num_log_features', type=int, default=256, help='Number of log features per pod (default: 256)')
     parser.add_argument('--num_trace_features', type=int, default=14, help='Number of trace features per pod (default: 14)')
-    parser.add_argument('--latent_per_pod', type=int, default=8, help='Number of latent features per pod (default: 16)')
+    parser.add_argument('--latent_per_pod', type=int, default=32, help='Number of latent features per pod (default: 16)')
 
     # Meta arguments
     parser.add_argument('--seed', type=int, default=7, help='Random seed (default: 1)')
@@ -43,7 +43,7 @@ def create_arg_parser():
     parser.add_argument('--beta', type=float, default=0.5, help='Beta (default: 0.5)')
     parser.add_argument('--lr', type=float, default=0.00001, help='Learning rate (default: 0.000001)')
     parser.add_argument('--epochs', type=int, default=1000, help='Number of epochs (default: 5000)')
-    parser.add_argument('--hidden_layer_size', type=int, default=128, help='Hidden layer size (default: 1000)')
+    parser.add_argument('--hidden_layer_size', type=int, default=256, help='Hidden layer size (default: 1000)')
     parser.add_argument('--num_hidden_layers', type=int, default=2, help='Number of hidden layers (default: 4)')
     parser.add_argument('--recon_threshold', type=float, default=0.95, help='Reconstruction threshold (default: 0.95)')
     parser.add_argument('--root_cause_threshold_encoder', type=float, default=0.99, help='Root cause threshold for encoder (default: 0.99)')
