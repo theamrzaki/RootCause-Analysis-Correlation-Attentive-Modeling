@@ -33,7 +33,7 @@
                 "--include_logs_and_traces", "1",
                 "--results_csv", "msds_debugging.csv",
 
-                "--hidden_layer_size", "128",
+                "--hidden_layer_size", "8",
             ]
 ,
             "console": "integratedTerminal"
