@@ -1280,10 +1280,6 @@ class AERCA(nn.Module):
         if coeff_architecture in ["torai"]:
             inference_times = []
             if coeff_architecture == "torai":
-                #TODO 
-                #select first 100 samples just to test the pipeline
-                xs = xs[:1000]
-                labels = labels[:1000]
                 res = StatisticalRCA.evaluate_torai_multi_modality(xs, labels)
                 print(f"TORAI multi-modality evaluation results: {res}")
             if res:
