@@ -5,7 +5,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "MSDS (Multi) - vlinear",
+            "name": "AIops - Case Study",
             "type": "debugpy",
             "request": "launch",
             "program": "main.py",
@@ -24,16 +24,17 @@
 
                 "--lr", "1e-4",
                 "--seed", "7",
-                "--dataset", "msds_multi_modality",
-                "--window_size", "2",
+                "--dataset", "smd",
+                "--window_size", "4",
 
-                "--training_aerca", "1",
-                "--epochs", "100",
-                "--preprocessing_data", "0",
-                "--include_logs_and_traces", "1",
-                "--results_csv", "msds_debugging.csv",
-
-                "--hidden_layer_size", "16",
+                "--training_aerca", "0",
+                "--epochs", "200",
+                "--preprocessing_data", "1",
+                "--include_logs_and_traces", "0",
+                "--results_csv", "aiops_casestudy.csv",
+                
+                "--run_case_study", "1",
+                "--hidden_layer_size", "128",
             ]
 ,
             "console": "integratedTerminal"
