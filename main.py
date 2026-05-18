@@ -255,7 +255,87 @@ def main(argv):
     print('Done testing for root cause analysis')
 
 
+    # =========================================================
+    # CASE STUDY PIPELINE ANALYSIS
+    # =========================================================
+    if options.get("run_case_study", False):
+
+        print("Running RCA case study analysis...")
+
+        # Example anomalous sample
+        case_idx = None
+
+        for idx, lbl in enumerate(test_label):
+
+            lbl_arr = np.asarray(lbl)
+
+            # supports shapes like:
+            # (T, P), (1, P), or (P,)
+            if np.any(lbl_arr == 1):
+                case_idx = idx
+                break
+
+        if case_idx is None:
+            raise ValueError("No anomalous sample found in test labels.")
+
+        print(f"Selected case study sample: {case_idx}")
+
+        case_x = test_x_ab[case_idx]
+        case_label = test_label[case_idx]
+
+        case_result = aerca_model.case_study_rca_pipeline(
+            case_x,
+            case_label,
+            alpha=0.5,
+            use_attention_fusion=False
+        )
+
+        print("\n===== CASE STUDY RESULTS =====")
+        print("True Root Causes:", case_result["true_idx"])
+        print("Top-10 Ranking:", case_result["ranking"][:10])
+
+        for k, v in case_result["metrics"].items():
+            print(f"{k}: {v:.5f}")
+
+        # Optional saving
+        if options.get("save_case_study", True):
+
+            case_save_dir = os.path.join(
+                aerca_model.save_dir,
+                "case_study"
+            )
+
+            os.makedirs(case_save_dir, exist_ok=True)
+
+            np.save(
+                os.path.join(case_save_dir, "residual.npy"),
+                case_result["residual"]
+            )
+
+            np.save(
+                os.path.join(case_save_dir, "z_scores.npy"),
+                case_result["z_scores"]
+            )
+
+            np.save(
+                os.path.join(case_save_dir, "z_pot.npy"),
+                case_result["z_pot"]
+            )
+
+            np.save(
+                os.path.join(case_save_dir, "ranking.npy"),
+                case_result["ranking"]
+            )
+
+            np.save(
+                os.path.join(case_save_dir, "labels.npy"),
+                case_result["labels"]
+            )
+            print(f"Case study artifacts saved to: {case_save_dir}")
+
     print('done')
+
+
 
 if __name__ == '__main__':
     main(sys.argv)

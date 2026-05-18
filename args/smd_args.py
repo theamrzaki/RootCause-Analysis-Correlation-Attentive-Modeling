@@ -49,6 +49,7 @@ def create_arg_parser():
     parser.add_argument('--early_stopping', type=int, default=0, help='Flag for early stopping (default: 0)')
     parser.add_argument('--mean_std_recon_loss', type=int, default=0, help='Patience for early stopping (default: 50)')
     parser.add_argument('--AMOC_Loss', type=int, default=0, help='Minimum delta for early stopping (default: 1e-4)')
+    parser.add_argument('--run_case_study', type=int, default=0, help='Flag for running case study (default: 1)')
 
     # Dual KL arguments
     parser.add_argument('--correlated_KL', type=int, default=0, help='Flag for correlated KL (default: 1)')

@@ -1295,7 +1295,170 @@ class AERCA(nn.Module):
                 "Zero valid samples found. Check if labels[i][-1] contains any anomalies."
             )
    
-    
+   
+    def case_study_rca_pipeline(
+        self,
+        x,
+        label,
+        alpha=0.5,
+        use_attention_fusion=False
+    ):
+        """
+        Executes the complete RCA inference pipeline for qualitative analysis.
+
+        Pipeline:
+            input window
+                -> residual generation
+                -> z-score normalization
+                -> optional attention fusion
+                -> POT filtering
+                -> ranking
+
+        Returns all intermediate representations for visualization and analysis.
+        """
+
+        # =========================================================
+        # 1. Forward inference
+        # =========================================================
+        with torch.no_grad():
+
+            _, _, _, _, _, _, _, us, attn_weights = self._testing_step(
+                x,
+                label,
+                add_u=False
+            )
+
+        residual = us.detach().cpu().numpy()  # (1, P)
+
+        # =========================================================
+        # 2. Z-score normalization
+        # =========================================================
+        z_scores = -(
+            (residual - self.us_mean_encoder)
+            / (self.us_std_encoder + 1e-8)
+        )
+
+        # =========================================================
+        # 3. Optional attention fusion
+        # =========================================================
+        attention_scores = None
+
+        if use_attention_fusion and attn_weights is not None:
+
+            if torch.is_tensor(attn_weights):
+                attn_np = attn_weights.detach().cpu().numpy()
+            else:
+                attn_np = attn_weights
+
+            # expected shape:
+            # (B, T, P, P)
+            attn_per_lag = attn_np.mean(axis=2)
+            attention_scores = attn_per_lag.mean(axis=1)
+
+            z_scores = (
+                alpha * z_scores
+                + (1 - alpha) * attention_scores
+            )
+
+        # =========================================================
+        # 4. POT thresholding
+        # =========================================================
+        z_pot = np.zeros_like(z_scores)
+
+        for var_idx in range(self.num_vars):
+
+            col = z_scores[:, var_idx]
+            col = col[np.isfinite(col)]
+
+            if len(col) == 0:
+                continue
+
+            try:
+                threshold, _ = pot(
+                    col,
+                    self.risk,
+                    self.initial_level,
+                    self.num_candidates
+                )
+
+            except Exception:
+                threshold = np.mean(col) + 3 * np.std(col)
+
+            z_pot[:, var_idx] = np.where(
+                z_scores[:, var_idx] >= threshold,
+                z_scores[:, var_idx],
+                0.0
+            )
+
+        # =========================================================
+        # 5. Final ranking
+        # =========================================================
+        ranking = np.argsort(-z_pot[0])
+
+        # =========================================================
+        # 6. Label aggregation
+        # =========================================================
+        lab = np.asarray(label)
+
+        current_labels = np.max(label, axis=0, keepdims=True)
+        true_idx = np.where(current_labels[0] == 1)[0]
+        # =========================================================
+        # 7. Ranking metrics
+        # =========================================================
+        def compute_mrr(rank_list, gt_idx):
+
+            for rank, idx in enumerate(rank_list, start=1):
+                if idx in gt_idx:
+                    return 1.0 / rank
+
+            return 0.0
+
+        def compute_hr(rank_list, gt_idx, k):
+
+            return int(
+                any(idx in rank_list[:k] for idx in gt_idx)
+            )
+
+        metrics = {
+            "MRR": compute_mrr(ranking, true_idx),
+            "HR@1": compute_hr(ranking, true_idx, 1),
+            "HR@3": compute_hr(ranking, true_idx, 3),
+            "HR@5": compute_hr(ranking, true_idx, 5),
+            "HR@10": compute_hr(ranking, true_idx, 10),
+        }
+
+        # =========================================================
+        # 8. Return full RCA interpretability bundle
+        # =========================================================
+        return {
+
+            # raw residual anomaly signal
+            "residual": residual,
+
+            # normalized anomaly scores
+            "z_scores": z_scores,
+
+            # EVT/POT-filtered anomaly scores
+            "z_pot": z_pot,
+
+            # final RCA ranking
+            "ranking": ranking,
+
+            # GT root causes
+            "true_idx": true_idx,
+            "labels": current_labels,
+
+            # evaluation metrics
+            "metrics": metrics,
+
+            # optional interpretability signal
+            "attention": attention_scores,
+
+            # labels used internally
+            "labels": current_labels,
+        }
+   
+   
     def _testing_root_cause_multi_modality_old(self, xs, labels, alpha: float = 0.5, use_attention_fusion: bool = False):
         coeff_architecture = self.options["coeff_architecture"]
 
