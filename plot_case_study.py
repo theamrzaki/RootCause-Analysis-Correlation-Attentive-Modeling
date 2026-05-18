@@ -89,7 +89,7 @@ for idx in TRUE_ROOT_CAUSES:
         zorder=6
     )
 
-plt.title("Raw Residual Anomaly Signal", fontsize=title_fontsize, fontweight='bold', pad=15)
+#plt.title("Raw Residual Anomaly Signal", fontsize=title_fontsize, fontweight='bold', pad=15)
 plt.xlabel("Variable Index", fontsize=params_label_fontsize, labelpad=10)
 plt.ylabel("Residual Magnitude", fontsize=params_label_fontsize, labelpad=10)
 
@@ -146,7 +146,7 @@ plt.yticks(fontsize=y_ticks_fontsize)
 
 plt.xlabel("Ranked Variables (* = Ground Truth Root Cause)", fontsize=params_label_fontsize, labelpad=12)
 plt.ylabel("Anomaly Score (Z-Score)", fontsize=params_label_fontsize, labelpad=12)
-plt.title("Top-K RCA Ranking (Root Cause Diagnostics)", fontsize=title_fontsize, fontweight='bold', pad=15)
+#plt.title("Top-K RCA Ranking (Root Cause Diagnostics)", fontsize=title_fontsize, fontweight='bold', pad=15)
 
 plt.grid(axis='y', linestyle='--', alpha=0.5, zorder=0)
 plt.gca().set_axisbelow(True)
