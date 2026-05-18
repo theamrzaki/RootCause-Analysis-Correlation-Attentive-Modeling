@@ -223,6 +223,8 @@ def main(argv):
         aerca_model._get_recon_threshold(xs_val)
         aerca_model._get_root_cause_threshold_encoder(xs_val)
         aerca_model._get_root_cause_threshold_decoder(xs_val)
+        if "include_logs_and_traces" in options and options["include_logs_and_traces"]:
+            aerca_model._get_root_cause_threshold_encoder_multi_modality(xs_val)
     aerca_model.example_normal_window = data_class.data_dict['x_n_list'][0]
     # Testing phase for causal discovery (applies only if slicing is used).
     if mapping["use_slice"]:
