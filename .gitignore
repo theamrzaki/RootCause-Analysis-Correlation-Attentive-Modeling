@@ -8,6 +8,7 @@
 /datasets/OneDrive_1_4-13-2026.zip
 /datasets/archive
 /datasets/gaia_data
+/datasets/D1_art
 *.pyc
 *.log
 *.pkl
