@@ -99,21 +99,12 @@ run_experiment_baselines() {
 #---------------------------------------------------------------------------
 
 
-seeds=(1 3)
-window_size=(8 10 12 14)
+seeds=(2)
+window_size=(14)
 
 for seed in "${seeds[@]}"; do
     for window_size_item in "${window_size[@]}"; do
         preprocessing_data=1
-        if [ $seed -eq 1 ]; then
-            # Seed 1 missing
-            if [ $window_size_item -eq 8 ] || [ $window_size_item -eq 10 ]; then
-                #run_deep_models $preprocessing_data $seed $window_size_item "GVAR"
-                run_deep_models $preprocessing_data $seed $window_size_item "cLSTM"
-            fi
-        elif [ $seed -eq 3 ]; then
-            # Seed 3 missing
-            run_deep_models $preprocessing_data $seed $window_size_item "vlinear"
-        fi
+        run_deep_models $preprocessing_data $seed $window_size_item "vlinear"
     done
 done
