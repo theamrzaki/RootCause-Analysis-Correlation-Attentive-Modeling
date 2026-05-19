@@ -99,25 +99,25 @@ run_experiment_baselines() {
 #---------------------------------------------------------------------------
 
 
-#seeds=(1)
-#window_size=(8)
-#
-#for seed in "${seeds[@]}"; do
-#    for window_size_item in "${window_size[@]}"; do
-#        preprocessing_data=1
-#        run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS"
-#    done
-#done
-
-
-
-
-seeds=(2)
-window_size=(12)
+seeds=(1)
+window_size=(8)
 
 for seed in "${seeds[@]}"; do
     for window_size_item in "${window_size[@]}"; do
         preprocessing_data=1
-        run_deep_models $preprocessing_data $seed $window_size_item "vlinear"
+        run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS"
     done
 done
+
+
+
+
+#seeds=(2)
+#window_size=(12)
+#
+#for seed in "${seeds[@]}"; do
+#    for window_size_item in "${window_size[@]}"; do
+#        preprocessing_data=1
+#        run_deep_models $preprocessing_data $seed $window_size_item "vlinear"
+#    done
+#done
