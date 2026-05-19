@@ -274,7 +274,7 @@ run_CUTS_PLUS_SMD() {
 
 
 seeds=(2)
-window_size=(10 20)  # NOT 20 — 20 is already done except CUTS_PLUS
+window_size=(20)  # NOT 20 — 20 is already done except CUTS_PLUS
 
 for seed in "${seeds[@]}"; do
     for window_size_item in "${window_size[@]}"; do
