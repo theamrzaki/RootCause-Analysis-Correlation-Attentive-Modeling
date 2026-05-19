@@ -168,21 +168,31 @@ print("True scores:", z_scores[0][TRUE_ROOT_CAUSES])
 # =========================================================
 # 3. Automated Text Report Generation
 # =========================================================
+# Parse statistics dynamically from the data
 gt_in_top_k = [int(v) for v in ranked_vars if v in TRUE_ROOT_CAUSES]
 hit_rate = len(gt_in_top_k) / len(TRUE_ROOT_CAUSES) if len(TRUE_ROOT_CAUSES) > 0 else 0.0
 
+# Find localization ranks for each Ground Truth variable
 gt_ranks_text = ""
 for gt in TRUE_ROOT_CAUSES:
     positions = np.where(ranking == gt)[0]
     rank_str = f"Rank {positions[0] + 1}" if len(positions) > 0 else "Not Found"
     gt_ranks_text += f"*   **Variable {gt}:** {rank_str} (Residual: {scores[gt]:.4f})\n"
 
+# Build the Top-K table markdown string (Matches Plot 2)
 table_rows = ""
 for i in range(TOP_K):
     var = ranked_vars[i]
     is_gt = "Yes (★)" if var in TRUE_ROOT_CAUSES else "No"
     table_rows += f"| {i+1} | {var} | {ranked_scores[i]:.4f} | {is_gt} |\n"
 
+# Build the Comprehensive Variable Residual Table (Matches Plot 1)
+residual_table_rows = ""
+for idx, mag in enumerate(scores):
+    is_gt = "Yes (★)" if idx in TRUE_ROOT_CAUSES else "No"
+    residual_table_rows += f"| {idx} | {mag:.4f} | {is_gt} |\n"
+
+# Construct the full text report string
 report_content = f"""# Root Cause Analysis (RCA) Diagnostic Report
 
 ## Executive Summary
@@ -205,6 +215,14 @@ This table matches the data points visualized within `plot_topk.pdf`:
 {table_rows}
 ---
 
+## Full Residual Signal Profile
+This table details every metric across the system, mapping directly to the line signal in `plot_residual.pdf`:
+
+| Variable Index | Residual Magnitude | Is Ground Truth? |
+| :------------- | :----------------- | :--------------- |
+{residual_table_rows}
+---
+
 ## Signal Metrics Summary
 *   **Raw Residual Max Magnitude:** {np.max(scores):.4f} (at Index {np.argmax(scores)})
 *   **Raw Residual Mean:** {np.mean(scores):.4f}
@@ -212,6 +230,7 @@ This table matches the data points visualized within `plot_topk.pdf`:
 *   **Anomaly Score Max (Z-Score):** {np.max(z_scores[0]):.4f}
 """
 
+# Save the report to a text file
 report_path = os.path.join(CASE_DIR, "rca_diagnostic_report.md")
 with open(report_path, "w", encoding="utf-8") as f:
     f.write(report_content)
