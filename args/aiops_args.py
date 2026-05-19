@@ -21,6 +21,7 @@ def create_arg_parser():
     parser.add_argument('--num_log_features', type=int, default=20, help='Number of log features (default: 10)')
     parser.add_argument('--num_trace_features', type=int, default=20, help='Number of trace features (default: 10)')
     parser.add_argument('--run_case_study', type=int, default=0, help='Flag for running case study (default: 1)')
+    parser.add_argument('--disable_orth_proj', type=int, default=0, help='Flag for running case study (default: 1)')
 
     # Meta arguments
     parser.add_argument('--seed', type=int, default=4, help='Random seed (default: 4)')

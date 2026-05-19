@@ -19,6 +19,7 @@ def create_arg_parser():
     parser.add_argument('--main_model', type=str, default='aerca', help='Main model to use (default: aerca)')
     parser.add_argument('--service_prefix', type=str, default='dbservice1', help='Service prefix (default: None)')
     parser.add_argument('--include_logs_and_traces', type=int, default=0, help='Flag for including logs and traces (default: 0)')
+    parser.add_argument('--disable_orth_proj', type=int, default=0, help='Flag for running case study (default: 1)')
 
     # Meta arguments
     parser.add_argument('--seed', type=int, default=4, help='Random seed (default: 4)')

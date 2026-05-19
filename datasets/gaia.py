@@ -384,6 +384,9 @@ class GAIA:
         self.data_dict['label_list'] = np.load(os.path.join(self.data_dir, 'label_list.npy'))
         orth_matrix_dir = os.path.join(self.data_dir, 'orth_transform_meta')
         self.pipeline_sanity_check()
+        if self.options.get('disable_orth_proj', False):
+            print("Orthogonal projection disabled. Skipping transformation.")
+            return None
         return self.apply_orthogonal_transform(save_path=orth_matrix_dir, device='cpu')
 
 
