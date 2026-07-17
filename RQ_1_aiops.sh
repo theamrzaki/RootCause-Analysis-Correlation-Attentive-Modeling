@@ -1,11 +1,11 @@
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate RCAEval
 
-seeds=(2 3)
+seeds=(1)
 dataset="aiops"
 window_size=(8 12 16 20)
 lrs=("1e-4")
-results_csv="RQ_1_aiops_final.csv"
+results_csv="RQ_1_aiops_TSE.csv"
 
 BETA_VAL=0.01
 LAMBDA_VAL=0.5

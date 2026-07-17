@@ -181,13 +181,8 @@ class AERCA(nn.Module):
         self.encoder.to(self.device)
         #self.decoder.to(self.device)
         #self.decoder_prev.to(self.device)
-        self.model_name = 'AERCA_' + data_name + '_ws_' + str(window_size) + '_stride_' + str(stride) + \
-                          '_encoder_alpha_' + str(encoder_alpha) + '_decoder_alpha_' + str(decoder_alpha) + \
-                          '_encoder_gamma_' + str(encoder_gamma) + '_decoder_gamma_' + str(decoder_gamma) + \
-                          '_encoder_lambda_' + str(encoder_lambda) + '_decoder_lambda_' + str(decoder_lambda) + \
-                          '_beta_' + str(beta) + '_lr_' + str(lr) + '_epochs_' + str(epochs) + \
-                          '_hidden_layer_size_' + str(hidden_layer_size) + '_num_hidden_layers_' + \
-                          str(num_hidden_layers)
+        self.model_name =  self.options["coeff_architecture"] + '_' + data_name + '_ws_' + str(window_size) + '_seed_' + str(self.options['seed']) + '_numvars_' + str(num_vars) 
+        
         self.causal_quantile = causal_quantile
         self.risk = risk
         self.initial_level = initial_level

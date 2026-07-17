@@ -1,11 +1,11 @@
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate RCAEval
 
-seeds=(2)
+seeds=(1)
 dataset="gaia"
 window_size=(8 10 12 14)
 lrs=("1e-4")
-results_csv="RQ_1_gaia_final.csv"
+results_csv="RQ_1_aiops_TSE.csv"
 
 BETA_VAL=0.01
 LAMBDA_VAL=0.5
@@ -99,25 +99,14 @@ run_experiment_baselines() {
 #---------------------------------------------------------------------------
 
 
-seeds=(1)
-window_size=(8)
-
 for seed in "${seeds[@]}"; do
     for window_size_item in "${window_size[@]}"; do
-        preprocessing_data=1
+        preprocessing_data=1 
+        run_deep_models $preprocessing_data $seed $window_size_item "vlinear"
+        preprocessing_data=0
+        run_deep_models $preprocessing_data $seed $window_size_item "GVAR"
+        run_experiment_baselines $preprocessing_data $seed $window_size_item
+        run_deep_models $preprocessing_data $seed $window_size_item "cLSTM"
         run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS"
     done
 done
-
-
-
-
-#seeds=(2)
-#window_size=(12)
-#
-#for seed in "${seeds[@]}"; do
-#    for window_size_item in "${window_size[@]}"; do
-#        preprocessing_data=1
-#        run_deep_models $preprocessing_data $seed $window_size_item "vlinear"
-#    done
-#done
