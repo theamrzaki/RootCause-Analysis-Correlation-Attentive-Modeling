@@ -1,9 +1,9 @@
-source ~/miniconda3/etc/profile.d/conda.sh
+source ~/miniforge3/etc/profile.d/conda.sh
 conda activate RCAEval
 
 seeds=(1)
 dataset="aiops"
-window_size=(8 12 16 20)
+window_size=(20)
 lrs=("1e-4")
 results_csv="RQ_1_aiops_TSE.csv"
 
@@ -31,6 +31,8 @@ run_deep_models() {
                                 cmd="python3 main.py \
                                         --encoder_gamma=$GAMMA_VAL --decoder_gamma=$GAMMA_VAL \
                                         --encoder_lambda=$LAMBDA_VAL --decoder_lambda=$LAMBDA_VAL --beta=$BETA_VAL \
+                                    
+                                    --device=cpu \
 
                                     --main_model=$main_model \
                                     --coeff_architecture="$arch" \
@@ -43,7 +45,7 @@ run_deep_models() {
                                     --dataset="$dataset" \
                                     --window_size="$window_size_item" \
 
-                                    --training_aerca=1 \
+                                    --training_aerca=0 \
                                     --epochs=200 \
                                     --results_csv="$results_csv" \
 
@@ -98,12 +100,12 @@ run_experiment_baselines() {
 #---------------------------------------------------------------------------
 for seed in "${seeds[@]}"; do
     for window_size_item in "${window_size[@]}"; do
-        preprocessing_data=1 
-        run_deep_models $preprocessing_data $seed $window_size_item "vlinear"
+        #preprocessing_data=1 
+        #run_deep_models $preprocessing_data $seed $window_size_item "vlinear"
         preprocessing_data=0
-        run_deep_models $preprocessing_data $seed $window_size_item "GVAR"
-        run_experiment_baselines $preprocessing_data $seed $window_size_item
+        #run_deep_models $preprocessing_data $seed $window_size_item "GVAR"
+        #run_experiment_baselines $preprocessing_data $seed $window_size_item
         run_deep_models $preprocessing_data $seed $window_size_item "cLSTM"
-        run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS"
+        #run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS"
     done
 done

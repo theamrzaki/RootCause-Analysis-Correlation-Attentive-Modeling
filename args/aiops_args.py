@@ -12,7 +12,7 @@ def create_arg_parser():
 
     # Dataset arguments
     parser.add_argument('--preprocessing_data', type=int, default=1, help='Flag for preprocessing data (default: 1)')
-    parser.add_argument('--data_dir', type=str, default='/home/db2003/Desktop/Amr/Tests/Medicine/dataset/aiops22-pre/初赛评分数据', help='Data directory (default: ./datasets/smd)')
+    parser.add_argument('--data_dir', type=str, default='/home/db2003larger/RootCause-Analysis-Correlation-Attentive-Modeling/data/TSE_JournalData_SFlexRCA/AIops', help='Data directory (default: ./datasets/smd)')
     parser.add_argument('--num_vars', type=int, default=30, help='Number of variables (default: 20)')
     parser.add_argument('--causal_quantile', type=float, default=0.70, help='Causal quantile (default: 0.70)')
     parser.add_argument('--shuffle', type=int, default=1, help='Flag for shuffling data (default: 1)')
@@ -45,7 +45,7 @@ def create_arg_parser():
     parser.add_argument('--recon_threshold', type=float, default=0.90, help='Reconstruction threshold (default: 0.95)')
     parser.add_argument('--root_cause_threshold_encoder', type=float, default=0.99, help='Root cause threshold for encoder (default: 0.99)')
     parser.add_argument('--root_cause_threshold_decoder', type=float, default=0.99, help='Root cause threshold for decoder (default: 0.99)')
-    parser.add_argument('--training_aerca', type=int, default=1, help='Flag for training AERCA (default: 1)')
+    parser.add_argument('--training_aerca', type=int, default=0, help='Flag for training AERCA (default: 1)')
     parser.add_argument('--initial_z_score', type=float, default=3.0, help='Initial Z-score (default: 3.0)')
     parser.add_argument('--risk', type=float, default=1e-5, help='Risk (default: 1e-5)')
     parser.add_argument('--initial_level', type=float, default=0.9, help='Initial level (default: 0.00)')

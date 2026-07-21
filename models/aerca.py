@@ -1279,10 +1279,10 @@ class AERCA(nn.Module):
                     # -------------------------
                     # TRAINING efficiency (NEW)
                     # -------------------------
-                    "train_total_time": self.training_metrics["total_train_time"],
-                    "train_avg_epoch_time": self.training_metrics["avg_epoch_time"],
-                    "train_throughput": self.training_metrics["train_throughput"],
-                    "train_peak_mem_mb": self.training_metrics["peak_mem_mb"],
+                    #"train_total_time": self.training_metrics["total_train_time"],
+                    #"train_avg_epoch_time": self.training_metrics["avg_epoch_time"],
+                    #"train_throughput": self.training_metrics["train_throughput"],
+                    #"train_peak_mem_mb": self.training_metrics["peak_mem_mb"],
                 },
             )
         else:
