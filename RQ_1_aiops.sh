@@ -1,7 +1,7 @@
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate RCAEval
 
-seeds=(2)
+seeds=(3)
 dataset="aiops"
 window_size=(8 12 16 20)
 lrs=("1e-4")
@@ -128,7 +128,7 @@ done
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate RCAEval
 
-seeds=(2)
+seeds=(3)
 dataset="gaia"
 window_size=(8 10 12 14)
 lrs=("1e-4")
@@ -524,7 +524,7 @@ run_CUTS_PLUS_SMD() {
 
 dataset="smd"
 results_csv="RQ_1_smd_final.csv"
-seeds=(1 2)
+seeds=(3)
 window_size=(4 6 10 20)  # NOT 20 — 20 is already done except CUTS_PLUS
 
 for seed in "${seeds[@]}"; do
