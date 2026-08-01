@@ -20,7 +20,7 @@ def create_arg_parser():
     parser.add_argument('--service_prefix', type=str, default='dbservice1', help='Service prefix (default: None)')
     parser.add_argument('--include_logs_and_traces', type=int, default=0, help='Flag for including logs and traces (default: 0)')
     parser.add_argument('--disable_orth_proj', type=int, default=0, help='Flag for running case study (default: 1)')
-
+    parser.add_argument('--use_MoM', type=int, default=0, help='Flag for using MoM (default: 0)')
     # Meta arguments
     parser.add_argument('--seed', type=int, default=4, help='Random seed (default: 4)')
     parser.add_argument('--device', type=str, default='cuda', help='Device to use (default: cuda)')

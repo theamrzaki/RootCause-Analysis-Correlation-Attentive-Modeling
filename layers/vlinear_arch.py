@@ -170,6 +170,121 @@ class OrthTransform_multi_modal(nn.Module):
         return out.transpose(1, 2)
 
 
+class TinyMoM(nn.Module):
+
+    def __init__(
+        self,
+        hidden_dim,
+        num_memories=4,
+        top_k=2
+    ):
+        super().__init__()
+
+        assert hidden_dim % num_memories == 0
+
+        self.num_memories = num_memories
+        self.sub_dim = hidden_dim // num_memories
+        self.top_k = top_k
+
+        self.router = nn.Linear(
+            hidden_dim,
+            num_memories,
+            bias=False
+        )
+
+        self.norm = nn.LayerNorm(
+            hidden_dim
+        )
+
+
+    def forward(self, x):
+
+        # x:
+        # [B,T,P,H]
+
+        B,T,P,H = x.shape
+
+
+        # --------------------------
+        # Router
+        # --------------------------
+
+        state = x.mean(dim=1)
+        # [B,P,H]
+
+
+        scores = torch.softmax(
+            self.router(state),
+            dim=-1
+        )
+        # [B,P,N]
+
+
+        if self.top_k < self.num_memories:
+
+            vals, idx = torch.topk(
+                scores,
+                self.top_k,
+                dim=-1
+            )
+
+            mask = torch.zeros_like(scores)
+
+            mask.scatter_(
+                -1,
+                idx,
+                vals
+            )
+
+            scores = mask / (
+                mask.sum(
+                    dim=-1,
+                    keepdim=True
+                )
+                + 1e-8
+            )
+
+
+        # --------------------------
+        # Memory split
+        # --------------------------
+
+        memories = x.reshape(
+            B,
+            T,
+            P,
+            self.num_memories,
+            self.sub_dim
+        )
+
+
+        # temporal aggregation
+        memories = memories.mean(dim=1)
+        # [B,P,N,sub_dim]
+
+
+        # --------------------------
+        # Routing
+        # --------------------------
+
+        scores = scores.unsqueeze(-1)
+        # [B,P,N,1]
+
+
+        memories = memories * scores
+        # [B,P,N,sub_dim]
+
+
+        # merge memories back
+        output = memories.reshape(
+            B,
+            P,
+            H
+        )
+
+
+        return self.norm(output)
+
 class vlinear(nn.Module):
     def __init__(self, num_vars, order, hidden_dim=128, device="cpu", options=None):#128 for SMD
         super().__init__()
@@ -205,6 +320,15 @@ class vlinear(nn.Module):
         # 3. Projection matching the Model's logic
         #self.temporal_proj = nn.Linear(self.order, hidden_dim)
         self.temporal_proj = nn.Linear(1, hidden_dim)
+        #self.mom = TinyMoM(
+        #    hidden_dim,
+        #    num_memories=4,
+        #    top_k=2
+        #)
+        #self.use_MoM = options.get(
+        #    "use_MoM",
+        #    True
+        #)
         #self.temporal_proj = nn.Sequential(
         #    nn.Linear(1, hidden_dim // 2),
         #    nn.GELU(),
@@ -281,7 +405,10 @@ class vlinear(nn.Module):
 
         # --- 5. Prediction (Forecasting) ---
         # Aggregate temporal info using max pooling (as per your best results)
+        #if not self.use_MoM:
         z_final, _ = torch.max(cond, dim=1) # [B, P, H]
+        #else:
+        #    z_final = self.mom(cond).max(dim=1).values
         
         # Apply the second Latent Bias to the forecast
         # vf(z_final) -> [B, P, Order]

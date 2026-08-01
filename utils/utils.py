@@ -535,8 +535,9 @@ def write_results(args, local_model_name, ac_at,k_at_step_all, total_params,file
         "train_peak_mem_mb": extra_metrics["train_peak_mem_mb"] if extra_metrics and "train_peak_mem_mb" in extra_metrics else 0,
 
         "temporal_mixer": args['temporal_mixer'] if 'temporal_mixer' in args else 0,
-
+        
         "disable_orth_proj": args['disable_orth_proj'] if 'disable_orth_proj' in args else 0,
+        "use_MoM": args['use_MoM'] if 'use_MoM' in args else 0,
     }
     
 

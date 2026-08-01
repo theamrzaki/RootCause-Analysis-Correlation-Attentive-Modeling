@@ -63,7 +63,7 @@ def create_arg_parser():
     # Architecture arguments
     parser.add_argument('--coeff_architecture', type=str, default='deep_mlp', help='Coefficient architecture options (deep_mlp, gnn_attention) (default: deep_mlp)')
     parser.add_argument('--temporal_mixer', type=int, default=0, help='Flag for using temporal mixer (default: 0)')
-    
+    parser.add_argument('--use_MoM', type=int, default=0, help='Flag for using MoM (default: 0)')
     # Attention arguments
     parser.add_argument('--global_attention_over_all_lag', type=str)
     parser.add_argument('--local_attention_per_lag', type=int, default=0, help='Flag for using local attention per lag (default: 0)')

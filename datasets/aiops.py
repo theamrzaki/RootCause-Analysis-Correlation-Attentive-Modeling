@@ -281,12 +281,14 @@ class aiops:
         #save with window and num of vars in the name to avoid confusion
         self.data_dir = os.path.join(self.data_dir, f"window_{self.window_size}_vars_{self.num_vars}")
         os.makedirs(self.data_dir, exist_ok=True)
+        self.data_dir_path_modified_with_window_var = True
         for key in ['x_n_list', 'x_ab_list', 'label_list']:
             np.save(os.path.join(self.data_dir, f'{key}.npy'), self.data_dict[key])
         print(f"Flattened AIOps matrices saved to {self.data_dir}")
 
     def load_data(self):
-        self.data_dir = os.path.join(self.data_dir, f"window_{self.window_size}_vars_{self.num_vars}")
+        if not self.data_dir_path_modified_with_window_var:
+            self.data_dir = os.path.join(self.data_dir, f"window_{self.window_size}_vars_{self.num_vars}")
         self.data_dict['x_n_list'] = np.load(os.path.join(self.data_dir, 'x_n_list.npy'))
         self.data_dict['x_ab_list'] = np.load(os.path.join(self.data_dir, 'x_ab_list.npy'))
         self.data_dict['label_list'] = np.load(os.path.join(self.data_dir, 'label_list.npy'))

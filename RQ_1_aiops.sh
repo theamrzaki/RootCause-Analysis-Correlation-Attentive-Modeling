@@ -1,7 +1,7 @@
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate RCAEval
 
-seeds=(3)
+seeds=()
 dataset="aiops"
 window_size=(8 12 16 20)
 lrs=("1e-4")
@@ -35,6 +35,7 @@ run_deep_models() {
                                     --main_model=$main_model \
                                     --coeff_architecture="$arch" \
                                     --temporal_mixer=0 \
+                                    --use_MoM=0 \
 
                                     --preprocessing_data="$preprocessing_data" \
 
@@ -163,6 +164,7 @@ run_deep_models() {
                                     --main_model=$main_model \
                                     --coeff_architecture="$arch" \
                                     --temporal_mixer=0 \
+                                    --use_MoM=0 \   
 
                                     --preprocessing_data="$preprocessing_data" \
 
@@ -291,7 +293,8 @@ run_vlinear() {
                                     --coeff_architecture="$arch" \
                                     --time_freq_representation="mag_phase" \
                                     --temporal_mixer=1 \
-                                    
+                                    --use_MoM=0 \
+
                                     --preprocessing_data="$preprocessing_data" \
 
                                     --lr="$lrs" \
@@ -531,12 +534,13 @@ for seed in "${seeds[@]}"; do
     for window_size_item in "${window_size[@]}"; do
         preprocessing_data=1 
         run_CUTS_PLUS_SMD $preprocessing_data $seed $window_size_item
-        preprocessing_data=0    
         run_vlinear $preprocessing_data $seed $window_size_item
+        preprocessing_data=0    
+        
         run_GVAR $preprocessing_data $seed $window_size_item
         run_cLSTM $preprocessing_data $seed $window_size_item
         run_experiment_baselines $preprocessing_data $seed $window_size_item    
-        #run_CUTS_PLUS_SMD 0 $seed $window_size_item
+        run_CUTS_PLUS_SMD 0 $seed $window_size_item
     done
 done
 
