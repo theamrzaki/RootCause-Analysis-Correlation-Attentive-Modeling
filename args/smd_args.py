@@ -64,7 +64,7 @@ def create_arg_parser():
     parser.add_argument('--outer_heads_num', type=int, default=2, help='Number of outer attention heads (default: 4)')
     parser.add_argument('--outer_hidden_dim', type=int, default=128, help='Outer hidden dimension (default: 64)')
     parser.add_argument('--temporal_mixer', type=int, default=1, help='Flag for using temporal mixer (default: 0)')
-    parser.add_argument('--use_MoM', type=int, default=0, help='Flag for using MoM (default: 0)')
+    parser.add_argument('--use_MoM', type=str, default="tinyMoM", help='Flag for using MoM (default: 0)')
 
     # Attention arguments
     parser.add_argument('--global_attention_over_all_lag', type=str)

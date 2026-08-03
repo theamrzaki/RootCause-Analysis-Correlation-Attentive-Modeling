@@ -22,6 +22,7 @@ class aiops:
         self.data_dir = options['data_dir']
         self.shuffle = options.get('shuffle', False)
         self.metric_types = ['container', 'istio', 'jvm', 'node', 'service']
+        self.data_dir_path_modified_with_window_var = False
 
 
     def predict_best_sampling_rate(self, df, current_interval_sec=60):

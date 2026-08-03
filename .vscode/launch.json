@@ -5,7 +5,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "AIops - Case Study",
+            "name": "vlinear",
             "type": "debugpy",
             "request": "launch",
             "program": "main.py",
@@ -26,19 +26,20 @@
                 "--seed", "7",
                 "--dataset", "smd",
                 "--window_size", "4",
+                "--temporal_mixer","0",
+                "--use_MoM","LinearRNNMoM",
 
-                "--training_aerca", "0",
-                "--epochs", "200",
-                "--preprocessing_data", "1",
+                "--training_aerca", "1",
+                "--epochs", "20",
+                "--preprocessing_data", "0",
                 "--include_logs_and_traces", "0",
-                "--results_csv", "aiops_casestudy.csv",
-                
+                "--results_csv", "testing.csv",
+
                 "--run_case_study", "1",
-                "--hidden_layer_size", "128",
-            ]
-,
-            "console": "integratedTerminal"
-        },
+                "--hidden_layer_size", "128"
+            ],
+        "console": "integratedTerminal"
+    },
         {
             "name": "Run Current File",
             "type": "python",

@@ -1,22 +1,8 @@
-
-
 #!/bin/bash
-MODEL_NAMES=("cLSTM") # "CUTS_PLUS" "GVAR" "vlinear")
-DATASET_NAMES=("aiops") # "gaia")
 #IP_ADDRESS="130.63.254.162" #db2003smaller
-IP_ADDRESS="130.63.103.80"
-SEEDS=("1")
+IP_ADDRESS="130.63.100.216"
 #DEVICE_NAME="db2003smaller"
 DEVICE_NAME="db2003larger"
-
-
-#----hyperparameters-----
-windows_aiops=(20) #8 12 16 20)
-num_vars_aiops=30
-
-windows_gaia=(8 10 12)
-num_vars_gaia=50
-#-------------------------
 
 
 #This sets up SSH keys so scp never asks for a password again.
@@ -26,21 +12,60 @@ ssh-copy-id $DEVICE_NAME@$IP_ADDRESS
 # Give your user permission to read the source folder so you don't need sudo inside the loops
 sudo chown -R $(whoami) "/home/db2003/Desktop/Amr/(TSE) RootCause-Analysis-Correlation-Attentive-Modeling/saved_models/"
 
+DATASET_ROOT="/home/db2003/Desktop/Amr/(TSE) RootCause-Analysis-Correlation-Attentive-Modeling/datasets"
+
+dataset="smd"
+windows_list=() #4
+num_vars=38
+
+for window in "${windows_list[@]}"; do
+    model_file=${DATASET_ROOT}/${dataset}/window_${window}_vars_${num_vars}
+
+    echo "---- Copying dataset files for window ${window} and num_vars ${num_vars} to $DEVICE_NAME@$IP_ADDRESS ----"
+    data_files=(
+        "${DATASET_ROOT}/${dataset}/window_${window}_vars_${num_vars}/label_list.npy"
+        "${DATASET_ROOT}/${dataset}/window_${window}_vars_${num_vars}/x_ab_list.npy"
+        "${DATASET_ROOT}/${dataset}/window_${window}_vars_${num_vars}/x_n_list.npy"
+    )
+    for data_file in "${data_files[@]}"; do
+        # create the destination directory on the remote server if it doesn't exist
+        ssh $DEVICE_NAME@$IP_ADDRESS "mkdir -p /home/$DEVICE_NAME/RootCause-Analysis-Correlation-Attentive-Modeling/datasets/${dataset}/window_${window}#_vars_${num_vars}/"
+        scp "$data_file" $DEVICE_NAME@$IP_ADDRESS:/home/$DEVICE_NAME/RootCause-Analysis-Correlation-Attentive-Modeling/datasets/${dataset}/window_${window}#_vars_${num_vars}/
+    done
+
+    orth_data_file="${DATASET_ROOT}/${dataset}/window_${window}_vars_${num_vars}/orth_transform_meta/swat_q_matrix_lag${window}.npy"
+    ssh $DEVICE_NAME@$IP_ADDRESS "mkdir -p /home/$DEVICE_NAME/RootCause-Analysis-Correlation-Attentive-Modeling/datasets/${dataset}/window_${window}_vars_${num_vars}/orth_transform_meta"
+    scp "$orth_data_file" $DEVICE_NAME@$IP_ADDRESS:/home/$DEVICE_NAME/RootCause-Analysis-Correlation-Attentive-Modeling/datasets/${dataset}/window_${window}_vars_${num_vars}/orth_transform_meta/
+done
+
+
+
+
+
+
+#------------------------------------------------------#
+#------------------------------------------------------#
+#------------------------------------------------------#
+#------------------------------------------------------#
+#--------------------Model Files-----------------------#
+#------------------------------------------------------#
+#------------------------------------------------------#
+#------------------------------------------------------#
+#------------------------------------------------------#
+
+
+
+#!/bin/bash
+MODEL_NAMES=("vlinear") # )"cLSTM" "GVAR" "vlinear" "CUTS_PLUS"
+DATASET_NAMES=("smd") # "gaia")
+SEEDS=(1)
+windows_list=(4) #4
 for seed in "${SEEDS[@]}"; do
     for model in "${MODEL_NAMES[@]}"; do
         for dataset in "${DATASET_NAMES[@]}"; do
-            windows_list=()
-            num_vars=0
-            if [ "$dataset" == "aiops" ]; then
-                windows_list=("${windows_aiops[@]}")
-                num_vars=$num_vars_aiops
-            elif [ "$dataset" == "gaia" ]; then
-                windows_list=("${windows_gaia[@]}")
-                num_vars=$num_vars_gaia
-            fi
 
             for window in "${windows_list[@]}"; do
-                 
+                echo "##### Copying model files for window ${window} and num_vars ${num_vars} to $DEVICE_NAME@$IP_ADDRESS ####"
                 #cLSTM_aiops_ws_8_seed_1_numvars_30_lower_decoder.npy
                 #cLSTM_aiops_ws_8_seed_1_numvars_30_lower_encoder.npy
                 #cLSTM_aiops_ws_8_seed_1_numvars_30_recon_mean.npy

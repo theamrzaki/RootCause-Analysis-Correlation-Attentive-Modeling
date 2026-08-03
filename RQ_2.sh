@@ -1,10 +1,10 @@
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate RCAEval
 
-seeds=(1)
+seeds=(1 2 3)
 dataset="aiops"
 window_size_item=20
-num_vars=(100 150 200 250)
+num_vars=(20 40 50)
 lrs=("1e-4")
 results_csv="RQ_2_aiops_TSE_var.csv"
 
@@ -101,18 +101,18 @@ run_experiment_baselines() {
 #---------------------------------------------------------------------------
 #-----------------------------run experiments-------------------------------
 #---------------------------------------------------------------------------
-#num_vars=(100 150 250)
-#for seed in "${seeds[@]}"; do
-#    for var in "${num_vars[@]}"; do
-#        preprocessing_data=1 
-#        run_deep_models $preprocessing_data $seed $window_size_item $var "vlinear"
-#        preprocessing_data=0
-#        run_deep_models $preprocessing_data $seed $window_size_item $var "GVAR"
-#        run_experiment_baselines $preprocessing_data $seed $window_size_item $var
-#        run_deep_models $preprocessing_data $seed $window_size_item $var "cLSTM"
-#        run_deep_models $preprocessing_data $seed $window_size_item $var "CUTS_PLUS"
-#    done
-#done
+for seed in "${seeds[@]}"; do
+    for var in "${num_vars[@]}"; do
+        #preprocessing_data=1 
+        #run_deep_models $preprocessing_data $seed $window_size_item $var "vlinear"
+        preprocessing_data=0
+        #
+        run_experiment_baselines $preprocessing_data $seed $window_size_item $var
+        run_deep_models $preprocessing_data $seed $window_size_item $var "GVAR"
+        #run_deep_models $preprocessing_data $seed $window_size_item $var "cLSTM"
+        #run_deep_models $preprocessing_data $seed $window_size_item $var "CUTS_PLUS"
+    done
+done
 
 
 
@@ -127,7 +127,7 @@ run_experiment_baselines() {
 
 
 
-seeds=(1)
+seeds=()
 dataset="gaia"
 window_size_item=10
 num_vars=(40 60 70) #50

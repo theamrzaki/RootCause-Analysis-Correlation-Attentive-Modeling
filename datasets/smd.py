@@ -17,7 +17,7 @@ class SMD:
         # SMD specific: list of machines to process (e.g., machine-1-1)
         # If not provided, it will process all machines in the train folder
         self.subset_machines = options.get('subset_machines', None)
-
+        self.data_dir_path_modified_with_window_var = False
 
 
     def parse_interpretation_label(self, file_path, num_timestamps, num_vars=38):
@@ -173,11 +173,16 @@ class SMD:
 
 
     def save_data(self):
-        if not os.path.exists(self.data_dir): os.makedirs(self.data_dir)
+        #if not os.path.exists(self.data_dir): os.makedirs(self.data_dir)
+        self.data_dir = os.path.join(self.data_dir, f"window_{self.window_size}_vars_{self.num_vars}")
+        os.makedirs(self.data_dir, exist_ok=True)
+        self.data_dir_path_modified_with_window_var = True
         for key in ['x_n_list', 'x_ab_list', 'label_list']:
             np.save(os.path.join(self.data_dir, f'{key}.npy'), self.data_dict[key])
 
     def load_data(self):
+        if not self.data_dir_path_modified_with_window_var:
+            self.data_dir = os.path.join(self.data_dir, f"window_{self.window_size}_vars_{self.num_vars}")
         self.data_dict['x_n_list'] = np.load(os.path.join(self.data_dir, 'x_n_list.npy'))
         self.data_dict['x_ab_list'] = np.load(os.path.join(self.data_dir, 'x_ab_list.npy'))
         self.data_dict['label_list'] = np.load(os.path.join(self.data_dir, 'label_list.npy'))

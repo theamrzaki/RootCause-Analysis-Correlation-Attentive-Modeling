@@ -34,6 +34,8 @@ class SENNGC(nn.Module):
                         modules.extend(nn.Sequential(nn.Linear(hidden_layer_size, hidden_layer_size), nn.ReLU()))
                 modules.extend(nn.Sequential(nn.Linear(hidden_layer_size, num_vars**2), nn.Tanh()))
                 self.coeff_nets.append(nn.Sequential(*modules))
+            # move to device
+            self.coeff_nets.to(device)
      
         if args["coeff_architecture"] not in  ["ht","epsilon_diagnosis","rcd","TemporalGNN","cross_time_freq","cross_attention_single_coeff_network","TemporalGNN_Attention","trend_seasonal","rcd","TemporalGNN_Attention_fourier","TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced","causalrca","cuts_mlp","cuts_lstm","GVAR","vlinear","nsigma","baro","circa","torai","cLSTM","CUTS_PLUS","Eadro","Anofusion"]:
             total_params = sum(p.numel() for net in self.coeff_nets for p in net.parameters())
@@ -119,6 +121,8 @@ class SENNGC(nn.Module):
                 device=device,
                 options = args  # default to None if not specified
             )
+        if args["coeff_architecture"] in ["CUTS_PLUS","cLSTM","vlinear"]:
+            self.coeff_net.to(device)
         # Some bookkeeping
         self.num_vars = num_vars
         self.order = order
