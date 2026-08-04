@@ -23,6 +23,7 @@ class SWaT:
         self.data_dir = options['data_dir']
         self.window_size = options['window_size']
         self.shuffle = options['shuffle']
+        self.data_dir_path_modified_with_window_var = False
 
     def generate_example(self):
         """
@@ -132,25 +133,61 @@ class SWaT:
                 # Mark the corresponding attack points in the label matrix as 1 for these indices
                 for j in attack_lst_ind:
                     labels[index_lst, j] = 1
+                # AERCA had test data function in windows size, while normal not 
                 # Define the window for the example based on the minimum index in the attack interval
-                start_idx = int(min(index_lst) - 2 * 10 * self.window_size)
-                end_idx = int(min(index_lst) + 1 * 10 * self.window_size)
-                # Slice the abnormal data and label arrays with a step of 10
-                test_x_lst.append(
-                    df_abnormal.iloc[start_idx:end_idx:10, 1:-2].values
-                )
-                test_label_lst.append(
-                    labels[start_idx:end_idx:10]
-                )
+                #start_idx = int(min(index_lst) - 2 * 10 * self.window_size)
+                #end_idx = int(min(index_lst) + 1 * 10 * self.window_size)
+                ## Slice the abnormal data and label arrays with a step of 10
+                #test_x_lst.append(
+                #    df_abnormal.iloc[start_idx:end_idx:10, 1:-2].values
+                #)
+                #test_label_lst.append(
+                #    labels[start_idx:end_idx:10]
+                #)
+
+                # Preserve AERCA's 10-step downsampling while making
+                # abnormal windows consistent with training window_size.
+                sampling_rate = 10
+                onset = min(index_lst)
+
+                start_idx = int(onset - (self.window_size//2) * sampling_rate)
+                end_idx = int(onset + (self.window_size//2) * sampling_rate)
+                if start_idx >= 0 and end_idx <= len(df_abnormal):
+                    test_x_lst.append(
+                        df_abnormal.iloc[
+                            start_idx:end_idx:sampling_rate,
+                            1:-2
+                        ].values
+                    )
+                    #to preserve the label information
+                    sampled_labels = []
+                    for k in range(self.window_size):
+                        chunk = labels[
+                            start_idx+k*sampling_rate:
+                            start_idx+(k+1)*sampling_rate
+                        ]
+
+                        sampled_labels.append(
+                            chunk.max(axis=0)
+                        )
+
+                    sampled_labels = np.array(sampled_labels)
+                    test_label_lst.append(sampled_labels)
 
         # ----------------------------
         # Process Normal Data: Split and Scale
         # ----------------------------
+        #fixed segements from AERCA
         # Split normal data into segments of 1000 rows each, ensuring each segment has exactly 1000 rows
+        #x_n_list = [
+        #    df_normal.iloc[i:i + 1000].values
+        #    for i in range(0, len(df_normal), 1000)
+        #    if i + 1000 < len(df_normal)
+        #]
         x_n_list = [
-            df_normal.iloc[i:i + 1000].values
-            for i in range(0, len(df_normal), 1000)
-            if i + 1000 < len(df_normal)
+            df_normal.iloc[i:i + self.window_size].values
+            for i in range(0, len(df_normal), self.window_size)
+            if i + self.window_size < len(df_normal)
         ]
         # Initialize and fit the StandardScaler on the concatenated normal data segments
         scaler = StandardScaler()
@@ -178,8 +215,11 @@ class SWaT:
         """
         Save the processed data arrays to .npy files in the data directory.
         """
+        self.data_dir = os.path.join(self.data_dir, f"window_{self.window_size}_vars_{self.num_vars}")
         if not os.path.exists(self.data_dir):
             os.makedirs(self.data_dir)
+        self.data_dir_path_modified_with_window_var = True
+
         np.save(os.path.join(self.data_dir, 'x_n_list'), self.data_dict['x_n_list'])
         np.save(os.path.join(self.data_dir, 'x_ab_list'), self.data_dict['x_ab_list'])
         np.save(os.path.join(self.data_dir, 'label_list'), self.data_dict['label_list'])
@@ -222,6 +262,8 @@ class SWaT:
         Loads saved .npy files and immediately applies OrthTransform.
         """
         # Load standard lists
+        if not self.data_dir_path_modified_with_window_var:
+            self.data_dir = os.path.join(self.data_dir, f"window_{self.window_size}_vars_{self.num_vars}")
         self.data_dict['x_n_list'] = np.load(os.path.join(self.data_dir, 'x_n_list.npy'))
         self.data_dict['x_ab_list'] = np.load(os.path.join(self.data_dir, 'x_ab_list.npy'))
         self.data_dict['label_list'] = np.load(os.path.join(self.data_dir, 'label_list.npy'))
@@ -230,4 +272,130 @@ class SWaT:
         orth_matrix_dir = os.path.join(self.data_dir, 'orth_transform_meta')
         
         device = 'cpu'
+        self.pipeline_sanity_check()
         return self.apply_orthogonal_transform(save_path=orth_matrix_dir, device=device)
+
+    def pipeline_sanity_check(self):
+        print("\n--- Starting SWaT Data Pipeline Sanity Check ---")
+
+        x_n = self.data_dict['x_n_list']
+        x_ab = self.data_dict['x_ab_list']
+        labels = self.data_dict['label_list']
+
+        # --------------------------------
+        # 1. Shape Verification
+        # --------------------------------
+        print(f"Normal Data Shape:   {x_n.shape}")
+        print(f"Abnormal Data Shape: {x_ab.shape}")
+        print(f"Label Shape:         {labels.shape}")
+
+        assert x_n.ndim == 3, "Normal data must be [Batch, Window, Sensors]"
+        assert x_ab.ndim == 3, "Abnormal data must be [Batch, Window, Sensors]"
+        assert labels.ndim == 3, "Labels must be [Batch, Window, Sensors]"
+
+        assert x_ab.shape == labels.shape, \
+            f"Abnormal data and labels mismatch: {x_ab.shape} vs {labels.shape}"
+
+        assert x_n.shape[2] == x_ab.shape[2], \
+            "Normal and abnormal sensor dimensions do not match"
+
+        assert x_n.shape[1] == self.window_size, \
+            f"Normal window mismatch: expected {self.window_size}, got {x_n.shape[1]}"
+
+        assert x_ab.shape[1] == self.window_size, \
+            f"Abnormal window mismatch: expected {self.window_size}, got {x_ab.shape[1]}"
+
+
+        # --------------------------------
+        # 2. Root Cause Label Coverage
+        # --------------------------------
+        anomaly_samples = np.sum(labels)
+
+        print(f"Total root-cause labels: {int(anomaly_samples)}")
+
+        if anomaly_samples == 0:
+            print(
+                "WARNING: No root cause labels detected. "
+                "RCA evaluation will not be possible."
+            )
+        else:
+            abnormal_windows = np.where(
+                np.any(labels == 1, axis=(1,2))
+            )[0]
+
+            print(
+                f"Abnormal windows with root causes: "
+                f"{len(abnormal_windows)}/{len(labels)}"
+            )
+
+
+        # --------------------------------
+        # 3. Feature Statistics
+        # --------------------------------
+        feat_min = x_n.min()
+        feat_max = x_n.max()
+        feat_mean = x_n.mean()
+        feat_std = x_n.std()
+
+        print(
+            f"Normal Feature Statistics -> "
+            f"Min: {feat_min:.4f}, "
+            f"Max: {feat_max:.4f}, "
+            f"Mean: {feat_mean:.4f}, "
+            f"Std: {feat_std:.4f}"
+        )
+
+        if abs(feat_max) > 10 or abs(feat_min) > 10:
+            print(
+                "INFO: Large values detected. "
+                "Check scaling/clipping."
+            )
+
+
+        # --------------------------------
+        # 4. Sensor Variance Check
+        # --------------------------------
+        variances = np.var(
+            x_n,
+            axis=(0,1)
+        )
+
+        dead_sensors = np.where(
+            variances == 0
+        )[0]
+
+        if len(dead_sensors) > 0:
+            print(
+                f"CRITICAL: Sensors with zero variance: "
+                f"{dead_sensors}"
+            )
+        else:
+            print(
+                "Variance Check: All sensors are active."
+            )
+
+
+        # --------------------------------
+        # 5. Window Length Distribution
+        # --------------------------------
+        normal_lengths = np.unique(
+            [x.shape[0] for x in x_n]
+        )
+
+        abnormal_lengths = np.unique(
+            [x.shape[0] for x in x_ab]
+        )
+
+        print(
+            f"Normal window lengths: {normal_lengths}"
+        )
+
+        print(
+            f"Abnormal window lengths: {abnormal_lengths}"
+        )
+
+
+        print("--- SWaT Sanity Check Passed ---\n")
+
+
+        

@@ -310,6 +310,8 @@ class vlinear(nn.Module):
         self.delta_latent1 = nn.Parameter(torch.randn(1, num_vars, hidden_dim))
         self.delta_latent2 = nn.Parameter(torch.randn(1, num_vars, hidden_dim))
 
+        self.source_proj = nn.Linear(hidden_dim, hidden_dim)
+        self.target_proj = nn.Linear(hidden_dim, hidden_dim)
         # Projection to match the output 'order'
         self.bias_proj = nn.Linear(hidden_dim, self.order)
         
@@ -349,10 +351,40 @@ class vlinear(nn.Module):
                 padding=1,
                 groups=hidden_dim
             )
-        
+        self._init_weights()
+
+    def _init_weights(self):
+        """Xavier initialization for all learnable layers."""
+
+        for m in self.modules():
+
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
+            elif isinstance(m, nn.GRU):
+                for name, param in m.named_parameters():
+
+                    if "weight_ih" in name:
+                        nn.init.xavier_uniform_(param)
+
+                    elif "weight_hh" in name:
+                        nn.init.orthogonal_(param)
+
+                    elif "bias" in name:
+                        nn.init.zeros_(param)
+
 
     def forward(self, inputs: torch.Tensor):
         B, O_curr, P = inputs.shape # [B, Window, Sensors] e.g., [B, 2, 51]
+        
+        # RIN
+        x_mean = torch.mean(inputs, dim=1, keepdim=True)
+        inputs = inputs - x_mean
+        x_var=torch.var(inputs, dim=1, keepdim=True)+ 1e-5
+        # print(x_var)
+        inputs = inputs / torch.sqrt(x_var)
         
         # --- 1. Step into Orthogonal Domain ---
         if self.orth_transformer is None:
@@ -400,19 +432,34 @@ class vlinear(nn.Module):
             cond = cond
         # --- 4. Dynamic AERCA Coefficients ---
         # Creates a unique PxP matrix for every step in the window
-        coeffs_time = torch.einsum('btph, btqh -> btpq', cond, cond)
-        coeffs_time = torch.tanh(coeffs_time)
+        #coeffs_time = torch.einsum('btph, btqh -> btpq', cond, cond)
+        #coeffs_time = torch.tanh(coeffs_time)
+        src = self.source_proj(cond)
+        tgt = self.target_proj(cond)
 
+        coeffs_time = torch.einsum(
+            'btph, btqh -> btpq',
+            src,
+            tgt
+        )
+        coeffs_time = torch.tanh(coeffs_time)
         # --- 5. Prediction (Forecasting) ---
         # Aggregate temporal info using max pooling (as per your best results)
-        #if not self.use_MoM:
-        z_final, _ = torch.max(cond, dim=1) # [B, P, H]
-        #else:
-        #    z_final = self.mom(cond).max(dim=1).values
         
-        # Apply the second Latent Bias to the forecast
-        # vf(z_final) -> [B, P, Order]
-        # d2 -> [1, P, Order]
+        
+        
+        split = (cond.size(1) // 2) #+ 1
+        history = cond[:, :split]      # first half
+        recent  = cond[:, split:]      # second half
+        #split_method = self.options.get("split_method")
+        #if split_method == "mean":
+        history = history.mean(dim=1)
+        recent  = recent.mean(dim=1)
+        #split_method == "max"
+        #history = history.max(dim=1).values
+        #recent  = recent.max(dim=1).values
+        z_final = recent - history
+
         d2 = self.bias_proj(self.delta_latent2)
         v_pred = self.vf(z_final) + d2 # [B, P, Order]
 
@@ -426,6 +473,276 @@ class vlinear(nn.Module):
         coeffs_freq = coeffs_time[:, 0, :, :] # First step coefficients
 
         return preds, coeffs_time, coeffs_freq
+
+
+class vlinear_(nn.Module):
+    def __init__(self, num_vars, order, hidden_dim=128, device="cpu", options=None):
+        super().__init__()
+        self.num_vars = num_vars  
+        self.order = order*1  -1        
+        self.device = device
+        self.options = options or {}
+        self.gru = nn.GRU(
+            input_size=num_vars,
+            hidden_size=hidden_dim,
+            num_layers=2,
+            batch_first=True
+        )
+        self.linear_time = nn.Linear(num_vars, hidden_dim)
+        self.linear_freq = nn.Linear(2 * num_vars, hidden_dim)
+        self.vf_gru = nn.Linear(hidden_dim, num_vars)
+        self.vf_freq = nn.Linear(hidden_dim, num_vars)
+        self.router = nn.Linear(num_vars, 2)   # GRU and Frequency experts
+
+
+        
+        self.num_vars = num_vars  
+        self.order = order*1  -1      
+        self.device = device
+        self.options = options or {}
+        if "orth_transformer_multi_modality" in options and options["orth_transformer_multi_modality"]:
+            self.multi_modal = True
+            self.orth_transformer = OrthTransform_multi_modal(
+                dataset_obj=options['dataset_obj'],
+                save_path=options['save_path'],
+                time_lag=options['time_lag'],
+                device=device
+            )
+        else:
+            self.multi_modal = False
+            self.orth_transformer = options.get('orth_transformer') 
+        
+        # 1. Delta Biases (Faithful to Model logic)
+        # These act as "Learned Context" for the orthogonal domain
+        # Projection to match the output 'order'
+        self.bias_proj = nn.Linear(hidden_dim, self.order)
+        self.bias_proj2 = nn.Linear(hidden_dim, self.order)
+        # 2. Updated Embeddings 
+        # In the Model code, embeddings are often 1D and expanded
+        #self.embeddings = nn.Parameter(torch.randn(1, hidden_dim))
+
+
+        # Learnable orthogonal-domain residual biases
+        self.delta_latent1 = nn.Parameter(
+            torch.empty(1, num_vars, hidden_dim)
+        )
+
+        self.delta_latent2 = nn.Parameter(
+            torch.empty(1, num_vars, hidden_dim)
+        )
+
+        # Learnable feature scaling
+        self.embeddings = nn.Parameter(
+            torch.empty(1, num_vars, 1, hidden_dim)
+        )
+
+        
+        self.hidden_dim = hidden_dim
+        self.temporal_proj = nn.Linear(1, hidden_dim)
+        self.vf = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim*2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim*2, self.order) 
+        )
+        self.temporal_attention = nn.Linear(hidden_dim,1)
+        #self.revin = RevIN(num_vars)
+        self.use_temporal_mixer = options.get('temporal_mixer', False)
+        if self.use_temporal_mixer:
+            self.temporal_mixer = nn.Conv1d(
+                hidden_dim,
+                hidden_dim,
+                kernel_size=3,
+                padding=1,
+                groups=hidden_dim
+            )
+        self.recency_bias = nn.Parameter(torch.tensor(0.5))
+        #self._init_weights()
+
+    def _init_latent_parameters(self):
+        # Residual biases: start almost inactive
+        nn.init.normal_(
+            self.delta_latent1,
+            mean=0.0,
+            std=0.02
+        )
+
+        nn.init.normal_(
+            self.delta_latent2,
+            mean=0.0,
+            std=0.02
+        )
+
+        # Multiplicative embedding: start as identity scaling
+        nn.init.normal_(
+            self.embeddings,
+            mean=1.0,
+            std=0.02
+        )
+    def forward_gru(self, inputs: torch.Tensor):
+        z_final  = self.gru(inputs)[0] # [B, T, H]
+        z_final = z_final.mean(dim=1) # [B, H]    avg pool over time dimension    
+        z_final = self.vf_gru(z_final) # [B, V]
+
+        return z_final
+    
+    def forward_orth_testing(self, inputs: torch.Tensor):
+        B, O_curr, P = inputs.shape # [B, Window, Sensors] e.g., [B, 2, 51]
+        
+        # --- 1. Step into Orthogonal Domain ---
+        x_orth = self.orth_transformer(inputs)
+        
+        # --- 2. Apply Delta1 Latent Bias ---
+        d1 = self.bias_proj(self.delta_latent1).unsqueeze(-2) 
+        x_orth_biased = x_orth.unsqueeze(-2) + d1 # [B, P, 1, Order]
+        
+        # --- 3. Truly Dynamic Latent Generation ---
+        # [B, P, 1, Order] -> [B, Order, P, 1]
+        x_t = x_orth_biased.squeeze(-2).transpose(1, 2).unsqueeze(-1)
+        
+        # Project each sensor at each time step into H-space
+        cond = self.temporal_proj(x_t) * self.embeddings.transpose(1, 2) 
+        # --- 5. Prediction (Forecasting) ---
+        z_final, _ = torch.max(cond, dim=1) # [B, P, H]
+
+        # Apply the second Latent Bias to the forecast
+        d2 = self.bias_proj(self.delta_latent2)
+        v_pred = self.vf_orth(z_final) + d2 # [B, P, Order]
+
+        preds_all_time = v_pred.transpose(1, 2) # [B, Order, P]
+        
+        # Final forecast is the last step of the predicted window
+        preds = preds_all_time[:, -1, :] 
+
+        return preds,cond
+    
+    def forward_orth(self, inputs: torch.Tensor):
+        B, O_curr, P = inputs.shape # [B, Window, Sensors] e.g., [B, 2, 51]
+        
+        # --- 1. Step into Orthogonal Domain ---
+        x_orth = self.orth_transformer(inputs)
+        
+        # --- 2. Apply Delta1 Latent Bias ---
+        # Project delta_latent1 [1, P, H] -> [1, P, Order]
+        # Then unsqueeze to [1, P, 1, Order] for broadcasting
+        d1 = self.bias_proj(self.delta_latent1).unsqueeze(-2) 
+        x_orth_biased = x_orth.unsqueeze(-2) + d1 # [B, P, 1, Order]
+        
+        # --- 3. Truly Dynamic Latent Generation ---
+        # [B, P, 1, Order] -> [B, Order, P, 1]
+        x_t = x_orth_biased.squeeze(-2).transpose(1, 2).unsqueeze(-1)
+        
+        # Project each sensor at each time step into H-space
+        # cond: [B, Order, P, H]
+        cond = self.temporal_proj(x_t) * self.embeddings.transpose(1, 2) 
+        if self.use_temporal_mixer:
+            cond_mix = cond.permute(0,2,3,1)
+            H = cond_mix.shape[2]
+            T = cond_mix.shape[3]
+    #
+            cond_mix = self.temporal_mixer(cond_mix.reshape(B*P, H, T))
+            cond_mix = cond_mix.reshape(B, P, H, T).permute(0,3,1,2)
+
+            cond = cond + cond_mix
+        else:
+            cond = cond
+        # --- 4. Dynamic AERCA Coefficients ---
+        # Creates a unique PxP matrix for every step in the window
+        coeffs_time = torch.einsum('btph, btqh -> btpq', cond, cond)
+        coeffs_time = torch.tanh(coeffs_time)
+
+        # --- 5. Prediction (Forecasting) ---
+        # Aggregate temporal info using max pooling (as per your best results)
+        #if not self.use_MoM:
+        #z_final, _ = torch.max(cond, dim=1) # [B, P, H]
+        #score = self.temporal_attention(cond)
+        #weight = torch.softmax(score, dim=1)
+        #z_final = (cond * weight).sum(dim=1)
+        B, T, P, H = cond.shape
+
+        score = self.temporal_attention(cond)  # [B,T,P,1]
+
+        pos = torch.arange(T, device=cond.device).float()
+        pos = pos.view(1, T, 1, 1)
+
+        score = score + self.recency_bias * pos
+
+        weight = torch.softmax(score, dim=1)
+
+        z_final = (cond * weight).sum(dim=1)
+
+        #else:
+        #    z_final = self.mom(cond).max(dim=1).values
+        
+        # Apply the second Latent Bias to the forecast
+        # vf(z_final) -> [B, P, Order]
+        # d2 -> [1, P, Order]
+        d2 = self.bias_proj2(self.delta_latent2)
+        #cond = cond.permute(0,2,3,1).reshape(B,P,-1)
+        v_pred = self.vf(z_final) + d2 # [B, P, Order]
+
+        preds_all_time = self.orth_transformer.inverse(v_pred)
+        
+        # Final forecast is the last step of the predicted window
+        preds = preds_all_time[:, -1, :] 
+        coeffs_freq = coeffs_time[:, 0, :, :] # First step coefficients
+
+        return preds, coeffs_time, coeffs_freq
+
+    def _init_weights(self):
+        """Xavier initialization for all learnable layers."""
+
+        for m in self.modules():
+
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
+            elif isinstance(m, nn.GRU):
+                for name, param in m.named_parameters():
+
+                    if "weight_ih" in name:
+                        nn.init.xavier_uniform_(param)
+
+                    elif "weight_hh" in name:
+                        nn.init.orthogonal_(param)
+
+                    elif "bias" in name:
+                        nn.init.zeros_(param)
+
+    def forward_freq(self, inputs: torch.Tensor):
+        freq = torch.fft.rfft(inputs, dim=1, norm="ortho") # [B,F,V]
+        freq = torch.cat([freq.real, freq.imag], dim=-1)   # [B, F, 2V]                                 # magnitude
+        z_final = self.linear_freq(freq) # [B, T, H]
+        z_final = z_final.mean(dim=1) # [B, H]    avg pool over time dimension    
+        z_final = self.vf_freq(z_final) # [B, V]
+        return z_final
+
+    def forward(self, inputs: torch.Tensor):
+        #x = inputs.transpose(1, 2)
+        #coeffs_time = torch.einsum('btp, btq -> btpq', x, x)
+        #coeffs_time = torch.tanh(coeffs_time)
+
+        # inputs: [B, T, V]
+        # Global representation of the window
+        route = inputs.mean(dim=1)             # [B,V]
+        scores = self.router(route)            # [B,2]
+        weights = torch.softmax(scores, dim=-1)
+        w_gru = weights[:, 0:1]
+        w_freq = weights[:, 1:2]
+        #
+        #z_final_gru = self.forward_gru(inputs)
+        z_final_gru = self.forward_freq(inputs)
+        z_final, coeffs_time, coeffs_freq = self.forward_orth(inputs)
+        
+        #z_final_freq = self.forward_freq(inputs)
+        ##weighted combination of the two paths
+        z_final = w_gru * z_final_gru + w_freq * z_final
+
+        return z_final, coeffs_time, coeffs_time
+
+
+
 class MultiModalVLinear(nn.Module):
     def __init__(self, md, ld, td, N, order, h=128, device="cpu", opt=None):
         super().__init__()

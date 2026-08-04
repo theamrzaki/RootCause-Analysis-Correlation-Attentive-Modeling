@@ -15,6 +15,7 @@ class WADI:
         self.data_dir = options['data_dir']
         self.window_size = options['window_size']
         self.shuffle = options['shuffle']
+        self.data_dir_path_modified_with_window_var = False
 
     def clean_column_names(self, df):
         """Removes the long system paths from WADI column headers."""
@@ -118,7 +119,7 @@ class WADI:
         # 7. Scaling
         # ----------------------------
         scaler = StandardScaler()
-        df_normal = df_normal + np.random.normal(0, 1e-6, df_normal.shape)
+        #df_normal = df_normal + np.random.normal(0, 1e-6, df_normal.shape)
 
         scaler.fit(df_normal.values)
         scaler.scale_[scaler.scale_ < 1e-4] = 1.0
@@ -134,12 +135,16 @@ class WADI:
         # ----------------------------
         # 8. Segment Normal Data
         # ----------------------------
-        normal_block_len = 200
-        self.data_dict['x_n_list'] = np.array([
-            scaled_normal[i:i + normal_block_len]
-            for i in range(0, len(scaled_normal), normal_block_len)
-            if i + normal_block_len <= len(scaled_normal)
-        ])
+        x_n_list = [
+            scaled_normal[i:i+self.window_size]
+            for i in range(
+                0,
+                len(scaled_normal)-self.window_size,
+                self.window_size
+            )
+        ]
+        self.data_dict['x_n_list'] = np.array(x_n_list)
+        
 
         # ----------------------------
         # 9. Segment Attack Data (SWaT-style) ✅
@@ -150,14 +155,23 @@ class WADI:
         test_x_lst = []
         test_y_lst = []
 
-        for start_idx in anomaly_starts:
-            s = int(start_idx - 2 * self.window_size)
-            e = int(start_idx + 1 * self.window_size)
-
-            if s >= 0 and e <= len(scaled_attack):
-                test_x_lst.append(scaled_attack[s:e])
-                test_y_lst.append(labels[s:e])
-
+        #for start_idx in anomaly_starts:
+        #    s = int(start_idx - 2 * self.window_size)
+        #    e = int(start_idx + 1 * self.window_size)
+#
+        #    if s >= 0 and e <= len(scaled_attack):
+        #        test_x_lst.append(scaled_attack[s:e])
+        #        test_y_lst.append(labels[s:e])
+        for onset in anomaly_starts:
+            start_idx = int(onset - self.window_size//2)
+            end_idx = int(onset + self.window_size//2)
+            if start_idx >=0 and end_idx <= len(scaled_attack):
+                test_x_lst.append(
+                    scaled_attack[start_idx:end_idx]
+                )
+                test_y_lst.append(
+                    labels[start_idx:end_idx]
+                )
         self.data_dict['x_ab_list'] = np.array(test_x_lst)
         self.data_dict['label_list'] = np.array(test_y_lst)
 
@@ -184,8 +198,10 @@ class WADI:
         Save the processed data arrays to .npy files in the data directory.
         Matches the implementation in swat.py and smd.py.
         """
+        self.data_dir = os.path.join(self.data_dir, f"window_{self.window_size}_vars_{self.num_vars}")
         if not os.path.exists(self.data_dir):
             os.makedirs(self.data_dir)
+        self.data_dir_path_modified_with_window_var = True
         
         # Save the primary data lists
         for key in ['x_n_list', 'x_ab_list', 'label_list']:
@@ -202,6 +218,8 @@ class WADI:
         Follows the 'Silent Operator' pattern to ensure model readiness.
         """
         # 1. Load standard lists
+        if not self.data_dir_path_modified_with_window_var:
+            self.data_dir = os.path.join(self.data_dir, f"window_{self.window_size}_vars_{self.num_vars}")
         self.data_dict['x_n_list'] = np.load(os.path.join(self.data_dir, 'x_n_list.npy'))
         self.data_dict['x_ab_list'] = np.load(os.path.join(self.data_dir, 'x_ab_list.npy'))
         self.data_dict['label_list'] = np.load(os.path.join(self.data_dir, 'label_list.npy'))
@@ -216,6 +234,7 @@ class WADI:
         # 4. Immediately apply/re-initialize the OrthTransform
         # This matches the load_data behavior in your smd.py and swat.py
         device = 'cpu'
+        self.pipeline_sanity_check()
         return self.apply_orthogonal_transform(save_path=orth_matrix_dir, device=device)
     
 
@@ -235,3 +254,131 @@ class WADI:
             self.data_dict['x_ab_orth'] = self.orth_transformer(x_ab_tensor).cpu().numpy()
         
         return self.orth_transformer
+    
+
+    def pipeline_sanity_check(self):
+        print("\n--- Starting SWaT Data Pipeline Sanity Check ---")
+
+        x_n = self.data_dict['x_n_list']
+        x_ab = self.data_dict['x_ab_list']
+        labels = self.data_dict['label_list']
+
+        # --------------------------------
+        # 1. Shape Verification
+        # --------------------------------
+        print(f"Normal Data Shape:   {x_n.shape}")
+        print(f"Abnormal Data Shape: {x_ab.shape}")
+        print(f"Label Shape:         {labels.shape}")
+        
+        print(
+            f"Sensor count: {x_n.shape[-1]}"
+        )
+        assert x_n.ndim == 3, "Normal data must be [Batch, Window, Sensors]"
+        assert x_ab.ndim == 3, "Abnormal data must be [Batch, Window, Sensors]"
+        assert labels.ndim == 3, "Labels must be [Batch, Window, Sensors]"
+
+        assert x_ab.shape == labels.shape, \
+            f"Abnormal data and labels mismatch: {x_ab.shape} vs {labels.shape}"
+
+        assert x_n.shape[2] == x_ab.shape[2], \
+            "Normal and abnormal sensor dimensions do not match"
+
+        assert x_n.shape[1] == self.window_size, \
+            f"Normal window mismatch: expected {self.window_size}, got {x_n.shape[1]}"
+
+        assert x_ab.shape[1] == self.window_size, \
+            f"Abnormal window mismatch: expected {self.window_size}, got {x_ab.shape[1]}"
+
+
+        # --------------------------------
+        # 2. Root Cause Label Coverage
+        # --------------------------------
+        anomaly_samples = np.sum(labels)
+
+        print(f"Total root-cause labels: {int(anomaly_samples)}")
+
+        if anomaly_samples == 0:
+            print(
+                "WARNING: No root cause labels detected. "
+                "RCA evaluation will not be possible."
+            )
+        else:
+            abnormal_windows = np.where(
+                np.any(labels == 1, axis=(1,2))
+            )[0]
+
+            print(
+                f"Abnormal windows with root causes: "
+                f"{len(abnormal_windows)}/{len(labels)}"
+            )
+
+
+        # --------------------------------
+        # 3. Feature Statistics
+        # --------------------------------
+        feat_min = x_n.min()
+        feat_max = x_n.max()
+        feat_mean = x_n.mean()
+        feat_std = x_n.std()
+
+        print(
+            f"Normal Feature Statistics -> "
+            f"Min: {feat_min:.4f}, "
+            f"Max: {feat_max:.4f}, "
+            f"Mean: {feat_mean:.4f}, "
+            f"Std: {feat_std:.4f}"
+        )
+
+        if abs(feat_max) > 10 or abs(feat_min) > 10:
+            print(
+                "INFO: Large values detected. "
+                "Check scaling/clipping."
+            )
+
+
+        # --------------------------------
+        # 4. Sensor Variance Check
+        # --------------------------------
+        variances = np.var(
+            x_n,
+            axis=(0,1)
+        )
+
+        dead_sensors = np.where(
+            variances == 0
+        )[0]
+
+        if len(dead_sensors) > 0:
+            print(
+                f"CRITICAL: Sensors with zero variance: "
+                f"{dead_sensors}"
+            )
+        else:
+            print(
+                "Variance Check: All sensors are active."
+            )
+
+
+        # --------------------------------
+        # 5. Window Length Distribution
+        # --------------------------------
+        normal_lengths = np.unique(
+            [x.shape[0] for x in x_n]
+        )
+
+        abnormal_lengths = np.unique(
+            [x.shape[0] for x in x_ab]
+        )
+
+        print(
+            f"Normal window lengths: {normal_lengths}"
+        )
+
+        print(
+            f"Abnormal window lengths: {abnormal_lengths}"
+        )
+
+
+
+        print("--- WADI Data Pipeline Sanity Check Passed ---\n")
+

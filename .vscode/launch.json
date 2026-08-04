@@ -19,8 +19,8 @@
                 "--beta", "0.01",
 
                 "--main_model", "aerca_based",
-                "--coeff_architecture", "vlinear",
-                "--time_freq_representation", "vlinear",
+                "--coeff_architecture", "baro",
+                "--time_freq_representation", "baro",
 
                 "--lr", "1e-4",
                 "--seed", "7",
@@ -29,7 +29,7 @@
                 "--temporal_mixer","0",
                 "--use_MoM","LinearRNNMoM",
 
-                "--training_aerca", "1",
+                "--training_aerca", "0",
                 "--epochs", "20",
                 "--preprocessing_data", "0",
                 "--include_logs_and_traces", "0",

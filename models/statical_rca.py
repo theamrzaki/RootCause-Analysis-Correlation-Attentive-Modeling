@@ -116,8 +116,8 @@ class StatisticalRCA:
             window_data = xs[i] # [Window_Size, Num_Vars]
             
             # RCAEval BARO logic: split window into normal (history) and abnormal (current)
-            # We use the first 70% of the window as 'normal' context for the scaler
-            split_idx = int(0.7 * len(window_data))
+            # We use the first 50% of the window as 'normal' context for the scaler
+            split_idx = int(0.5 * len(window_data))
             normal_part = window_data[:split_idx]
             anomal_part = window_data[split_idx:]
             
@@ -171,7 +171,7 @@ class StatisticalRCA:
         
         for i in tqdm(range(len(xs)), desc="Faithful TORAI Eval"):
             window_data = xs[i]
-            split_idx = int(0.7 * len(window_data))
+            split_idx = int(0.5 * len(window_data))
             
             # Step 1: Metric Z-Score Ranking (Coarse Stage)
             metric_ranks = []
