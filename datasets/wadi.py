@@ -79,6 +79,9 @@ class WADI:
             df_label_meta = pd.read_excel(label_info_path, skiprows=4)
             df_label_meta = df_label_meta.dropna(subset=['Start Time', 'End Time'])
 
+            print(df_label_meta[['Date','Start Time','End Time','Attack Point (s)']])
+            print("Number of attack rows:", len(df_label_meta))
+
             col_map = {col.upper(): i for i, col in enumerate(common_sensors)}
 
             for _, row in df_label_meta.iterrows():

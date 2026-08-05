@@ -256,7 +256,6 @@ done
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate RCAEval
 
-dataset="smd"
 lrs=("1e-4")
 
 BETA_VAL=0.01
@@ -345,28 +344,10 @@ run_experiment_baselines() {
 
 #-------------------SMD-----------------------
 
-#dataset="swat"
-#results_csv="RQ_1_swat_TSE.csv"
-#seeds=(1)
-#window_size=(5 7 10 15 20)  # 6 10 20 NOT 20 — 20 is already done except CUTS_PLUS
-#
-#for seed in "${seeds[@]}"; do
-#    for window_size_item in "${window_size[@]}"; do
-#        preprocessing_data=1 
-#        run_deep_models $preprocessing_data $seed $window_size_item "vlinear"
-#        preprocessing_data=0
-#        run_deep_models $preprocessing_data $seed $window_size_item "GVAR"
-#        run_experiment_baselines $preprocessing_data $seed $window_size_item
-#        run_deep_models $preprocessing_data $seed $window_size_item "cLSTM"
-#        run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS"
-#    done
-#done
-
-
-dataset="wadi"
-results_csv="RQ_1_wadi_TSE.csv"
-seeds=(1)
-window_size=(6 10 14 16)  # 6 10 20 NOT 20 — 20 is already done except CUTS_PLUS
+dataset="swat"
+results_csv="Ablations_SWAT.csv"
+seeds=(1) # 2 3
+window_size=(4) # 8 16 20)  # 6 10 20 NOT 20 — 20 is already done except CUTS_PLUS
 
 for seed in "${seeds[@]}"; do
     for window_size_item in "${window_size[@]}"; do

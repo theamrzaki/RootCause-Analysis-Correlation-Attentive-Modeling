@@ -285,7 +285,7 @@ class TinyMoM(nn.Module):
 
         return self.norm(output)
 
-class vlinear(nn.Module):
+class vlinear_old(nn.Module):
     def __init__(self, num_vars, order, hidden_dim=128, device="cpu", options=None):#128 for SMD
         super().__init__()
         self.num_vars = num_vars  
@@ -475,7 +475,7 @@ class vlinear(nn.Module):
         return preds, coeffs_time, coeffs_freq
 
 
-class vlinear_(nn.Module):
+class vlinear_MoM(nn.Module):
     def __init__(self, num_vars, order, hidden_dim=128, device="cpu", options=None):
         super().__init__()
         self.num_vars = num_vars  
@@ -741,7 +741,182 @@ class vlinear_(nn.Module):
 
         return z_final, coeffs_time, coeffs_time
 
+class vlinear(nn.Module):
+    def __init__(self, num_vars, order, hidden_dim=128, device="cpu", options=None):
+        super().__init__()
 
+        self.num_vars = num_vars
+        self.order = order - 1
+        self.options = options or {}
+
+        # options
+        self.latent_mode = self.options.get("latent_mode", "mul")
+        self.temporal_mixer = self.options.get("temporal_mixer", False)
+        self.coeff_mode = self.options.get("coeff_mode", "symmetric")
+        self.pool = self.options.get("pool", "split_diff")
+        self.context = self.options.get("context", "gate")
+        self.predictor = self.options.get("predictor", "mlp")
+
+        # orthogonal transform
+        self.orth_transformer = self.options.get("orth_transformer", None)
+
+
+        # Latent construction
+        self.embedding = nn.Parameter(
+            torch.randn(1, num_vars, 1, hidden_dim)
+        )
+        self.proj = nn.Linear(1, hidden_dim)
+        if self.latent_mode == "gate":
+            self.value = nn.Linear(1, hidden_dim)
+            self.gate = nn.Sequential(
+                nn.Linear(1, hidden_dim),
+                nn.Sigmoid()
+            )
+
+        # Coefficient model
+        if self.coeff_mode == "bipartite":
+            self.src = nn.Linear(hidden_dim, hidden_dim)
+            self.tgt = nn.Linear(hidden_dim, hidden_dim)
+
+        # Temporal mixer
+        if self.temporal_mixer:
+            self.mixer = nn.Conv1d(
+                hidden_dim,
+                hidden_dim,
+                3,
+                padding=1,
+                groups=hidden_dim
+            )
+
+        # Context sharpening
+        if self.context == "layernorm":
+            self.norm = nn.LayerNorm(hidden_dim)
+
+        elif self.context == "residual":
+            self.context_proj = nn.Linear(hidden_dim, hidden_dim)
+
+        elif self.context == "gate":
+            self.context_gate = nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.Sigmoid()
+            )
+
+        # Prediction head
+        if self.predictor == "linear":
+            self.head = nn.Linear(hidden_dim, self.order)
+        else:
+            self.head = nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim * 2),
+                nn.GELU(),
+                nn.Linear(hidden_dim * 2, self.order)
+            )
+
+
+        self.bias = nn.Parameter(
+            torch.zeros(1, num_vars, self.order)
+        )
+
+        self._init_weights()
+
+
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
+
+
+    def forward(self, x):
+        B,T,P = x.shape
+
+        # Normalization
+        x = (x - x.mean(1, keepdim=True))
+        x = x / (x.var(1, keepdim=True)+1e-5).sqrt()
+
+        # Orthogonal space
+        x = (
+            self.orth_transformer(x)
+            if self.orth_transformer
+            else x.transpose(1,2)
+        )
+
+        # B,P,T -> B,T,P,1
+        x = x.transpose(1,2).unsqueeze(-1)
+
+        # Latent generation
+        if self.latent_mode == "mul":
+            cond = self.proj(x) * self.embedding.transpose(1, 2) 
+        elif self.latent_mode == "add":
+            cond = self.proj(x) + self.embedding.transpose(1, 2) 
+        else:   # gate
+            cond = (
+                self.value(x)
+                *
+                self.gate(x)
+                *
+                self.embedding.transpose(1, 2) 
+            )
+
+        # Temporal mixer
+        if self.temporal_mixer:
+            z = cond.permute(0,2,3,1)
+            z = self.mixer(
+                z.reshape(B*P, z.size(2), T)
+            )
+            cond = cond + z.reshape(
+                B,P,-1,T
+            ).permute(0,3,1,2)
+
+        # Context sharpening
+        if self.context == "layernorm":
+            cond = self.norm(cond)
+        elif self.context == "residual":
+            cond = cond + self.context_proj(cond)
+        elif self.context == "gate":
+            cond = cond * self.context_gate(cond)
+
+        # Coefficients
+        if self.coeff_mode == "bipartite":
+            coeff = torch.einsum(
+                "btph,btqh->btpq",
+                self.src(cond),
+                self.tgt(cond)
+            )
+        else:
+            c = (
+                F.normalize(cond, dim=-1)
+                if self.coeff_mode == "cosine"
+                else cond
+            )
+            coeff = torch.einsum(
+                "btph,btqh->btpq",
+                c,c
+            )
+        coeff = torch.tanh(coeff)
+
+        # Temporal aggregation
+        if self.pool == "mean":
+            z = cond.mean(1)
+        elif self.pool == "max":
+            z = cond.max(1).values
+        else:
+            h,r = torch.chunk(cond,2,dim=1)
+            if self.pool == "split_mean":
+                z = r.mean(1)-h.mean(1)
+            elif self.pool == "split_max":
+                z = r.max(1).values-h.max(1).values
+            else: # split_diff
+                z = r.mean(1)-h.max(1).values
+
+        # Prediction
+        pred = self.head(z) + self.bias
+        if self.orth_transformer:
+            pred = self.orth_transformer.inverse(pred)
+
+
+        return pred[:,-1,:], coeff, coeff[:,0]
 
 class MultiModalVLinear(nn.Module):
     def __init__(self, md, ld, td, N, order, h=128, device="cpu", opt=None):

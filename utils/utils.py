@@ -538,6 +538,14 @@ def write_results(args, local_model_name, ac_at,k_at_step_all, total_params,file
         
         "disable_orth_proj": args['disable_orth_proj'] if 'disable_orth_proj' in args else 0,
         "use_MoM": args['use_MoM'] if 'use_MoM' in args else 0,
+
+        "latent_mode": args['latent_mode'] if 'latent_mode' in args else 'mul',
+        "context": args['context'] if 'context' in args else 'none',
+        "pool": args['pool'] if 'pool' in args else 'split_diff',
+        "coeff_mode": args['coeff_mode'] if 'coeff_mode' in args else 'bipartite',
+        "predictor": args['predictor'] if 'predictor' in args else 'mlp',
+        "disable_orth_proj": args['disable_orth_proj'] if 'disable_orth_proj' in args else 0,
+        "use_MoM": args['use_MoM'] if 'use_MoM' in args else 0,
     }
     
 

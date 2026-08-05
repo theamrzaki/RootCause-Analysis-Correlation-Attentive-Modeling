@@ -453,7 +453,7 @@ class AERCA(nn.Module):
         else:
             raise ValueError(f"Unknown dataset {self.options['dataset']} for training")
         
-    def _training_batches_swat(self, xs, batch_size=512):
+    def _training_batches_swat(self, xs, batch_size=1024):
         import time
         import numpy as np
         import psutil
