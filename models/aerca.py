@@ -453,7 +453,7 @@ class AERCA(nn.Module):
         else:
             raise ValueError(f"Unknown dataset {self.options['dataset']} for training")
         
-    def _training_batches_swat(self, xs, batch_size=1024):
+    def _training_batches_swat(self, xs, batch_size=64):
         import time
         import numpy as np
         import psutil
@@ -1163,6 +1163,59 @@ class AERCA(nn.Module):
             us_sample = us_sample_list[i] #(1,30)
             z_scores = (-(us_sample - self.us_mean_encoder) / self.us_std_encoder)#(1,30)
 
+
+            ## =========================================================
+            ## Robust statistical RCA score
+            ## =========================================================
+            #from sklearn.preprocessing import RobustScaler
+#
+            #window_data = xs[i]          # (window, num_vars)
+#
+            #split_idx = max(1, window_data.shape[0] // 2)
+#
+            #normal_part = window_data[:split_idx]
+            #anomal_part = window_data[split_idx:]
+#
+            #robust_scores = []
+#
+            #for var in range(self.num_vars):
+#
+            #    a = normal_part[:, var]
+            #    b = anomal_part[:, var]
+#
+            #    scaler = RobustScaler().fit(a.reshape(-1, 1))
+#
+            #    zscores = scaler.transform(
+            #        b.reshape(-1, 1)
+            #    )[:, 0]
+#
+            #    # BARO score
+            #    robust_scores.append(np.max(np.abs(zscores)))
+#
+            #robust_scores = np.asarray(robust_scores)
+            #
+            #
+            ## =========================================================
+            ## Rank-based fusion
+            ## =========================================================
+            #ed_scores = z_scores[0]
+            #baro_scores = np.array(robust_scores)
+            ## rankings
+            #ed_rank = np.argsort(np.argsort(-ed_scores)) + 1
+            #baro_rank = np.argsort(np.argsort(-baro_scores)) + 1
+            #
+            #agreement = np.abs(ed_rank - baro_rank)
+            #agreement = agreement / (agreement.max() + 1e-8)
+            #
+            #alpha_dyn = 1.0 - agreement
+            #
+            #hybrid_scores = (
+            #    alpha_dyn * ed_scores +
+            #    (1.0 - alpha_dyn) * robust_scores
+            #)
+            #
+            #z_scores = hybrid_scores.reshape(1, -1)
+            
             if use_attention_fusion:
                 attn_per_lag = attn_list[i].mean(axis=2)
                 attn_importance = attn_per_lag.mean(axis=0)

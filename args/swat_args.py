@@ -55,7 +55,7 @@ def create_arg_parser():
     parser.add_argument('--temporal_mixer', type=int, default=0, choices=[0,1])
     parser.add_argument('--coeff_mode', type=str, default='bipartite', choices=['symmetric','bipartite','cosine'])
     parser.add_argument('--pool', type=str, default='split_diff', choices=['mean','max','split_mean','split_max','split_diff'])
-    parser.add_argument('--context', type=str, default='gate', choices=['none','layernorm','residual','gate'])
+    parser.add_argument('--context', type=str, default='gate', choices=['none','layernorm','residual','gate','linear_attn'])
     parser.add_argument('--predictor', type=str, default='mlp', choices=['mlp','linear'])
 
     # Dual KL arguments

@@ -11,7 +11,7 @@ import json
 #make layers import work
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-from layers.vlinear_arch import OrthTransform_multi_modal
+#from layers.vlinear_arch import OrthTransform_multi_modal
 
 class MSDS_multi_modality_full_traces:
     def __init__(self, options):

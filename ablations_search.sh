@@ -26,7 +26,7 @@ run_deep_models() {
     local temporal_mixer=${10}
 
     local main_model="aerca_based"
-    local hidden_layer_size=64
+    local hidden_layer_size=128
 
     echo "Running arch=$arch | latent=$latent_mode | context=$context | pool=$pool | seed=$seed | window=$window_size_item | coeff_mode=$coeff_mode | predictor=$predictor | temporal_mixer=$temporal_mixer"
 
@@ -70,20 +70,20 @@ run_deep_models() {
 dataset="swat"
 results_csv="Ablations_SWAT.csv"
 seeds=(1)
-window_size=(4)
+window_size=(64)
 
 
 # Ablation options
-latent_modes=("mul") #"gate"
-contexts=("gate") #"none" 
-pools=("split_max") # "split_diff"
+latent_modes=("mul" "gate") #"gate"
+contexts=("linear_attn") #"none"  "gate" "linear_attn"
+pools=("max" ) # "split_diff" "max" 
 #mul,gate,split_max,bipartite,mlp
 
 
 # fixed for now
-coeff_mode_list=("bipartite" "symmetric" "cosine")
-predictor_list=("mlp" "linear")
-temporal_mixer_list=(0 1)
+coeff_mode_list=("symmetric") # "cosine" "bipartite" 
+predictor_list=("mlp" "linear") #"mlp" "linear"
+temporal_mixer_list=(1 0) #0 
 
 
 for seed in "${seeds[@]}"; do
