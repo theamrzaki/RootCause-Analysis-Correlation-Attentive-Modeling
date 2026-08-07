@@ -117,13 +117,13 @@ temporal_mixer=(1) #0
 dataset="swat"
 results_csv="RQ_1_SWAT_ExpandedWindows.csv"
 seeds=(1) # 2 3
-window_size=(64) # 8 16 20)  # 6 10 20 NOT 20 — 20 is already done except CUTS_PLUS
+window_size=(32 16) # 8 16 20)  # 6 10 20 NOT 20 — 20 is already done except CUTS_PLUS
 
 for seed in "${seeds[@]}"; do
     for window_size_item in "${window_size[@]}"; do
+        preprocessing_data=1
+        run_deep_models $preprocessing_data $seed $window_size_item "vlinear" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer
         preprocessing_data=0
-        #run_deep_models $preprocessing_data $seed $window_size_item "vlinear" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer
-        #preprocessing_data=0
         run_deep_models $preprocessing_data $seed $window_size_item "GVAR" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer
         run_experiment_baselines $preprocessing_data $seed $window_size_item
         run_deep_models $preprocessing_data $seed $window_size_item "cLSTM" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer
@@ -140,29 +140,29 @@ done
 #-------------------SMD-----------------------
 
 
-latent_modes=("mul") #"gate"
-contexts=("linear_attn") #"none" 
-pools=("max") # "split_diff"
-coeff_mode_list=("symmetric") # "cosine" "bipartite" 
-predictor_list=("linear") #"mlp" "linear"
-temporal_mixer_list=(1) #0 
-
-dataset="wadi"
-results_csv="RQ_1_WADI_ExpandedWindows.csv"
-seeds=(1) # 2 3
-window_size=(64) # 8 16 20)  # 6 10 20 NOT 20 — 20 is already done except CUTS_PLUS
-
-for seed in "${seeds[@]}"; do
-    for window_size_item in "${window_size[@]}"; do
-        preprocessing_data=1
-        #run_deep_models $preprocessing_data $seed $window_size_item "vlinear" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer
-        #preprocessing_data=0
-        run_deep_models $preprocessing_data $seed $window_size_item "GVAR" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer
-        run_experiment_baselines $preprocessing_data $seed $window_size_item
-        run_deep_models $preprocessing_data $seed $window_size_item "cLSTM" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer
-        run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer
-    done
-done
+#latent_modes=("mul") #"gate"
+#contexts=("linear_attn") #"none" 
+#pools=("max") # "split_diff"
+#coeff_mode_list=("symmetric") # "cosine" "bipartite" 
+#predictor_list=("linear") #"mlp" "linear"
+#temporal_mixer_list=(1) #0 
+#
+#dataset="wadi"
+#results_csv="RQ_1_WADI_ExpandedWindows.csv"
+#seeds=(1) # 2 3
+#window_size=(32) # 8 16 20)  # 6 10 20 NOT 20 — 20 is already done except CUTS_PLUS
+#
+#for seed in "${seeds[@]}"; do
+#    for window_size_item in "${window_size[@]}"; do
+#        preprocessing_data=1
+#        #run_deep_models $preprocessing_data $seed $window_size_item "vlinear" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer
+#        #preprocessing_data=0
+#        run_deep_models $preprocessing_data $seed $window_size_item "GVAR" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer
+#        run_experiment_baselines $preprocessing_data $seed $window_size_item
+#        run_deep_models $preprocessing_data $seed $window_size_item "cLSTM" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer
+#        run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer
+#    done
+#done
 
 
 

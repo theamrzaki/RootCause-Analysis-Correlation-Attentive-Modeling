@@ -67,14 +67,14 @@ run_deep_models() {
 
 #-------------------SMD-----------------------
 
-dataset="swat"
-results_csv="Ablations_SWAT.csv"
+dataset="wadi"
+results_csv="RQ_1_WADI_ExpandedWindows.csv"
 seeds=(1)
-window_size=(64)
+window_size=(32)
 
 
 # Ablation options
-latent_modes=("mul" "gate") #"gate"
+latent_modes=("mul") #"gate"  "gate"
 contexts=("linear_attn") #"none"  "gate" "linear_attn"
 pools=("max" ) # "split_diff" "max" 
 #mul,gate,split_max,bipartite,mlp
@@ -82,8 +82,8 @@ pools=("max" ) # "split_diff" "max"
 
 # fixed for now
 coeff_mode_list=("symmetric") # "cosine" "bipartite" 
-predictor_list=("mlp" "linear") #"mlp" "linear"
-temporal_mixer_list=(1 0) #0 
+predictor_list=( "linear") #"mlp" "linear" "mlp"
+temporal_mixer_list=(1) #0 
 
 
 for seed in "${seeds[@]}"; do
@@ -98,7 +98,7 @@ for seed in "${seeds[@]}"; do
                         for predictor in "${predictor_list[@]}"; do
                             for temporal_mixer in "${temporal_mixer_list[@]}"; do
 
-                                preprocessing_data=0
+                                preprocessing_data=1
                                 echo "Running for seed=$seed, window_size=$window_size_item, latent_mode=$latent_mode, context=$context, pool=$pool, coeff_mode=$coeff_mode, predictor=$predictor, temporal_mixer=$temporal_mixer"
                                 run_deep_models $preprocessing_data $seed $window_size_item "vlinear" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer
 
