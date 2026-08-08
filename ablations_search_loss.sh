@@ -89,44 +89,44 @@ temporal_mixer=1
 #    gamma  = 0.5
 # ============================================================
 
-BETAs=(0.001 0.0025 0.005 0.02 0.05)
-
-for beta in "${BETAs[@]}"; do
-
-    lambda=0.5
-    gamma=0.5
-
-    echo "Running KL: Beta=$beta, Lambda=$lambda, Gamma=$gamma"
-
-    run_deep_models \
-        $preprocessing_data \
-        $seed \
-        $window_size_item \
-        "vlinear" \
-        $latent_mode \
-        $context \
-        $pool \
-        $coeff_mode \
-        $predictor \
-        $temporal_mixer \
-        $beta \
-        $lambda \
-        $gamma
-
-done
-
+#BETAs=(0.001 0.0025 0.005 0.02 0.05)
+#
+#for beta in "${BETAs[@]}"; do
+#
+#    lambda=0.5
+#    gamma=0.5
+#
+#    echo "Running KL: Beta=$beta, Lambda=$lambda, Gamma=$gamma"
+#
+#    run_deep_models \
+#        $preprocessing_data \
+#        $seed \
+#        $window_size_item \
+#        "vlinear" \
+#        $latent_mode \
+#        $context \
+#        $pool \
+#        $coeff_mode \
+#        $predictor \
+#        $temporal_mixer \
+#        $beta \
+#        $lambda \
+#        $gamma
+#
+#done
 
 # ============================================================
 # 2. SPARSITY LOSS (lambda) SENSITIVITY
-#    beta  = 0.01
-#    gamma = 0.5
+#
+# beta  = 0.005  <-- best current beta for AC@1
+# gamma = 0.5
 # ============================================================
 
-Lambdas=(0.05 0.1 0.25 0.75 1.0)
+Lambdas=(0.2 0.3 0.4 0.5 0.6 0.7)
 
 for lambda in "${Lambdas[@]}"; do
 
-    beta=0.01
+    beta=0.005
     gamma=0.5
 
     echo "Running Sparsity: Beta=$beta, Lambda=$lambda, Gamma=$gamma"
@@ -155,11 +155,10 @@ done
 #    lambda = 0.5
 # ============================================================
 
-Gammas=(0.05 0.1 0.25 0.75)
-
+Gammas=(0.05 0.25 0.35 0.45 0.5 0.55 0.65 0.75)
 for gamma in "${Gammas[@]}"; do
 
-    beta=0.01
+    beta=0.005
     lambda=0.5
 
     echo "Running Smoothness: Beta=$beta, Lambda=$lambda, Gamma=$gamma"
