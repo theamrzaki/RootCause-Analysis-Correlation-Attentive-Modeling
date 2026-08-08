@@ -80,7 +80,7 @@ class SWaT:
         df_normal = df_normal.loc[df_normal['Normal/Attack'] == 'Normal']
         # Drop unnecessary columns and downsample by taking every 10th row
         df_normal.drop(columns=[' Timestamp', 'Normal/Attack'], inplace=True)
-        df_normal = df_normal[::3].reset_index(drop=True)
+        df_normal = df_normal[::1].reset_index(drop=True)
 
         # ----------------------------
         # Clean Abnormal Data
@@ -147,7 +147,7 @@ class SWaT:
 
                 # Preserve AERCA's 10-step downsampling while making
                 # abnormal windows consistent with training window_size.
-                sampling_rate = 10
+                sampling_rate = 1
                 onset = min(index_lst)
 
                 start_idx = int(onset - (self.window_size//2) * sampling_rate)
