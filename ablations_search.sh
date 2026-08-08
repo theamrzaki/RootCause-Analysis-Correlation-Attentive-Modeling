@@ -67,10 +67,10 @@ run_deep_models() {
 
 #-------------------SMD-----------------------
 
-dataset="wadi"
-results_csv="RQ_1_WADI_ExpandedWindows.csv"
+dataset="swat"
+results_csv="RQ_1_SWAT_ExpandedWindows.csv"
 seeds=(1)
-window_size=(32)
+window_size=(64)
 
 
 # Ablation options
