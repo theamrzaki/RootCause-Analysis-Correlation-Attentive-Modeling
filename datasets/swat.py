@@ -78,7 +78,7 @@ class SWaT:
         # ----------------------------
         # Select only rows marked as 'Normal'
         df_normal = df_normal.loc[df_normal['Normal/Attack'] == 'Normal']
-        # Drop unnecessary columns and downsample by taking every 10th row
+        # Drop unnecessary columns and downsample by taking every 10th row (me: no longer 10th row, i have removed the downsampling), to make it controllable isA as its own RQ
         df_normal.drop(columns=[' Timestamp', 'Normal/Attack'], inplace=True)
         df_normal = df_normal[::1].reset_index(drop=True)
 
