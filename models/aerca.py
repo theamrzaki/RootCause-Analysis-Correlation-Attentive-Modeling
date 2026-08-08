@@ -1121,23 +1121,24 @@ class AERCA(nn.Module):
         us_all = np.concatenate(us_list, axis=0) #(1430,30)
         us_all_z_score = (-(us_all - self.us_mean_encoder) / self.us_std_encoder)# (1430,30)
 
-        us_all_z_score_pot = []
-        for i in tqdm(range(self.num_vars), desc="Calculating POT thresholds"):
-            col_data = us_all_z_score[:, i]
-            col_data = col_data[np.isfinite(col_data)]
-
-            if col_data.size == 0:
-                us_all_z_score_pot.append(0.0)
-                continue
-
-            try:
-                pot_val, _ = pot(col_data, self.risk, self.initial_level, self.num_candidates)
-            except:
-                pot_val = np.mean(col_data) + 3 * np.std(col_data)
-
-            us_all_z_score_pot.append(pot_val)
-
-        us_all_z_score_pot = np.array(us_all_z_score_pot)#(30,)
+        # as statistical models can't compute pot, we use a threshold based topk
+        #us_all_z_score_pot = []
+        #for i in tqdm(range(self.num_vars), desc="Calculating POT thresholds"):
+        #    col_data = us_all_z_score[:, i]
+        #    col_data = col_data[np.isfinite(col_data)]
+#
+        #    if col_data.size == 0:
+        #        us_all_z_score_pot.append(0.0)
+        #        continue
+#
+        #    try:
+        #        pot_val, _ = pot(col_data, self.risk, self.initial_level, self.num_candidates)
+        #    except:
+        #        pot_val = np.mean(col_data) + 3 * np.std(col_data)
+#
+        #    us_all_z_score_pot.append(pot_val)
+#
+        #us_all_z_score_pot = np.array(us_all_z_score_pot)#(30,)
 
 
         # =========================================================
@@ -1227,7 +1228,7 @@ class AERCA(nn.Module):
             current_labels = np.max(labels[i], axis=0, keepdims=True)# labels = (1430, 10, 30)
 
             try:
-                k_lst = topk(z_scores, current_labels, us_all_z_score_pot)
+                k_lst = topk(z_scores, current_labels, threshold=0.5)
                 k_at_step = topk_at_step(z_scores, current_labels)
 
                 k_all.append(k_lst)
