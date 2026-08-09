@@ -115,9 +115,9 @@ predictor=("linear") #"mlp" "linear"
 temporal_mixer=(1) #0 
 
 dataset="swat"
-results_csv="RQ_1_SWAT_NoDownsampling.csv"
+results_csv="RQ_1_SWAT_NoDownsampling_batch256.csv"
 seeds=(1) # 2 3
-window_size=(8 16 32 64) # 8 16 20)  # 6 10 20 NOT 20 — 20 is already done except CUTS_PLUS
+window_size=(32 16 12 8) # 8 16 20)  # 6 10 20 NOT 20 — 20 is already done except CUTS_PLUS
 
 for seed in "${seeds[@]}"; do
     for window_size_item in "${window_size[@]}"; do
