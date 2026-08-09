@@ -57,7 +57,7 @@ run_deep_models() {
 
 
                                     --training_aerca=1 \
-                                    --epochs=200 \
+                                    --epochs=100 \
                                     --results_csv="$results_csv" \
 
                                     --hidden_layer_size="$hidden_layer_size" \
@@ -115,9 +115,9 @@ predictor=("linear") #"mlp" "linear"
 temporal_mixer=(1) #0 
 
 dataset="swat"
-results_csv="RQ_1_SWAT_NoDownsampling_batch256.csv"
+results_csv="RQ_1_SWAT_NoDownsampling_batch256_100epochs.csv"
 seeds=(1) # 2 3
-window_size=(32 16 12 8) # 8 16 20)  # 6 10 20 NOT 20 — 20 is already done except CUTS_PLUS
+window_size=(8 16 32) # 8 16 20)  # 6 10 20 NOT 20 — 20 is already done except CUTS_PLUS
 
 for seed in "${seeds[@]}"; do
     for window_size_item in "${window_size[@]}"; do
@@ -127,10 +127,9 @@ for seed in "${seeds[@]}"; do
         run_deep_models $preprocessing_data $seed $window_size_item "GVAR" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer
         run_experiment_baselines $preprocessing_data $seed $window_size_item
         run_deep_models $preprocessing_data $seed $window_size_item "cLSTM" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer
-        run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer
+        #run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer
     done
 done
-
 
 
 
