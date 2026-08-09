@@ -10,32 +10,34 @@
             "request": "launch",
             "program": "main.py",
             "args": [
-                "--encoder_alpha", "1.0",
-                "--decoder_alpha", "1.0",
-                "--encoder_gamma", "0.2",
-                "--decoder_gamma", "0.2",
+                "--encoder_gamma", "0.5",
+                "--decoder_gamma", "0.5",
                 "--encoder_lambda", "0.5",
                 "--decoder_lambda", "0.5",
-                "--beta", "0.01",
+                "--beta", "0.005",
 
                 "--main_model", "aerca_based",
-                "--coeff_architecture", "baro",
-                "--time_freq_representation", "baro",
+                "--coeff_architecture", "vlinear",
+                "--temporal_mixer", "1",
+                "--use_MoM", "0",
+
+                "--preprocessing_data", "0",
 
                 "--lr", "1e-4",
-                "--seed", "7",
-                "--dataset", "smd",
-                "--window_size", "4",
-                "--temporal_mixer","0",
-                "--use_MoM","LinearRNNMoM",
+                "--seed", "1",
+                "--dataset", "swat",
+                "--window_size", "64",
+
+                "--latent_mode", "mul",
+                "--context", "linear_attn",
+                "--pool", "max",
+                "--coeff_mode", "symmetric",
+                "--predictor", "linear",
 
                 "--training_aerca", "0",
-                "--epochs", "20",
-                "--preprocessing_data", "0",
-                "--include_logs_and_traces", "0",
-                "--results_csv", "testing.csv",
+                "--epochs", "200",
+                "--results_csv", "RQ_1_SWAT_ExpandedWindows.csv",
 
-                "--run_case_study", "1",
                 "--hidden_layer_size", "128"
             ],
         "console": "integratedTerminal"

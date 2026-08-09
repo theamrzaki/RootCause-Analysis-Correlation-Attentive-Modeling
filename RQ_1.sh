@@ -3,7 +3,7 @@ conda activate RCAEval
 
 lrs=("1e-4")
 
-BETA_VAL=0.01
+BETA_VAL=0.005
 LAMBDA_VAL=0.5
 GAMMA_VAL=0.5
 
@@ -38,7 +38,7 @@ run_deep_models() {
 
                                     --main_model=$main_model \
                                     --coeff_architecture="$arch" \
-                                    --temporal_mixer=0 \
+                                    --temporal_mixer=$temporal_mixer\
                                     --use_MoM=0 \
 
                                     --preprocessing_data="$preprocessing_data" \
@@ -115,19 +115,19 @@ predictor=("linear") #"mlp" "linear"
 temporal_mixer=(1) #0 
 
 dataset="swat"
-results_csv="RQ_1_SWAT_ExpandedWindows.csv"
-seeds=(2 3) # 2 3
-window_size=(32 16) # 8 16 20)  # 6 10 20 NOT 20 — 20 is already done except CUTS_PLUS
+results_csv="RQ_1_SWAT_NoDownsampling.csv"
+seeds=(1) # 2 3
+window_size=(8 16 32 64) # 8 16 20)  # 6 10 20 NOT 20 — 20 is already done except CUTS_PLUS
 
 for seed in "${seeds[@]}"; do
     for window_size_item in "${window_size[@]}"; do
-        preprocessing_data=0
+        preprocessing_data=1
         run_deep_models $preprocessing_data $seed $window_size_item "vlinear" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer
         preprocessing_data=0
         run_deep_models $preprocessing_data $seed $window_size_item "GVAR" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer
         run_experiment_baselines $preprocessing_data $seed $window_size_item
         run_deep_models $preprocessing_data $seed $window_size_item "cLSTM" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer
-        #run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer
+        run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer
     done
 done
 
