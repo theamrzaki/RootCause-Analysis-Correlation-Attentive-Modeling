@@ -3,7 +3,7 @@ conda activate RCAEval
 
 lrs=("1e-4")
 
-BETA_VAL=0.01
+BETA_VAL=0.005
 LAMBDA_VAL=0.5
 GAMMA_VAL=0.5
 
@@ -25,6 +25,7 @@ run_deep_models() {
     local predictor=$9
     local temporal_mixer=${10}
 
+    local batch_size=${11}
     local main_model="aerca_based"
     local hidden_layer_size=128
 
@@ -48,13 +49,14 @@ run_deep_models() {
 
         --use_MoM=0 \
         --preprocessing_data=$preprocessing_data \
+        --batch_size=$batch_size \
 
         --lr=$lrs \
         --seed=$seed \
         --dataset=$dataset \
         --window_size=$window_size_item \
 
-        --training_aerca=1 \
+        --training_aerca=0\
         --epochs=200 \
         --results_csv=$results_csv \
 
@@ -67,24 +69,26 @@ run_deep_models() {
 
 #-------------------SMD-----------------------
 
-dataset="swat"
-results_csv="RQ_1_SWAT_ExpandedWindows.csv"
+dataset="smd"
+results_csv="Ablations_SMD.csv"
 seeds=(1)
-window_size=(64)
+window_size=(32)
 
 
 # Ablation options
 latent_modes=("mul") #"gate"  "gate"
-contexts=("linear_attn") #"none"  "gate" "linear_attn"
-pools=("max" ) # "split_diff" "max" 
+contexts=("linear_attn")
+pools=("split_diff")
 #mul,gate,split_max,bipartite,mlp
 
 
 # fixed for now
 coeff_mode_list=("symmetric") # "cosine" "bipartite" 
-predictor_list=( "linear") #"mlp" "linear" "mlp"
+predictor_list=( "linear" "mlp") #"mlp" "linear" "mlp"
 temporal_mixer_list=(1) #0 
 
+
+batch_size=256
 
 for seed in "${seeds[@]}"; do
     for window_size_item in "${window_size[@]}"; do
@@ -100,7 +104,7 @@ for seed in "${seeds[@]}"; do
 
                                 preprocessing_data=1
                                 echo "Running for seed=$seed, window_size=$window_size_item, latent_mode=$latent_mode, context=$context, pool=$pool, coeff_mode=$coeff_mode, predictor=$predictor, temporal_mixer=$temporal_mixer"
-                                run_deep_models $preprocessing_data $seed $window_size_item "vlinear" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer
+                                run_deep_models $preprocessing_data $seed $window_size_item "vlinear" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size
 
                             done
                         done

@@ -546,6 +546,8 @@ def write_results(args, local_model_name, ac_at,k_at_step_all, total_params,file
         "predictor": args['predictor'] if 'predictor' in args else 'mlp',
         "disable_orth_proj": args['disable_orth_proj'] if 'disable_orth_proj' in args else 0,
         "use_MoM": args['use_MoM'] if 'use_MoM' in args else 0,
+
+        "batch_size": args['batch_size']
     }
     
 

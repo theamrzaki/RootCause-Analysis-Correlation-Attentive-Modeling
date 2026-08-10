@@ -448,8 +448,8 @@ class AERCA(nn.Module):
         return loss, losses_to_log
     
     def _training(self, xs):
-        if self.options["dataset_name"] in ["swat","smap","smd","wadi","msds","aiops","gaia","aiops_multi_modality","msds_multi_modality"]:
-            self._training_batches_swat(xs)
+        if self.options["dataset_name"] in ["swat","smd","wadi"]:
+            self._training_batches_swat(xs, self.options.get("batch_size"))
         else:
             raise ValueError(f"Unknown dataset {self.options['dataset']} for training")
         
@@ -497,6 +497,7 @@ class AERCA(nn.Module):
                 persistent_workers=False
             )
         else:
+            print("preparing the dataloader")
             train_loader = DataLoader(
                 TensorDataset(xs_train),
                 batch_size=batch_size,
@@ -545,6 +546,7 @@ class AERCA(nn.Module):
         # =========================================================
         # TRAIN LOOP
         # =========================================================
+        print("Starting training loop...")
         for epoch in tqdm(range(self.epochs), desc="Epoch"):
 
             self.current_epoch = epoch
@@ -556,7 +558,7 @@ class AERCA(nn.Module):
             # -----------------------------
             # TRAIN STEP
             # -----------------------------
-            for (x_batch,) in train_loader:
+            for (x_batch,) in tqdm(train_loader, desc="Batch"):
 
                 x_batch = x_batch.to(self.device, non_blocking=True)
 
@@ -575,6 +577,7 @@ class AERCA(nn.Module):
             # LOGGING
             # =========================================================
             epoch_time = time.time() - epoch_start
+            # save time in seconds 
             epoch_times.append(epoch_time)
             train_losses.append(epoch_loss)
 

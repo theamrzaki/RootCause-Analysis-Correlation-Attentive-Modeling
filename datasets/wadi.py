@@ -107,11 +107,10 @@ class WADI:
                         )
                         if matched_col is not None:
                             labels[idx_range, matched_col] = 1
-
         # ----------------------------
         # 6. Downsampling (ONCE ONLY) ✅
         # ----------------------------
-        sample_rate = 20
+        sample_rate = 1
 
         df_normal = df_normal.iloc[::sample_rate].reset_index(drop=True)
         df_attack_features = df_attack_features.iloc[::sample_rate].reset_index(drop=True)
@@ -125,13 +124,13 @@ class WADI:
         #df_normal = df_normal + np.random.normal(0, 1e-6, df_normal.shape)
 
         scaler.fit(df_normal.values)
-        scaler.scale_[scaler.scale_ < 1e-4] = 1.0
+        #scaler.scale_[scaler.scale_ < 1e-4] = 1.0
 
         scaled_normal = scaler.transform(df_normal.values)
         scaled_attack = scaler.transform(df_attack_features.values)
 
-        scaled_normal = np.clip(scaled_normal, -15, 15)
-        scaled_attack = np.clip(scaled_attack, -15, 15)
+        #scaled_normal = np.clip(scaled_normal, -15, 15)
+        #scaled_attack = np.clip(scaled_attack, -15, 15)
 
         print(f"Max scaled: {np.max(scaled_attack)} | Min scaled: {np.min(scaled_attack)}")
 
@@ -175,6 +174,7 @@ class WADI:
                 test_y_lst.append(
                     labels[start_idx:end_idx]
                 )
+
         self.data_dict['x_ab_list'] = np.array(test_x_lst)
         self.data_dict['label_list'] = np.array(test_y_lst)
 

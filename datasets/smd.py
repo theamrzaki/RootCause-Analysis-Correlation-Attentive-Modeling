@@ -45,38 +45,78 @@ class SMD:
         return label_matrix
 
 
-    def process_abnormal(self, test_df, global_labels, root_cause_labels, lookback, lookahead):
+    def process_abnormal(
+        self,
+        test_df,
+        global_labels,
+        root_cause_labels,
+        sampling_rate=1
+    ):
         test_x_lst = []
         test_label_lst = []
-        
-        # We use a stride of 1 to ensure we don't miss anything
+
+        # Find all anomalous timestamps
         anomaly_indices = np.where(global_labels == 1)[0]
-        
-        if len(anomaly_indices) > 0:
-            # Group contiguous anomaly timestamps
-            events = np.split(anomaly_indices, np.where(np.diff(anomaly_indices) > 1)[0] + 1)
-            
-            for event in events:
-                # The exact moment the anomaly starts
-                onset = event[0]
-                
-                # THE ANCHOR:
-                # raw_start is placed so that the 'onset' is the first index 
-                # of the lookahead portion.
-                raw_start = onset - lookback
-                raw_end = onset + lookahead
-                
-                # Boundary check
-                if raw_start >= 0 and raw_end <= len(test_df):
-                    slice_x = test_df.values[raw_start:raw_end]
-                    slice_y = root_cause_labels[raw_start:raw_end]
-                    
-                    # We only keep slices that are the correct length and contain at least one root cause 
-                    # label of 1 in the lookahead portion (the actual anomaly window).
-                    if len(slice_x) == (lookback + lookahead) and np.any(slice_y == 1):
-                        test_x_lst.append(slice_x)
-                        test_label_lst.append(slice_y)
-                                
+
+        if len(anomaly_indices) == 0:
+            return test_x_lst, test_label_lst
+
+        # Group contiguous anomaly timestamps into separate attack events
+        events = np.split(
+            anomaly_indices,
+            np.where(np.diff(anomaly_indices) > 1)[0] + 1
+        )
+
+        for event in events:
+
+            # Same idea as SWaT:
+            # onset = min(index_lst)
+            onset = int(event[0])
+
+            # Same SWaT centered-window construction
+            start_idx = int(
+                onset - (self.window_size // 2) * sampling_rate
+            )
+
+            end_idx = int(
+                onset + (self.window_size // 2) * sampling_rate
+            )
+
+            # Boundary check
+            if start_idx < 0 or end_idx > len(test_df):
+                continue
+
+            # Extract exactly the same temporal window
+            slice_x = test_df.iloc[
+                start_idx:end_idx:sampling_rate
+            ].values
+
+            # Preserve root-cause labels
+            sampled_labels = []
+
+            for k in range(self.window_size):
+
+                chunk = root_cause_labels[
+                    start_idx + k * sampling_rate:
+                    start_idx + (k + 1) * sampling_rate
+                ]
+
+                sampled_labels.append(
+                    chunk.max(axis=0)
+                )
+
+            sampled_labels = np.array(sampled_labels)
+
+            # Make sure we actually obtained window_size samples
+            if len(slice_x) != self.window_size:
+                continue
+
+            if len(sampled_labels) != self.window_size:
+                continue
+
+            test_x_lst.append(slice_x)
+            test_label_lst.append(sampled_labels)
+
         return test_x_lst, test_label_lst
 
     def process_normal(self, combined_train, target_len):
@@ -122,11 +162,10 @@ class SMD:
             # We give it history (lookback), but we only evaluate a small, 
             # concentrated window where the anomaly actually happens (lookahead).
             m_test_x, m_test_y = self.process_abnormal(
-                test_df, 
-                global_labels, 
-                root_cause_labels, 
-                lookback=self.window_size // 2, 
-                lookahead=self.window_size // 2
+                test_df,
+                global_labels,
+                root_cause_labels,
+                sampling_rate=sampling_rate
             )
             all_test_x.extend(m_test_x)
             all_test_y.extend(m_test_y)
@@ -135,35 +174,72 @@ class SMD:
             all_train_data.append(train_df.values)
 
         # 5. Scaling 
-        scaler = RobustScaler(unit_variance=True) # Helps center the scale better
+        scaler = StandardScaler() # Helps center the scale better
         combined_train = np.concatenate(all_train_data, axis=0)
 
         # A. Log Transform + Max Clipping
         # We handle the negative/zero values first
-        combined_train = np.log1p(np.maximum(combined_train, 0))
+        #combined_train = np.log1p(np.maximum(combined_train, 0))
         
         # B. Robust Scaling with IQR check
         scaler.fit(combined_train)
-        scaled_train = scaler.transform(combined_train)
+        scaler.fit(np.concatenate(all_train_data, axis=0))
 
-        # C. THE FINAL FIX: Post-scaling Clipping
-        # Since RobustScaler doesn't bound data, we manually clip extreme 
-        # outliers to a reasonable 'Standard Deviation' equivalent (e.g., +/- 10)
-        scaled_train = np.clip(scaled_train, -10, 10)
-        x_n_list = self.process_normal(scaled_train, normal_block_len)
+        x_n_list = []
+
+        for train_data in all_train_data:
+            scaled = scaler.transform(train_data)
+            x_n_list.extend(
+                self.process_normal(scaled, normal_block_len)
+            )
 
         # 7. Apply to Test Data
         # Ensure the test data is also Logged then Scaled
         test_x_transformed = [
-            scaler.transform(np.log1p(np.maximum(x, 0))) 
+            scaler.transform(x)
             for x in all_test_x
         ]
+        #test_x_transformed = [
+        #    scaler.transform(np.log1p(np.maximum(x, 0))) 
+        #    for x in all_test_x
+        #]
         
         # 8. Update self.data_dict with the TRANSFORMED arrays
         self.data_dict['x_n_list'] = np.array(x_n_list)
         self.data_dict['x_ab_list'] = np.array(test_x_transformed)
         self.data_dict['label_list'] = np.array(all_test_y)
 
+        labels = self.data_dict['label_list']
+
+        print("label shape:", labels.shape)
+
+        for i in range(min(10, len(labels))):
+            global_y = np.any(labels[i] > 0, axis=1)
+            anomaly_pos = np.where(global_y)[0]
+
+            print(
+                i,
+                "first anomaly:",
+                anomaly_pos[0] if len(anomaly_pos) else None,
+                "last anomaly:",
+                anomaly_pos[-1] if len(anomaly_pos) else None,
+                "num anomalous:",
+                global_y.sum()
+            )
+        for i in range(min(10, len(labels))):
+            rc = labels[i] > 0
+
+            print(
+                i,
+                "RC first:",
+                np.where(np.any(rc, axis=1))[0][0]
+                if np.any(rc) else None,
+                "RC last:",
+                np.where(np.any(rc, axis=1))[0][-1]
+                if np.any(rc) else None,
+                "RC vars:",
+                np.where(np.any(rc, axis=0))[0].tolist()
+            )
         # Shuffle train data
         if self.shuffle:
             np.random.seed(self.seed)

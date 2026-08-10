@@ -26,6 +26,7 @@ def create_arg_parser():
 
     # AERCA arguments
     parser.add_argument('--window_size', type=int, default=1, help='Window size (default: 1)')
+    parser.add_argument('--batch_size', type=int, default=128, help='Batch size (default: 128)')
     parser.add_argument('--stride', type=int, default=1, help='Stride (default: 1)')
     parser.add_argument('--encoder_alpha', type=float, default=1.0, help='Encoder alpha (default: 0.5)')
     parser.add_argument('--decoder_alpha', type=float, default=1.0, help='Decoder alpha (default: 0.5)')
