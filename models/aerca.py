@@ -197,7 +197,35 @@ class AERCA(nn.Module):
         now = datetime.now()
         datetime_str = now.strftime("%d_%H%M%S_")
 
-        self.local_model_name =family_of_exp + datetime_str+ f"{str(window_size)}_{str(lr)}_{str(self.options['seed'])}_window_{str(self.window_size)}" 
+        self.local_model_name =self.model_name + "_" + datetime_str
+
+        # --- SETUP LOGGING TO FILE ---
+        # 1. Ensure the directory results_journal/logs exists
+        log_dir = os.path.join("results_journal", "logs")
+        os.makedirs(log_dir, exist_ok=True)
+
+        # 2. Construct full log file path using self.local_model_name
+        log_filepath = os.path.join(log_dir, f"{self.local_model_name}.log")
+
+        # 3. Configure file handler for the python logging module
+        file_handler = logging.FileHandler(log_filepath, mode='a')
+        file_handler.setLevel(logging.INFO)
+        file_handler.setFormatter(
+            logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        )
+
+        # 4. Attach handler to the root logger and set root logger level
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging.INFO)
+        
+        # Remove any existing file handlers to prevent writing to multiple files across runs
+        for handler in root_logger.handlers[:]:
+            if isinstance(handler, logging.FileHandler):
+                root_logger.removeHandler(handler)
+
+        root_logger.addHandler(file_handler)
+        # -----------------------------
+
         self.writer = SummaryWriter(log_dir=os.path.join(self.save_dir, "runs", self.local_model_name))
         self.init_weights()
 
@@ -389,13 +417,13 @@ class AERCA(nn.Module):
     def _training_step(self, x, add_u=True):
         nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us, attns = self.forward(x, add_u=add_u)
         loss_recon = self.mse_loss(nexts_hat, nexts)
-        logging.info('Reconstruction loss: %s', loss_recon.item())
+        #logging.info('Reconstruction loss: %s', loss_recon.item())
 
         if self.options["coeff_architecture"] in self.models_simple_next_step:
             loss_encoder_coeffs = torch.zeros((), device=self.device)
         else:
             loss_encoder_coeffs = self._sparsity_loss(encoder_coeffs, self.encoder_alpha)
-        logging.info('Encoder coeffs loss: %s', loss_encoder_coeffs.item())
+        #logging.info('Encoder coeffs loss: %s', loss_encoder_coeffs.item())
         if self.options["coeff_architecture"] == "cLSTM":
             for net in self.encoder.coeff_net.networks:
                 loss_encoder_coeffs += self._sparsity_loss_cLSTM(
@@ -404,22 +432,22 @@ class AERCA(nn.Module):
                 )
 
         loss_decoder_coeffs = self._sparsity_loss(decoder_coeffs, self.decoder_alpha) if self.options["coeff_architecture"] not in self.models_encoder_only else torch.tensor(0.0)
-        logging.info('Decoder coeffs loss: %s', loss_decoder_coeffs.item())
+        #logging.info('Decoder coeffs loss: %s', loss_decoder_coeffs.item())
 
         loss_prev_coeffs = self._sparsity_loss(prev_coeffs, self.decoder_alpha) if self.options["coeff_architecture"] not in self.models_encoder_only else torch.tensor(0.0)
-        logging.info('Prev coeffs loss: %s', loss_prev_coeffs.item())
+        #logging.info('Prev coeffs loss: %s', loss_prev_coeffs.item())
 
         loss_encoder_smooth = self._smoothness_loss(encoder_coeffs) if self.options["coeff_architecture"] not in self.models_simple_next_step else torch.tensor(0.0)
-        logging.info('Encoder smooth loss: %s', loss_encoder_smooth.item())
+        #logging.info('Encoder smooth loss: %s', loss_encoder_smooth.item())
 
         loss_decoder_smooth = self._smoothness_loss(decoder_coeffs) if self.options["coeff_architecture"] not in self.models_encoder_only else torch.tensor(0.0)
-        logging.info('Decoder smooth loss: %s', loss_decoder_smooth.item())
+        #logging.info('Decoder smooth loss: %s', loss_decoder_smooth.item())
 
         loss_prev_smooth = self._smoothness_loss(prev_coeffs) if self.options["coeff_architecture"] not in self.models_encoder_only else torch.tensor(0.0)
-        logging.info('Prev smooth loss: %s', loss_prev_smooth.item())
+        #logging.info('Prev smooth loss: %s', loss_prev_smooth.item())
 
         loss_kl = kl_div if self.options["coeff_architecture"] not in self.models_simple_next_step else torch.tensor(0.0)
-        logging.info('KL loss: %s', loss_kl.item())
+        #logging.info('KL loss: %s', loss_kl.item())
 
 
         loss = (loss_recon +
@@ -429,7 +457,7 @@ class AERCA(nn.Module):
                 self.decoder_gamma * (loss_decoder_smooth + loss_prev_smooth) +
                 self.beta * loss_kl
                 )
-        logging.info('Total loss: %s', loss.item())
+        #logging.info('Total loss: %s', loss.item())
 
         losses_to_log = {
             "loss_recon": loss_recon.item(),
@@ -464,6 +492,7 @@ class AERCA(nn.Module):
         from collections import defaultdict
         from tqdm import tqdm
 
+        print(f"batch_size: {batch_size}, dataset length: {len(xs)}")
         # =========================================================
         # SPLIT DATA (KEEP ON CPU)
         # =========================================================
@@ -571,7 +600,7 @@ class AERCA(nn.Module):
 
                 epoch_loss += loss.detach()
 
-            epoch_loss = epoch_loss.item()
+            epoch_loss = epoch_loss.item() / len(train_loader)
 
             # =========================================================
             # LOGGING
@@ -586,10 +615,7 @@ class AERCA(nn.Module):
             self.writer.add_scalar("Loss/train", epoch_loss, epoch)
             self.writer.add_scalar("Time/epoch", epoch_time, epoch)
 
-            logging.info(
-                "Epoch %d/%d | Loss: %.6f | Time: %.3fs | CPU Mem: %.2f MB",
-                epoch + 1, self.epochs, epoch_loss, epoch_time, cpu_mem_mb
-            )
+
 
             # =========================================================
             # VALIDATION
@@ -609,14 +635,16 @@ class AERCA(nn.Module):
 
                     for k, v in losses_dict.items():
                         losses_dict_validation[k] += v
-
+            val_loss /= len(val_loader)
             self.writer.add_scalar("Loss/val", val_loss, epoch)
 
             for k, v in losses_dict_validation.items():
                 self.writer.add_scalar(f"val/{k}", v, epoch)
 
-            logging.info("Val Loss: %.6f", val_loss)
-
+            logging.info(
+                "Epoch %d/%d | Loss: %.6f | Time: %.3fs | CPU Mem: %.2f MB | Val Loss: %.6f",
+                epoch + 1, self.epochs, epoch_loss, epoch_time, cpu_mem_mb, val_loss
+            )
             # =========================================================
             # EARLY STOPPING
             # =========================================================
@@ -633,6 +661,7 @@ class AERCA(nn.Module):
 
             if early_stop_counter >= 20:
                 print("Early stopping triggered.")
+                logging.info("Early stopping triggered at epoch %d", epoch + 1)
                 break
 
             if epoch % 5 == 0:

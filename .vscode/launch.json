@@ -25,8 +25,8 @@
 
                 "--lr", "1e-4",
                 "--seed", "1",
-                "--dataset", "swat",
-                "--window_size", "64",
+                "--dataset", "wadi",
+                "--window_size", "8",
 
                 "--latent_mode", "mul",
                 "--context", "linear_attn",

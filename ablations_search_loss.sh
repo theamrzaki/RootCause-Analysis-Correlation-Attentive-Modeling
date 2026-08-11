@@ -38,7 +38,7 @@ run_deep_models() {
         --encoder_gamma=$GAMMA_VAL --decoder_gamma=$GAMMA_VAL \
         --encoder_lambda=$LAMBDA_VAL --decoder_lambda=$LAMBDA_VAL \
         --beta=$BETA_VAL \
-
+        
         --main_model=$main_model \
         --coeff_architecture=$arch \
         --batch_size=$batch_size \
