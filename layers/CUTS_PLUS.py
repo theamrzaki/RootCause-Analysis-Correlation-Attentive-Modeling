@@ -166,9 +166,9 @@ class CUTS_PLUS_Wrapper(nn.Module):
             hidden_ch=hidden_dim,
             n_layers=n_layers,
             shared_weights_decoder=False 
-        ).to(device)
+        )#.to(device)
 
-        self.causal_graph = nn.Parameter(torch.randn(num_vars, num_vars)).to(device)
+        self.causal_graph = nn.Parameter(torch.randn(num_vars, num_vars))#.to(device)
 
     def forward(self, inputs: torch.Tensor):
         B, W, P = inputs.shape

@@ -1,0 +1,91 @@
+source ~/miniforge3/etc/profile.d/conda.sh
+conda activate RCAEval
+
+lrs=("1e-4")
+
+BETA_VAL=0.005
+LAMBDA_VAL=0.5
+GAMMA_VAL=0.5
+
+#-------------------------------------------------------------------
+#-------------------------deep models-------------------------------
+#-------------------------------------------------------------------
+run_deep_models() {
+    local preprocessing_data=$1
+    local seed=$2
+    local window_size_item=$3
+    local arch=$4
+    
+    local latent_mode=$5
+    local context=$6
+    local pool=$7
+    local coeff_mode=$8
+    local predictor=$9
+    local temporal_mixer=${10}
+    local batch_size=${11}
+
+    local main_model="aerca_based"
+    local hidden_layer_size=128
+
+
+    echo "Running: dataset=$dataset | seed=$seed | arch=$arch | window_size=$window_size_item | latent_mode=$latent_mode | context=$context | pool=$pool | coeff_mode=$coeff_mode | predictor=$predictor | temporal_mixer=$temporal_mixer"
+
+                                cmd="python3 main.py \
+                                        --encoder_gamma=$GAMMA_VAL --decoder_gamma=$GAMMA_VAL \
+                                        --encoder_lambda=$LAMBDA_VAL --decoder_lambda=$LAMBDA_VAL --beta=$BETA_VAL \
+
+                                    --main_model=$main_model \
+                                    --coeff_architecture="$arch" \
+                                    --temporal_mixer=$temporal_mixer\
+                                    --use_MoM=0 \
+
+                                    --preprocessing_data="$preprocessing_data" \
+
+                                    --lr="$lrs" \
+                                    --seed="$seed" \
+                                    --dataset="$dataset" \
+                                    --window_size="$window_size_item" \
+                                    --batch_size="$batch_size" \
+
+                                    --latent_mode=$latent_mode \
+                                    --context=$context \
+                                    --pool=$pool \
+                                    --coeff_mode=$coeff_mode \
+                                    --predictor=$predictor \
+                                    --temporal_mixer=$temporal_mixer \
+
+
+                                    --training_aerca=0 \
+                                    --epochs=200 \
+                                    --results_csv="$results_csv" \
+
+                                    --hidden_layer_size="$hidden_layer_size" \
+                                "
+
+                                eval $cmd
+                        
+            
+}
+
+#-------------------swat-----------------------
+
+
+latent_mode=("mul") 
+context=("linear_attn") 
+pool=("max") 
+coeff_mode=("symmetric") 
+predictor=("linear") 
+temporal_mixer=(1) 
+
+dataset="swat"
+results_csv="RQ_2_SWAT_RaspberryPi_Larger.csv"
+seeds=(1) 
+window_size_item=8
+
+for seed in "${seeds[@]}"; do
+    preprocessing_data=0
+    run_deep_models $preprocessing_data $seed $window_size_item "GVAR" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size
+    run_deep_models $preprocessing_data $seed $window_size_item "cLSTM" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size
+    run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size
+done
+

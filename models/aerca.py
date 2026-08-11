@@ -448,12 +448,12 @@ class AERCA(nn.Module):
         return loss, losses_to_log
     
     def _training(self, xs):
-        if self.options["dataset_name"] in ["swat","smap","smd","wadi","msds","aiops","gaia","aiops_multi_modality","msds_multi_modality"]:
-            self._training_batches_swat(xs)
+        if self.options["dataset_name"] in ["swat","smd","wadi"]:
+            self._training_batches_swat(xs, self.options.get("batch_size"))
         else:
             raise ValueError(f"Unknown dataset {self.options['dataset']} for training")
         
-    def _training_batches_swat(self, xs, batch_size=512):
+    def _training_batches_swat(self, xs, batch_size=256):
         import time
         import numpy as np
         import psutil
@@ -497,6 +497,7 @@ class AERCA(nn.Module):
                 persistent_workers=False
             )
         else:
+            print("preparing the dataloader")
             train_loader = DataLoader(
                 TensorDataset(xs_train),
                 batch_size=batch_size,
@@ -545,6 +546,7 @@ class AERCA(nn.Module):
         # =========================================================
         # TRAIN LOOP
         # =========================================================
+        print("Starting training loop...")
         for epoch in tqdm(range(self.epochs), desc="Epoch"):
 
             self.current_epoch = epoch
@@ -556,7 +558,7 @@ class AERCA(nn.Module):
             # -----------------------------
             # TRAIN STEP
             # -----------------------------
-            for (x_batch,) in train_loader:
+            for (x_batch,) in tqdm(train_loader, desc="Batch"):
 
                 x_batch = x_batch.to(self.device, non_blocking=True)
 
@@ -575,6 +577,7 @@ class AERCA(nn.Module):
             # LOGGING
             # =========================================================
             epoch_time = time.time() - epoch_start
+            # save time in seconds 
             epoch_times.append(epoch_time)
             train_losses.append(epoch_loss)
 
@@ -1121,23 +1124,24 @@ class AERCA(nn.Module):
         us_all = np.concatenate(us_list, axis=0) #(1430,30)
         us_all_z_score = (-(us_all - self.us_mean_encoder) / self.us_std_encoder)# (1430,30)
 
-        us_all_z_score_pot = []
-        for i in tqdm(range(self.num_vars), desc="Calculating POT thresholds"):
-            col_data = us_all_z_score[:, i]
-            col_data = col_data[np.isfinite(col_data)]
-
-            if col_data.size == 0:
-                us_all_z_score_pot.append(0.0)
-                continue
-
-            try:
-                pot_val, _ = pot(col_data, self.risk, self.initial_level, self.num_candidates)
-            except:
-                pot_val = np.mean(col_data) + 3 * np.std(col_data)
-
-            us_all_z_score_pot.append(pot_val)
-
-        us_all_z_score_pot = np.array(us_all_z_score_pot)#(30,)
+        # as statistical models can't compute pot, we use a threshold based topk
+        #us_all_z_score_pot = []
+        #for i in tqdm(range(self.num_vars), desc="Calculating POT thresholds"):
+        #    col_data = us_all_z_score[:, i]
+        #    col_data = col_data[np.isfinite(col_data)]
+#
+        #    if col_data.size == 0:
+        #        us_all_z_score_pot.append(0.0)
+        #        continue
+#
+        #    try:
+        #        pot_val, _ = pot(col_data, self.risk, self.initial_level, self.num_candidates)
+        #    except:
+        #        pot_val = np.mean(col_data) + 3 * np.std(col_data)
+#
+        #    us_all_z_score_pot.append(pot_val)
+#
+        #us_all_z_score_pot = np.array(us_all_z_score_pot)#(30,)
 
 
         # =========================================================
@@ -1163,6 +1167,59 @@ class AERCA(nn.Module):
             us_sample = us_sample_list[i] #(1,30)
             z_scores = (-(us_sample - self.us_mean_encoder) / self.us_std_encoder)#(1,30)
 
+
+            ## =========================================================
+            ## Robust statistical RCA score
+            ## =========================================================
+            #from sklearn.preprocessing import RobustScaler
+#
+            #window_data = xs[i]          # (window, num_vars)
+#
+            #split_idx = max(1, window_data.shape[0] // 2)
+#
+            #normal_part = window_data[:split_idx]
+            #anomal_part = window_data[split_idx:]
+#
+            #robust_scores = []
+#
+            #for var in range(self.num_vars):
+#
+            #    a = normal_part[:, var]
+            #    b = anomal_part[:, var]
+#
+            #    scaler = RobustScaler().fit(a.reshape(-1, 1))
+#
+            #    zscores = scaler.transform(
+            #        b.reshape(-1, 1)
+            #    )[:, 0]
+#
+            #    # BARO score
+            #    robust_scores.append(np.max(np.abs(zscores)))
+#
+            #robust_scores = np.asarray(robust_scores)
+            #
+            #
+            ## =========================================================
+            ## Rank-based fusion
+            ## =========================================================
+            #ed_scores = z_scores[0]
+            #baro_scores = np.array(robust_scores)
+            ## rankings
+            #ed_rank = np.argsort(np.argsort(-ed_scores)) + 1
+            #baro_rank = np.argsort(np.argsort(-baro_scores)) + 1
+            #
+            #agreement = np.abs(ed_rank - baro_rank)
+            #agreement = agreement / (agreement.max() + 1e-8)
+            #
+            #alpha_dyn = 1.0 - agreement
+            #
+            #hybrid_scores = (
+            #    alpha_dyn * ed_scores +
+            #    (1.0 - alpha_dyn) * robust_scores
+            #)
+            #
+            #z_scores = hybrid_scores.reshape(1, -1)
+            
             if use_attention_fusion:
                 attn_per_lag = attn_list[i].mean(axis=2)
                 attn_importance = attn_per_lag.mean(axis=0)
@@ -1174,7 +1231,7 @@ class AERCA(nn.Module):
             current_labels = np.max(labels[i], axis=0, keepdims=True)# labels = (1430, 10, 30)
 
             try:
-                k_lst = topk(z_scores, current_labels, us_all_z_score_pot)
+                k_lst = topk(z_scores, current_labels, threshold=0.5)
                 k_at_step = topk_at_step(z_scores, current_labels)
 
                 k_all.append(k_lst)
