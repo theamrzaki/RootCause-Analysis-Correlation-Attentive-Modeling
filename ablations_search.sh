@@ -106,6 +106,162 @@ coeff_mode_list=("symmetric")
 predictor_list=("linear" "mlp")
 temporal_mixer_list=(1)
 
+
+
+
+dataset="swat"
+results_csv="Ablations_SWAT_window8_MLP.csv"
+
+seeds=(1)
+window_size=(8)
+
+# ============================================================
+# Focused MLP ablation
+#
+# Fixed:
+#   latent_mode    = mul
+#   coeff_mode     = symmetric
+#   temporal_mixer = 1
+#
+# Vary:
+#   context = linear_attn / gate
+#   pool    = max / split_diff / split_max
+#   predictor = mlp
+#
+# Configurations:
+#   1. linear_attn + max        + mlp
+#   2. linear_attn + split_diff + mlp
+#   3. linear_attn + split_max  + mlp
+#   4. gate        + max        + mlp
+#   5. gate        + split_diff + mlp
+# ============================================================
+
+latent_mode="mul"
+coeff_mode="symmetric"
+predictor="mlp"
+temporal_mixer=1
+
+batch_size=512
+
+for seed in "${seeds[@]}"; do
+    for window_size_item in "${window_size[@]}"; do
+
+        # ----------------------------------------------------
+        # 1. linear attention + max + MLP
+        # ----------------------------------------------------
+        context="linear_attn"
+        pool="max"
+
+        echo "Running: context=$context, pool=$pool, predictor=$predictor"
+
+        run_deep_models \
+            0 \
+            "$seed" \
+            "$window_size_item" \
+            "vlinear" \
+            "$latent_mode" \
+            "$context" \
+            "$pool" \
+            "$coeff_mode" \
+            "$predictor" \
+            "$temporal_mixer" \
+            "$batch_size"
+
+
+        # ----------------------------------------------------
+        # 2. linear attention + split_diff + MLP
+        # ----------------------------------------------------
+        context="linear_attn"
+        pool="split_diff"
+
+        echo "Running: context=$context, pool=$pool, predictor=$predictor"
+
+        run_deep_models \
+            0 \
+            "$seed" \
+            "$window_size_item" \
+            "vlinear" \
+            "$latent_mode" \
+            "$context" \
+            "$pool" \
+            "$coeff_mode" \
+            "$predictor" \
+            "$temporal_mixer" \
+            "$batch_size"
+
+
+        # ----------------------------------------------------
+        # 3. linear attention + split_max + MLP
+        # ----------------------------------------------------
+        context="linear_attn"
+        pool="split_max"
+
+        echo "Running: context=$context, pool=$pool, predictor=$predictor"
+
+        run_deep_models \
+            0 \
+            "$seed" \
+            "$window_size_item" \
+            "vlinear" \
+            "$latent_mode" \
+            "$context" \
+            "$pool" \
+            "$coeff_mode" \
+            "$predictor" \
+            "$temporal_mixer" \
+            "$batch_size"
+
+
+        # ----------------------------------------------------
+        # 4. gate + max + MLP
+        # ----------------------------------------------------
+        context="gate"
+        pool="max"
+
+        echo "Running: context=$context, pool=$pool, predictor=$predictor"
+
+        run_deep_models \
+            0 \
+            "$seed" \
+            "$window_size_item" \
+            "vlinear" \
+            "$latent_mode" \
+            "$context" \
+            "$pool" \
+            "$coeff_mode" \
+            "$predictor" \
+            "$temporal_mixer" \
+            "$batch_size"
+
+
+        # ----------------------------------------------------
+        # 5. gate + split_diff + MLP
+        # ----------------------------------------------------
+        context="gate"
+        pool="split_diff"
+
+        echo "Running: context=$context, pool=$pool, predictor=$predictor"
+
+        run_deep_models \
+            0 \
+            "$seed" \
+            "$window_size_item" \
+            "vlinear" \
+            "$latent_mode" \
+            "$context" \
+            "$pool" \
+            "$coeff_mode" \
+            "$predictor" \
+            "$temporal_mixer" \
+            "$batch_size"
+
+    done
+done
+
+
+
+
+seeds=(2)
 for seed in "${seeds[@]}"; do
     for window_size_item in "${window_size[@]}"; do
 
