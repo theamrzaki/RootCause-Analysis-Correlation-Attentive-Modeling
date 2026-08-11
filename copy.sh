@@ -14,9 +14,9 @@ sudo chown -R $(whoami) "/home/db2003/Desktop/Amr/(TSE) RootCause-Analysis-Corre
 
 DATASET_ROOT="/home/db2003/Desktop/Amr/(TSE) RootCause-Analysis-Correlation-Attentive-Modeling/datasets"
 
-dataset="smd"
-windows_list=() #4
-num_vars=38
+dataset="swat"
+windows_list=(8) #4
+num_vars=51
 
 for window in "${windows_list[@]}"; do
     model_file=${DATASET_ROOT}/${dataset}/window_${window}_vars_${num_vars}
@@ -56,10 +56,10 @@ done
 
 
 #!/bin/bash
-MODEL_NAMES=("vlinear") # )"cLSTM" "GVAR" "vlinear" "CUTS_PLUS"
-DATASET_NAMES=("smd") # "gaia")
+MODEL_NAMES=("cLSTM" "GVAR" "CUTS_PLUS") # )"cLSTM" "GVAR" "vlinear" "CUTS_PLUS"
+DATASET_NAMES=("swat") # "gaia")
 SEEDS=(1)
-windows_list=(4) #4
+windows_list=(8) #4
 for seed in "${SEEDS[@]}"; do
     for model in "${MODEL_NAMES[@]}"; do
         for dataset in "${DATASET_NAMES[@]}"; do
