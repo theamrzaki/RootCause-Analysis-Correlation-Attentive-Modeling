@@ -28,159 +28,624 @@ class WADI:
         df.columns = new_cols
         return df
 
-    def generate_example(self):
-        # ----------------------------
-        # 1. Paths
-        # ----------------------------
-        normal_path = os.path.join(self.data_dir, 'WADI_14days.csv')
-        attack_path = os.path.join(self.data_dir, 'WADI_attackdata.csv')
-        label_info_path = os.path.join(self.data_dir, 'attack_description.xlsx')
 
-        # ----------------------------
+    """
+        since the WADI attack label dataset contains wrong dates (year 2047, and july instead of Oct)
+        we redefine the attacks from attack_description.xlsx in a dictionary to enable reproducibility and correct labeling of the attack data.
+    """
+    def generate_example(self):
+        # ============================================================
+        # 1. Paths
+        # ============================================================
+
+        normal_path = os.path.join(
+            self.data_dir,
+            "WADI_14days.csv"
+        )
+
+        attack_path = os.path.join(
+            self.data_dir,
+            "WADI_attackdata.csv"
+        )
+
+
+        # ============================================================
         # 2. Load Normal Data
-        # ----------------------------
-        temp_headers = pd.read_csv(normal_path, skiprows=3, nrows=0).columns.tolist()
-        df_normal = pd.read_csv(normal_path, skiprows=1000, names=temp_headers)
-        df_normal = self.clean_column_names(df_normal)
+        # ============================================================
+
+        temp_headers = pd.read_csv(
+            normal_path,
+            skiprows=3,
+            nrows=0
+        ).columns.tolist()
+
+        df_normal = pd.read_csv(
+            normal_path,
+            skiprows=1000,
+            names=temp_headers
+        )
+
+        df_normal = self.clean_column_names(
+            df_normal
+        )
 
         df_normal.fillna(0, inplace=True)
-        df_normal.drop(columns=[c for c in ['Row', 'Date', 'Time'] if c in df_normal.columns], inplace=True)
+
+        df_normal.drop(
+            columns=[
+                c for c in ["Row", "Date", "Time"]
+                if c in df_normal.columns
+            ],
+            inplace=True
+        )
+
         df_normal.ffill(inplace=True)
         df_normal.bfill(inplace=True)
 
-        print(f"Normal shape: {df_normal.shape}")
+        print(
+            f"Normal shape: {df_normal.shape}"
+        )
 
-        # ----------------------------
+
+        # ============================================================
         # 3. Load Attack Data
-        # ----------------------------
-        df_attack = pd.read_csv(attack_path)
-        df_attack = self.clean_column_names(df_attack)
+        # ============================================================
+
+        df_attack = pd.read_csv(
+            attack_path
+        )
+
+        df_attack = self.clean_column_names(
+            df_attack
+        )
 
         df_attack.fillna(0, inplace=True)
+
         df_attack.ffill(inplace=True)
         df_attack.bfill(inplace=True)
 
-        df_attack['Datetime'] = pd.to_datetime(df_attack['Date'] + ' ' + df_attack['Time'])
+        df_attack["Datetime"] = pd.to_datetime(
+            df_attack["Date"] + " " + df_attack["Time"]
+        )
 
-        print(f"Attack shape: {df_attack.shape}")
+        print(
+            f"Attack shape: {df_attack.shape}"
+        )
 
-        # ----------------------------
-        # 4. Align Features
-        # ----------------------------
+
+        # ============================================================
+        # 4. Verify Attack Data Range
+        # ============================================================
+
+        print(
+            "\n========== WADI ATTACK DATA RANGE =========="
+        )
+
+        print(
+            "Start:",
+            df_attack["Datetime"].min()
+        )
+
+        print(
+            "End:  ",
+            df_attack["Datetime"].max()
+        )
+
+        print(
+            "Dates:",
+            sorted(
+                df_attack["Datetime"].dt.date.unique()
+            )
+        )
+
+        print(
+            "============================================\n"
+        )
+
+
+        # ============================================================
+        # 5. Align Features
+        # ============================================================
+
         common_sensors = df_normal.columns.tolist()
-        df_attack_features = df_attack[common_sensors].copy()
 
-        # ----------------------------
-        # 5. Labeling (FULL RESOLUTION) ✅
-        # ----------------------------
-        labels = np.zeros((len(df_attack), len(common_sensors)))
+        df_attack_features = (
+            df_attack[common_sensors]
+            .copy()
+        )
 
-        if os.path.exists(label_info_path):
-            df_label_meta = pd.read_excel(label_info_path, skiprows=4)
-            df_label_meta = df_label_meta.dropna(subset=['Start Time', 'End Time'])
 
-            print(df_label_meta[['Date','Start Time','End Time','Attack Point (s)']])
-            print("Number of attack rows:", len(df_label_meta))
+        # ============================================================
+        # 6. Reproducible WADI Attack Specification
+        # ============================================================
 
-            col_map = {col.upper(): i for i, col in enumerate(common_sensors)}
+        WADI_ATTACKS = {
 
-            for _, row in df_label_meta.iterrows():
-                date_val = str(row['Date']).split(' ')[0]
-                start_dt = pd.to_datetime(date_val + ' ' + str(row['Start Time']))
-                end_dt   = pd.to_datetime(date_val + ' ' + str(row['End Time']))
+            1: {
+                "date": "2017-10-09",
+                "start": "19:25:00",
+                "end": "19:50:16",
+                "sensors": ["1MV001"],
+            },
 
-                points = str(row['Attack Point (s)']) \
-                            .replace('\n', ',') \
-                            .replace('and', ',') \
-                            .split(',')
+            2: {
+                "date": "2017-10-10",
+                "start": "10:24:10",
+                "end": "10:34:00",
+                "sensors": ["1FIT001"],
+            },
 
-                mask = (df_attack['Datetime'] >= start_dt) & (df_attack['Datetime'] <= end_dt)
-                idx_range = np.where(mask)[0]
+            3: {
+                "date": "2017-10-10",
+                "start": "10:55:00",
+                "end": "11:24:00",
+                "sensors": ["2LIT002"],
+            },
 
-                if len(idx_range) > 0:
-                    for p in points:
-                        p_clean = p.strip().upper()
-                        matched_col = next(
-                            (c_idx for name, c_idx in col_map.items()
-                            if p_clean in name.replace('_', '')),
-                            None
-                        )
-                        if matched_col is not None:
-                            labels[idx_range, matched_col] = 1
-        # ----------------------------
-        # 6. Downsampling (ONCE ONLY) ✅
-        # ----------------------------
+            4: {
+                "date": "2017-10-10",
+                "start": "11:07:46",
+                "end": "11:12:15",
+                "sensors": ["1AIT001"],
+            },
+
+            5: {
+                "date": "2017-10-10",
+                "start": "11:30:40",
+                "end": "11:44:50",
+                "sensors": [
+                    "2MCV101",
+                    "2MCV201",
+                    "2MCV301",
+                    "2MCV401",
+                    "2MCV501",
+                    "2MCV601",
+                ],
+            },
+
+            6: {
+                "date": "2017-10-10",
+                "start": "13:39:30",
+                "end": "13:50:40",
+                "sensors": [
+                    "2MCV101",
+                    "2MCV201",
+                ],
+            },
+
+            7: {
+                "date": "2017-10-10",
+                "sub_events": [
+                    {
+                        "start": "14:48:17",
+                        "end": "14:59:55",
+                        "sensors": ["1AIT002"],
+                    },
+                    {
+                        "start": "14:53:44",
+                        "end": "15:00:32",
+                        "sensors": ["2MV003"],
+                    },
+                ],
+            },
+
+            8: {
+                "date": "2017-10-10",
+                "start": "17:40:00",
+                "end": "17:49:40",
+                "sensors": ["2MCV007"],
+            },
+
+            9: {
+                "date": "2017-10-11",
+                "start": "10:55:00",
+                "end": "10:56:27",
+                "sensors": [
+                    "1-P-005",
+                    "1-P-006",
+                ],
+            },
+
+            10: {
+                "date": "2017-10-11",
+                "start": "11:17:54",
+                "end": "11:31:20",
+                "sensors": ["1MV001"],
+            },
+
+            11: {
+                "date": "2017-10-11",
+                "start": "11:36:31",
+                "end": "11:47:00",
+                "sensors": ["2MCV007"],
+            },
+
+            12: {
+                "date": "2017-10-11",
+                "start": "11:59:00",
+                "end": "12:05:00",
+                "sensors": ["2MCV007"],
+            },
+
+            13: {
+                "date": "2017-10-11",
+                "start": "12:07:30",
+                "end": "12:10:52",
+                "sensors": ["2PIC003"],
+            },
+
+            14: {
+                "date": "2017-10-11",
+                "start": "12:16:00",
+                "end": "12:25:36",
+                "sensors": [
+                    "1P001",
+                    "1P003",
+                ],
+            },
+
+            15: {
+                "date": "2017-10-11",
+                "start": "15:26:30",
+                "end": "15:37:00",
+                "sensors": ["2LIT002"],
+            },
+        }
+
+
+        # ============================================================
+        # 7. Explicit WADI Sensor Mapping
+        # ============================================================
+
+        WADI_SENSOR_MAP = {
+
+            "1AIT001": "1_AIT_001_PV",
+            "1AIT002": "1_AIT_002_PV",
+            "1FIT001": "1_FIT_001_PV",
+            "1MV001": "1_MV_001_STATUS",
+
+            "1P001": "1_P_001_STATUS",
+            "1P003": "1_P_003_STATUS",
+            "1-P-005": "1_P_005_STATUS",
+            "1-P-006": "1_P_006_STATUS",
+
+            "2LIT002": "2_LT_002_PV",
+
+            "2MCV007": "2_MCV_007_CO",
+            "2MCV101": "2_MCV_101_CO",
+            "2MCV201": "2_MCV_201_CO",
+            "2MCV301": "2_MCV_301_CO",
+            "2MCV401": "2_MCV_401_CO",
+            "2MCV501": "2_MCV_501_CO",
+            "2MCV601": "2_MCV_601_CO",
+
+            "2MV003": "2_MV_003_STATUS",
+
+            "2PIC003": "2_PIC_003_PV",
+        }
+
+
+        # ============================================================
+        # 8. Validate Sensor Mapping
+        # ============================================================
+
+        sensor_to_idx = {
+            sensor: idx
+            for idx, sensor in enumerate(common_sensors)
+        }
+
+        for attack_sensor, csv_sensor in WADI_SENSOR_MAP.items():
+
+            if csv_sensor not in sensor_to_idx:
+
+                raise ValueError(
+                    f"WADI sensor mapping invalid: "
+                    f"{attack_sensor} -> {csv_sensor}"
+                )
+
+
+        # ============================================================
+        # 9. Generate Root-Cause Labels
+        # ============================================================
+
+        labels = np.zeros(
+            (
+                len(df_attack),
+                len(common_sensors)
+            ),
+            dtype=np.float32
+        )
+
+
+        for attack_id, attack in WADI_ATTACKS.items():
+
+            date = attack["date"]
+
+            if "sub_events" in attack:
+
+                events = attack["sub_events"]
+
+            else:
+
+                events = [{
+                    "start": attack["start"],
+                    "end": attack["end"],
+                    "sensors": attack["sensors"],
+                }]
+
+
+            for event in events:
+
+                start_dt = pd.Timestamp(
+                    f"{date} {event['start']}"
+                )
+
+                end_dt = pd.Timestamp(
+                    f"{date} {event['end']}"
+                )
+
+                mask = (
+                    (df_attack["Datetime"] >= start_dt)
+                    &
+                    (df_attack["Datetime"] <= end_dt)
+                )
+
+                idx_range = np.flatnonzero(mask)
+
+                if len(idx_range) == 0:
+
+                    raise ValueError(
+                        f"Attack {attack_id} has no "
+                        f"matching samples: "
+                        f"{start_dt} -> {end_dt}"
+                    )
+
+
+                for attack_sensor in event["sensors"]:
+
+                    csv_sensor = (
+                        WADI_SENSOR_MAP[
+                            attack_sensor
+                        ]
+                    )
+
+                    sensor_idx = (
+                        sensor_to_idx[csv_sensor]
+                    )
+
+                    labels[
+                        idx_range,
+                        sensor_idx
+                    ] = 1.0
+
+
+        # ============================================================
+        # 10. Label Diagnostics
+        # ============================================================
+
+        print(
+            "\n========== WADI LABELING SUMMARY =========="
+        )
+
+        print(
+            f"Attack definitions: {len(WADI_ATTACKS)}"
+        )
+
+        print(
+            f"Sensors:            {len(common_sensors)}"
+        )
+
+        print(
+            f"Positive labels:    {int(labels.sum())}"
+        )
+
+        print(
+            "\nAttack-specific labels:"
+        )
+
+        for attack_id, attack in WADI_ATTACKS.items():
+
+            if "sub_events" in attack:
+
+                sensors = [
+                    sensor
+                    for event in attack["sub_events"]
+                    for sensor in event["sensors"]
+                ]
+
+            else:
+
+                sensors = attack["sensors"]
+
+            print(
+                f"Attack {attack_id:2d}: "
+                f"{', '.join(sensors)}"
+            )
+
+        print(
+            "============================================\n"
+        )
+
+
+        # ============================================================
+        # 11. Downsampling
+        # ============================================================
+
         sample_rate = 1
 
-        df_normal = df_normal.iloc[::sample_rate].reset_index(drop=True)
-        df_attack_features = df_attack_features.iloc[::sample_rate].reset_index(drop=True)
-        df_attack = df_attack.iloc[::sample_rate].reset_index(drop=True)
+        df_normal = (
+            df_normal
+            .iloc[::sample_rate]
+            .reset_index(drop=True)
+        )
+
+        df_attack_features = (
+            df_attack_features
+            .iloc[::sample_rate]
+            .reset_index(drop=True)
+        )
+
+        df_attack = (
+            df_attack
+            .iloc[::sample_rate]
+            .reset_index(drop=True)
+        )
+
         labels = labels[::sample_rate]
 
-        # ----------------------------
-        # 7. Scaling
-        # ----------------------------
+
+        # ============================================================
+        # 12. Scaling
+        # ============================================================
+
         scaler = StandardScaler()
-        #df_normal = df_normal + np.random.normal(0, 1e-6, df_normal.shape)
 
-        scaler.fit(df_normal.values)
-        #scaler.scale_[scaler.scale_ < 1e-4] = 1.0
+        scaler.fit(
+            df_normal.values
+        )
 
-        scaled_normal = scaler.transform(df_normal.values)
-        scaled_attack = scaler.transform(df_attack_features.values)
+        scaled_normal = scaler.transform(
+            df_normal.values
+        )
 
-        #scaled_normal = np.clip(scaled_normal, -15, 15)
-        #scaled_attack = np.clip(scaled_attack, -15, 15)
+        scaled_attack = scaler.transform(
+            df_attack_features.values
+        )
 
-        print(f"Max scaled: {np.max(scaled_attack)} | Min scaled: {np.min(scaled_attack)}")
+        print(
+            f"Max scaled: {np.max(scaled_attack)} | "
+            f"Min scaled: {np.min(scaled_attack)}"
+        )
 
-        # ----------------------------
-        # 8. Segment Normal Data
-        # ----------------------------
+        print("\n========== SCALER DIAGNOSTICS ==========")
+        for i, sensor in enumerate(common_sensors):
+            print(
+                f"{i:3d} {sensor:30s} "
+                f"mean={scaler.mean_[i]:12.6f} "
+                f"std={scaler.scale_[i]:12.6f}"
+            )
+        small_scale = np.where(scaler.scale_ < 1e-6)[0]
+        print("Near-zero scale sensors:")
+        for i in small_scale:
+            print(i, common_sensors[i], scaler.scale_[i])
+
+        # ============================================================
+        # 13. Normal Windows
+        # ============================================================
+
         x_n_list = [
-            scaled_normal[i:i+self.window_size]
+            scaled_normal[i:i + self.window_size]
             for i in range(
                 0,
-                len(scaled_normal)-self.window_size,
+                len(scaled_normal) - self.window_size,
                 self.window_size
             )
         ]
-        self.data_dict['x_n_list'] = np.array(x_n_list)
-        
 
-        # ----------------------------
-        # 9. Segment Attack Data (SWaT-style) ✅
-        # ----------------------------
-        global_labels = (labels.sum(axis=1) > 0).astype(int)
-        anomaly_starts = np.where(np.diff(global_labels) > 0)[0] + 1  # fix alignment
+        self.data_dict["x_n_list"] = np.asarray(
+            x_n_list,
+            dtype=np.float32
+        )
+
+
+        # ============================================================
+        # 14. Attack Windows
+        # ============================================================
 
         test_x_lst = []
         test_y_lst = []
 
-        #for start_idx in anomaly_starts:
-        #    s = int(start_idx - 2 * self.window_size)
-        #    e = int(start_idx + 1 * self.window_size)
-#
-        #    if s >= 0 and e <= len(scaled_attack):
-        #        test_x_lst.append(scaled_attack[s:e])
-        #        test_y_lst.append(labels[s:e])
-        for onset in anomaly_starts:
-            start_idx = int(onset - self.window_size//2)
-            end_idx = int(onset + self.window_size//2)
-            if start_idx >=0 and end_idx <= len(scaled_attack):
-                test_x_lst.append(
-                    scaled_attack[start_idx:end_idx]
+        half_window = self.window_size // 2
+
+
+        for attack_id, attack in WADI_ATTACKS.items():
+
+            date = attack["date"]
+
+            if "sub_events" in attack:
+
+                events = attack["sub_events"]
+
+            else:
+
+                events = [{
+                    "start": attack["start"],
+                    "end": attack["end"],
+                    "sensors": attack["sensors"],
+                }]
+
+
+            # Earliest event onset
+            attack_start = min(
+                pd.Timestamp(
+                    f"{date} {event['start']}"
                 )
-                test_y_lst.append(
-                    labels[start_idx:end_idx]
+                for event in events
+            )
+
+
+            onset_idx = np.searchsorted(
+                df_attack["Datetime"].values,
+                attack_start.to_datetime64()
+            )
+
+
+            start_idx = (
+                onset_idx - half_window
+            )
+
+            end_idx = (
+                onset_idx + half_window
+            )
+
+
+            if (
+                start_idx < 0
+                or
+                end_idx > len(scaled_attack)
+            ):
+
+                raise ValueError(
+                    f"Attack {attack_id} window "
+                    f"outside data range"
                 )
 
-        self.data_dict['x_ab_list'] = np.array(test_x_lst)
-        self.data_dict['label_list'] = np.array(test_y_lst)
 
-        # ----------------------------
-        # 10. Metadata
-        # ----------------------------
+            test_x_lst.append(
+                scaled_attack[
+                    start_idx:end_idx
+                ]
+            )
+
+            test_y_lst.append(
+                labels[
+                    start_idx:end_idx
+                ]
+            )
+
+
+            print(
+                f"Attack {attack_id:2d}: "
+                f"onset={attack_start} | "
+                f"indices={start_idx}:{end_idx}"
+            )
+
+
+        self.data_dict["x_ab_list"] = np.asarray(
+            test_x_lst,
+            dtype=np.float32
+        )
+
+        self.data_dict["label_list"] = np.asarray(
+            test_y_lst,
+            dtype=np.float32
+        )
+
+
+        # ============================================================
+        # 15. Metadata
+        # ============================================================
+
         self.num_vars = df_normal.shape[1]
 
         self.binary_flags = np.array([
@@ -188,13 +653,22 @@ class WADI:
             for col in common_sensors
         ])
 
-        # ----------------------------
-        # 11. Shuffle
-        # ----------------------------
+
+        # ============================================================
+        # 16. Shuffle Normal Data Only
+        # ============================================================
+
         if self.shuffle:
+
             np.random.seed(self.seed)
-            idx = np.random.permutation(len(self.data_dict['x_n_list']))
-            self.data_dict['x_n_list'] = self.data_dict['x_n_list'][idx]
+
+            idx = np.random.permutation(
+                len(self.data_dict["x_n_list"])
+            )
+
+            self.data_dict["x_n_list"] = (
+                self.data_dict["x_n_list"][idx]
+            )
 
     def save_data(self):
         """
