@@ -57,7 +57,7 @@ run_deep_models() {
         --window_size=$window_size_item \
 
         --training_aerca=1\
-        --epochs=200 \
+        --epochs=50 \
         --results_csv=$results_csv \
 
         --hidden_layer_size=$hidden_layer_size"
@@ -69,14 +69,8 @@ run_deep_models() {
 
 #-------------------SMD-----------------------
 
-dataset="swat"
-results_csv="Ablations_SWAT_window8.csv"
-seeds=(1)
-window_size=(8)
 
 
-dataset="swat"
-results_csv="Ablations_SWAT_window8.csv"
 seeds=(1)
 window_size=(8)
 
@@ -109,8 +103,8 @@ temporal_mixer_list=(1)
 
 
 
-dataset="swat"
-results_csv="Ablations_SWAT_window8_MLP.csv"
+dataset="wadi"
+results_csv="Ablations_WADI_window8_MLP.csv"
 
 seeds=(1)
 window_size=(8)
@@ -261,7 +255,7 @@ done
 
 
 
-seeds=(2)
+seeds=(1)
 for seed in "${seeds[@]}"; do
     for window_size_item in "${window_size[@]}"; do
 
