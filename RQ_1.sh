@@ -78,7 +78,7 @@ run_experiment_baselines() {
    local preprocessing_data=$1
    local seed=$2
    local window_size_item=$3
-   local coeff_architecture=("baro" ) #"torai" "rcd"
+   local coeff_architecture=("baro" "torai" "rcd") #
    local main_model="aerca_based" 
    for arch in "${coeff_architecture[@]}"; do
        echo "Running: dataset=$dataset | seed=$seed | arch=$arch | window_size=$window_size_item"
@@ -126,11 +126,23 @@ for seed in "${seeds[@]}"; do
     #run_deep_models $preprocessing_data $seed $window_size_item "vlinear" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs
     #run_deep_models $preprocessing_data $seed $window_size_item "GVAR" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs
     preprocessing_data=0
+    #run_experiment_baselines $preprocessing_data $seed $window_size_item
+    #run_deep_models $preprocessing_data $seed $window_size_item "cLSTM" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs
+    run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs
     run_experiment_baselines $preprocessing_data $seed $window_size_item
-    run_deep_models $preprocessing_data $seed $window_size_item "cLSTM" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs
-    #run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs
 done
 
+
+seeds=(2)
+for seed in "${seeds[@]}"; do
+    preprocessing_data=0
+    run_deep_models $preprocessing_data $seed $window_size_item "vlinear" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs
+    run_deep_models $preprocessing_data $seed $window_size_item "GVAR" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs
+    #preprocessing_data=0
+    run_experiment_baselines $preprocessing_data $seed $window_size_item
+    run_deep_models $preprocessing_data $seed $window_size_item "cLSTM" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs
+    run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs
+done
 
 
 
