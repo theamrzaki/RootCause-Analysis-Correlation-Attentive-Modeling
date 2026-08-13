@@ -34,6 +34,8 @@ run_deep_models() {
                                         --encoder_gamma=$GAMMA_VAL --decoder_gamma=$GAMMA_VAL \
                                         --encoder_lambda=$LAMBDA_VAL --decoder_lambda=$LAMBDA_VAL --beta=$BETA_VAL \
 
+                                    --device=cpu \
+                                    
                                     --main_model=$main_model \
                                     --coeff_architecture="$arch" \
                                     --temporal_mixer=$temporal_mixer\
@@ -81,11 +83,13 @@ dataset="swat"
 results_csv="RQ_2_SWAT_RaspberryPi_Larger.csv"
 seeds=(1) 
 window_size_item=8
+batch_size=512
 
 for seed in "${seeds[@]}"; do
     preprocessing_data=0
     run_deep_models $preprocessing_data $seed $window_size_item "GVAR" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size
     run_deep_models $preprocessing_data $seed $window_size_item "cLSTM" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size
     run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size
+    run_deep_models $preprocessing_data $seed $window_size_item "vlinear" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size
 done
 

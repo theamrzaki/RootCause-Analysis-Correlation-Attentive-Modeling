@@ -431,7 +431,7 @@ def topk_at_step_multi_modality_new(scores, labels, k_range=10):
 
     return np.array(k_lst)
 
-def write_results(args, local_model_name, ac_at,k_at_step_all, total_params,file_name='result.csv',
+def write_results(args, local_model_name, ac_at,k_at_step_all, total_params,flops,file_name='result.csv',
                    metric_results=None,
                    node_results=None,
                    service_results=None,
@@ -463,6 +463,7 @@ def write_results(args, local_model_name, ac_at,k_at_step_all, total_params,file
         'Avg@10': np.mean(k_at_step_all),
 
         'total_params': total_params,
+        'flops': flops,
         'window_size': args['window_size'],
         'early_stopping': args['early_stopping'],
         'num_epochs': args['epochs'],

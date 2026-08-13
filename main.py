@@ -4,7 +4,7 @@ import logging
 import argparse
 import numpy as np
 
-from datasets import linear, lotka_volterra, lorenz96, swat, nonlinear, msds, smd, wadi, aiops, gaia, aiops_multi_modality, msds_multi_modality
+from datasets import linear, lotka_volterra, lorenz96, swat, nonlinear, msds, smd, wadi 
 from args import linear_args, lotka_volterra_args, lorenz96_args, swat_args, msds_args, nonlinear_args, smd_args, wadi_args, aiops_args, gaia_args, msds_multi_modal_args
 from models import aerca
 from utils import utils
@@ -57,12 +57,6 @@ def main(argv):
             "log_file": "lorenz96.log",
             "use_slice": True
         },
-        "msds": {
-            "args": msds_args.create_arg_parser,
-            "dataset_class": msds.MSDS,
-            "log_file": "msds.log",
-            "use_slice": False
-        },
         "swat": {
             "args": swat_args.create_arg_parser,
             "dataset_class": swat.SWaT,
@@ -85,30 +79,6 @@ def main(argv):
             "args": wadi_args.create_arg_parser,
             "dataset_class": wadi.WADI,
             "log_file": "wadi.log",
-            "use_slice": False
-        },
-        "aiops": {
-            "args": aiops_args.create_arg_parser,
-            "dataset_class": aiops.aiops,
-            "log_file": "aiops.log",
-            "use_slice": False
-        },
-        "aiops_multi_modality": {
-            "args": aiops_args.create_arg_parser,
-            "dataset_class":  aiops_multi_modality.aiops_multi_modality,
-            "log_file": "aiops.log",
-            "use_slice": False
-        },
-        "gaia": {
-            "args": gaia_args.create_arg_parser,
-            "dataset_class": gaia.GAIA,
-            "log_file": "gaia.log",
-            "use_slice": False
-        },
-        "msds_multi_modality": {
-            "args": msds_multi_modal_args.create_arg_parser,
-            "dataset_class": msds_multi_modality.MSDS_multi_modality,
-            "log_file": "msds_multi_modality.log",
             "use_slice": False
         }
     }

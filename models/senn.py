@@ -2,7 +2,7 @@ import torch.nn as nn
 import torch
 
 
-from layers.vlinear_arch import vlinear,MultiModalVLinear
+from layers.vlinear_arch import vlinear
 from layers.cLSTM import cLSTM
 from layers.CUTS_PLUS import CUTS_PLUS_Wrapper
 from layers.Eadro import MainModel as Eadro 
