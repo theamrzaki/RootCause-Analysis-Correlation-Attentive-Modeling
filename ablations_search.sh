@@ -69,13 +69,6 @@ run_deep_models() {
 
 #-------------------SMD-----------------------
 
-
-
-seeds=(1)
-window_size=(8)
-
-batch_size=512
-
 # Focused ablation:
 #
 # Baseline:
@@ -92,15 +85,6 @@ batch_size=512
 #
 # Predictor:
 # mlp
-
-latent_modes=("mul" "gate" "add")
-contexts=("linear_attn" "gate")
-pools=("max" "split_diff" "split_max")
-coeff_mode_list=("symmetric")
-predictor_list=("linear" "mlp")
-temporal_mixer_list=(1)
-
-
 
 
 dataset="wadi"
@@ -130,130 +114,7 @@ window_size=(8)
 #   5. gate        + split_diff + mlp
 # ============================================================
 
-latent_mode="mul"
-coeff_mode="symmetric"
-predictor="mlp"
-temporal_mixer=1
-
 batch_size=512
-
-for seed in "${seeds[@]}"; do
-    for window_size_item in "${window_size[@]}"; do
-
-        # ----------------------------------------------------
-        # 1. linear attention + max + MLP
-        # ----------------------------------------------------
-        context="linear_attn"
-        pool="max"
-
-        echo "Running: context=$context, pool=$pool, predictor=$predictor"
-
-        run_deep_models \
-            0 \
-            "$seed" \
-            "$window_size_item" \
-            "vlinear" \
-            "$latent_mode" \
-            "$context" \
-            "$pool" \
-            "$coeff_mode" \
-            "$predictor" \
-            "$temporal_mixer" \
-            "$batch_size"
-
-
-        # ----------------------------------------------------
-        # 2. linear attention + split_diff + MLP
-        # ----------------------------------------------------
-        context="linear_attn"
-        pool="split_diff"
-
-        echo "Running: context=$context, pool=$pool, predictor=$predictor"
-
-        run_deep_models \
-            0 \
-            "$seed" \
-            "$window_size_item" \
-            "vlinear" \
-            "$latent_mode" \
-            "$context" \
-            "$pool" \
-            "$coeff_mode" \
-            "$predictor" \
-            "$temporal_mixer" \
-            "$batch_size"
-
-
-        # ----------------------------------------------------
-        # 3. linear attention + split_max + MLP
-        # ----------------------------------------------------
-        context="linear_attn"
-        pool="split_max"
-
-        echo "Running: context=$context, pool=$pool, predictor=$predictor"
-
-        run_deep_models \
-            0 \
-            "$seed" \
-            "$window_size_item" \
-            "vlinear" \
-            "$latent_mode" \
-            "$context" \
-            "$pool" \
-            "$coeff_mode" \
-            "$predictor" \
-            "$temporal_mixer" \
-            "$batch_size"
-
-
-        # ----------------------------------------------------
-        # 4. gate + max + MLP
-        # ----------------------------------------------------
-        context="gate"
-        pool="max"
-
-        echo "Running: context=$context, pool=$pool, predictor=$predictor"
-
-        run_deep_models \
-            0 \
-            "$seed" \
-            "$window_size_item" \
-            "vlinear" \
-            "$latent_mode" \
-            "$context" \
-            "$pool" \
-            "$coeff_mode" \
-            "$predictor" \
-            "$temporal_mixer" \
-            "$batch_size"
-
-
-        # ----------------------------------------------------
-        # 5. gate + split_diff + MLP
-        # ----------------------------------------------------
-        context="gate"
-        pool="split_diff"
-
-        echo "Running: context=$context, pool=$pool, predictor=$predictor"
-
-        run_deep_models \
-            0 \
-            "$seed" \
-            "$window_size_item" \
-            "vlinear" \
-            "$latent_mode" \
-            "$context" \
-            "$pool" \
-            "$coeff_mode" \
-            "$predictor" \
-            "$temporal_mixer" \
-            "$batch_size"
-
-    done
-done
-
-
-
 
 seeds=(1)
 for seed in "${seeds[@]}"; do
@@ -278,74 +139,54 @@ for seed in "${seeds[@]}"; do
         # --------------------------------------------------
         # Latent construction ablation
         # --------------------------------------------------
-        for latent_mode in gate add; do
-
-            run_deep_models \
-                0 \
-                $seed \
-                $window_size_item \
-                "vlinear" \
-                $latent_mode \
-                "linear_attn" \
-                "max" \
-                "symmetric" \
-                "linear" \
-                1 \
-                $batch_size
-
-        done
-
-        # --------------------------------------------------
-        # Context ablation
-        # --------------------------------------------------
-        run_deep_models \
-            0 \
-            $seed \
-            $window_size_item \
-            "vlinear" \
-            "mul" \
-            "gate" \
-            "max" \
-            "symmetric" \
-            "linear" \
-            1 \
-            $batch_size
-
-        # --------------------------------------------------
-        # Pooling ablation
-        # --------------------------------------------------
-        for pool in split_diff split_max; do
-
-            run_deep_models \
-                0 \
-                $seed \
-                $window_size_item \
-                "vlinear" \
-                "mul" \
-                "linear_attn" \
-                $pool \
-                "symmetric" \
-                "linear" \
-                1 \
-                $batch_size
-
-        done
-
-        # --------------------------------------------------
-        # Prediction head ablation
-        # --------------------------------------------------
-        run_deep_models \
-            0 \
-            $seed \
-            $window_size_item \
-            "vlinear" \
-            "mul" \
-            "linear_attn" \
-            "max" \
-            "symmetric" \
-            "mlp" \
-            1 \
-            $batch_size
+        #for latent_mode in gate add; do
+#
+        #    run_deep_models \
+        #        0 \
+        #        $seed \
+        #        $window_size_item \
+        #        "vlinear" \
+        #        $latent_mode \
+        #        "linear_attn" \
+        #        "max" \
+        #        "symmetric" \
+        #        "linear" \
+        #        1 \
+        #        $batch_size
+#
+        #done
+#
+        ## --------------------------------------------------
+        ## Context ablation
+        ## --------------------------------------------------
+        #run_deep_models \
+        #    0 \
+        #    $seed \
+        #    $window_size_item \
+        #    "vlinear" \
+        #    "mul" \
+        #    "gate" \
+        #    "max" \
+        #    "symmetric" \
+        #    "linear" \
+        #    1 \
+        #    $batch_size
+#
+        ## --------------------------------------------------
+        ## Prediction head ablation
+        ## --------------------------------------------------
+        #run_deep_models \
+        #    0 \
+        #    $seed \
+        #    $window_size_item \
+        #    "vlinear" \
+        #    "mul" \
+        #    "linear_attn" \
+        #    "max" \
+        #    "symmetric" \
+        #    "mlp" \
+        #    1 \
+        #    $batch_size
 
     done
 done
