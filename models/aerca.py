@@ -70,8 +70,8 @@ class AERCA(nn.Module):
         # For nexts: (B, num_vars)
         self.nexts_proj = nn.Linear(self.num_modalities * self.num_vars_mod, self.num_vars).to(device)
 
-        self.models_encoder_only = ["GVAR","vlinear","cLSTM","CUTS_PLUS","Eadro","Anofusion"] 
-        self.models_simple_next_step = ["cLSTM","Eadro","Anofusion"]#TODO i need to reenable the sparsity, make it simple vector sparisty for cLSTM -> already done 
+        self.models_encoder_only = ["GVAR","vlinear","cLSTM","CUTS_PLUS"] 
+        self.models_simple_next_step = ["cLSTM"]
         if(self.options["coeff_architecture"] in self.models_encoder_only):
             self._log_and_print('Number of parameters in encoder: {}', self._count_parameters(self.encoder))
             self.total_params = (self._count_parameters(self.encoder)  )
