@@ -83,8 +83,14 @@ window_size=(8)
 # FIXED ARCHITECTURE
 # ============================================================
 
+           # "context": "gate",
+           # "latent_mode": "mul",
+           # "pool": "max",
+           # "coeff_mode": "symmetric",
+           # "predictor": "linear",
+
 latent_mode="mul"
-context="linear_attn"
+context="gate"
 pool="max"
 coeff_mode="symmetric"
 predictor="linear"
@@ -107,18 +113,69 @@ batch_size=512
 # Focus around the current value rather than a broad sweep.
 # ============================================================
 
-BETAs=(0.005 0.01 0.02) # 0.005 0.01 0.02) 0 0.001 0.02
+#BETAs=(0.5) # 0.005 0.01 0.02) 0 0.001 0.02 ||| 0 0.005 0.01 0.02
+#
+#for seed in "${seeds[@]}"; do
+#    for window_size_item in "${window_size[@]}"; do
+#
+#        for beta in "${BETAs[@]}"; do
+#
+#            lambda=0.5
+#            gamma=0.5
+#
+#            echo "================================================"
+#            echo "KL sensitivity"
+#            echo "seed=$seed"
+#            echo "window=$window_size_item"
+#            echo "beta=$beta"
+#            echo "lambda=$lambda"
+#            echo "gamma=$gamma"
+#            echo "================================================"
+#
+#            run_deep_models \
+#                $preprocessing_data \
+#                $seed \
+#                $window_size_item \
+#                "vlinear" \
+#                $latent_mode \
+#                $context \
+#                $pool \
+#                $coeff_mode \
+#                $predictor \
+#                $temporal_mixer \
+#                $beta \
+#                $lambda \
+#                $gamma \
+#                $batch_size
+#
+#        done
+#    done
+#done
+
+
+# ============================================================
+# 2. SPARSITY LOSS / LAMBDA SENSITIVITY
+#
+# Fixed:
+#   beta  = 0.005
+#   gamma = 0.5
+#
+# Current reference:
+#   lambda = 0.5
+# ============================================================
+
+Lambdas=(0 0.2 0.35 0.5)
 
 for seed in "${seeds[@]}"; do
     for window_size_item in "${window_size[@]}"; do
 
-        for beta in "${BETAs[@]}"; do
+        for lambda in "${Lambdas[@]}"; do
 
-            lambda=0.5
+            beta=0.01
             gamma=0.5
 
             echo "================================================"
-            echo "KL sensitivity"
+            echo "Sparsity sensitivity"
             echo "seed=$seed"
             echo "window=$window_size_item"
             echo "beta=$beta"
@@ -148,103 +205,51 @@ done
 
 
 # ============================================================
-# 2. SPARSITY LOSS / LAMBDA SENSITIVITY
+# 3. SMOOTHNESS LOSS / GAMMA SENSITIVITY
 #
 # Fixed:
-#   beta  = 0.005
-#   gamma = 0.5
+#   beta   = 0.005
+#   lambda = 0.5
 #
 # Current reference:
-#   lambda = 0.5
+#   gamma = 0.5
 # ============================================================
 
-#Lambdas=(0.2 0.35 0.5 0.65)
-#
-#for seed in "${seeds[@]}"; do
-#    for window_size_item in "${window_size[@]}"; do
-#
-#        for lambda in "${Lambdas[@]}"; do
-#
-#            beta=0.001
-#            gamma=0.5
-#
-#            echo "================================================"
-#            echo "Sparsity sensitivity"
-#            echo "seed=$seed"
-#            echo "window=$window_size_item"
-#            echo "beta=$beta"
-#            echo "lambda=$lambda"
-#            echo "gamma=$gamma"
-#            echo "================================================"
-#
-#            run_deep_models \
-#                $preprocessing_data \
-#                $seed \
-#                $window_size_item \
-#                "vlinear" \
-#                $latent_mode \
-#                $context \
-#                $pool \
-#                $coeff_mode \
-#                $predictor \
-#                $temporal_mixer \
-#                $beta \
-#                $lambda \
-#                $gamma \
-#                $batch_size
-#
-#        done
-#    done
-#done
-#
-#
-## ============================================================
-## 3. SMOOTHNESS LOSS / GAMMA SENSITIVITY
-##
-## Fixed:
-##   beta   = 0.005
-##   lambda = 0.5
-##
-## Current reference:
-##   gamma = 0.5
-## ============================================================
-#
-#Gammas=(0.25 0.4 0.5 0.6 0.75)
-#
-#for seed in "${seeds[@]}"; do
-#    for window_size_item in "${window_size[@]}"; do
-#
-#        for gamma in "${Gammas[@]}"; do
-#
-#            beta=0.005
-#            lambda=0.5
-#
-#            echo "================================================"
-#            echo "Smoothness sensitivity"
-#            echo "seed=$seed"
-#            echo "window=$window_size_item"
-#            echo "beta=$beta"
-#            echo "lambda=$lambda"
-#            echo "gamma=$gamma"
-#            echo "================================================"
-#
-#            run_deep_models \
-#                $preprocessing_data \
-#                $seed \
-#                $window_size_item \
-#                "vlinear" \
-#                $latent_mode \
-#                $context \
-#                $pool \
-#                $coeff_mode \
-#                $predictor \
-#                $temporal_mixer \
-#                $beta \
-#                $lambda \
-#                $gamma \
-#                $batch_size
-#
-#        done
-#    done
-#done
-#
+Gammas=(0 0.25 0.4 0.5)
+
+for seed in "${seeds[@]}"; do
+    for window_size_item in "${window_size[@]}"; do05
+
+        for gamma in "${Gammas[@]}"; do
+
+            beta=0.01
+            lambda=0.5
+
+            echo "================================================"
+            echo "Smoothness sensitivity"
+            echo "seed=$seed"
+            echo "window=$window_size_item"
+            echo "beta=$beta"
+            echo "lambda=$lambda"
+            echo "gamma=$gamma"
+            echo "================================================"
+
+            run_deep_models \
+                $preprocessing_data \
+                $seed \
+                $window_size_item \
+                "vlinear" \
+                $latent_mode \
+                $context \
+                $pool \
+                $coeff_mode \
+                $predictor \
+                $temporal_mixer \
+                $beta \
+                $lambda \
+                $gamma \
+                $batch_size
+
+        done
+    done
+done

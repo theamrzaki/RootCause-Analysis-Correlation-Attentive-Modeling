@@ -1,120 +1,94 @@
 #!/bin/bash
-#IP_ADDRESS="130.63.254.162" #db2003smaller
-IP_ADDRESS="130.63.100.216"
-#DEVICE_NAME="db2003smaller"
-DEVICE_NAME="db2003larger"
+IP_ADDRESS="130.63.252.156" #db2003smaller
+#IP_ADDRESS="130.63.102.199"
+DEVICE_NAME="db2003smaller"
+#DEVICE_NAME="db2003larger"
 
 
-#This sets up SSH keys so scp never asks for a password again.
-ssh-keygen -t rsa -N "" -f ~/.ssh/id_rsa
-ssh-copy-id $DEVICE_NAME@$IP_ADDRESS
+# 1. Generate SSH key only if it doesn't already exist
+if [ ! -f ~/.ssh/id_rsa ]; then
+    echo "Generating new SSH key..."
+    ssh-keygen -t rsa -N "" -f ~/.ssh/id_rsa
+fi
 
-# Give your user permission to read the source folder so you don't need sudo inside the loops
+# 2. Copy SSH key to remote (using IdentitiesOnly to prevent agent auth errors)
+echo "Ensuring SSH key is copied to $DEVICE_NAME@$IP_ADDRESS..."
+ssh-copy-id -o IdentitiesOnly=yes -i ~/.ssh/id_rsa.pub $DEVICE_NAME@$IP_ADDRESS || true
+
+# SSH/SCP flags to avoid 'Too many authentication failures'
+SSH_OPTS="-o IdentitiesOnly=yes -i ~/.ssh/id_rsa"
+
+# Fix permissions on local directory
 sudo chown -R $(whoami) "/home/db2003/Desktop/Amr/(TSE) RootCause-Analysis-Correlation-Attentive-Modeling/saved_models/"
 
 DATASET_ROOT="/home/db2003/Desktop/Amr/(TSE) RootCause-Analysis-Correlation-Attentive-Modeling/datasets"
+dataset="wadi"
+windows_list=(8)
+num_vars=127
 
-dataset="swat"
-windows_list=(8) #4
-num_vars=51
-
+# --- COPY DATASET FILES ---
 for window in "${windows_list[@]}"; do
-    model_file=${DATASET_ROOT}/${dataset}/window_${window}_vars_${num_vars}
-
     echo "---- Copying dataset files for window ${window} and num_vars ${num_vars} to $DEVICE_NAME@$IP_ADDRESS ----"
+    
+    # FIXED: Replaced '#' typo with '_' in the target path
+    REMOTE_DATASET_DIR="/home/$DEVICE_NAME/RootCause-Analysis-Correlation-Attentive-Modeling/datasets/${dataset}/window_${window}_vars_${num_vars}"
+
+    ssh $SSH_OPTS $DEVICE_NAME@$IP_ADDRESS "mkdir -p ${REMOTE_DATASET_DIR}/orth_transform_meta"
+
     data_files=(
         "${DATASET_ROOT}/${dataset}/window_${window}_vars_${num_vars}/label_list.npy"
         "${DATASET_ROOT}/${dataset}/window_${window}_vars_${num_vars}/x_ab_list.npy"
         "${DATASET_ROOT}/${dataset}/window_${window}_vars_${num_vars}/x_n_list.npy"
     )
+
     for data_file in "${data_files[@]}"; do
-        # create the destination directory on the remote server if it doesn't exist
-        ssh $DEVICE_NAME@$IP_ADDRESS "mkdir -p /home/$DEVICE_NAME/RootCause-Analysis-Correlation-Attentive-Modeling/datasets/${dataset}/window_${window}#_vars_${num_vars}/"
-        scp "$data_file" $DEVICE_NAME@$IP_ADDRESS:/home/$DEVICE_NAME/RootCause-Analysis-Correlation-Attentive-Modeling/datasets/${dataset}/window_${window}#_vars_${num_vars}/
+        scp $SSH_OPTS "$data_file" $DEVICE_NAME@$IP_ADDRESS:${REMOTE_DATASET_DIR}/
     done
 
     orth_data_file="${DATASET_ROOT}/${dataset}/window_${window}_vars_${num_vars}/orth_transform_meta/swat_q_matrix_lag${window}.npy"
-    ssh $DEVICE_NAME@$IP_ADDRESS "mkdir -p /home/$DEVICE_NAME/RootCause-Analysis-Correlation-Attentive-Modeling/datasets/${dataset}/window_${window}_vars_${num_vars}/orth_transform_meta"
-    scp "$orth_data_file" $DEVICE_NAME@$IP_ADDRESS:/home/$DEVICE_NAME/RootCause-Analysis-Correlation-Attentive-Modeling/datasets/${dataset}/window_${window}_vars_${num_vars}/orth_transform_meta/
+    scp $SSH_OPTS "$orth_data_file" $DEVICE_NAME@$IP_ADDRESS:${REMOTE_DATASET_DIR}/orth_transform_meta/
 done
 
 
-
-
-
-
-#------------------------------------------------------#
-#------------------------------------------------------#
-#------------------------------------------------------#
-#------------------------------------------------------#
-#--------------------Model Files-----------------------#
-#------------------------------------------------------#
-#------------------------------------------------------#
-#------------------------------------------------------#
-#------------------------------------------------------#
-
-
-
-#!/bin/bash
-MODEL_NAMES=("cLSTM" "GVAR" "CUTS_PLUS") # )"cLSTM" "GVAR" "vlinear" "CUTS_PLUS"
-DATASET_NAMES=("swat") # "gaia")
+# --- COPY MODEL FILES ---
+MODEL_NAMES=("cLSTM" "GVAR" "vlinear" "CUTS_PLUS")
+DATASET_NAMES=("wadi")
 SEEDS=(1)
-windows_list=(8) #4
+
+REMOTE_SAVED_MODELS="/home/$DEVICE_NAME/RootCause-Analysis-Correlation-Attentive-Modeling/saved_models/"
+ssh $SSH_OPTS $DEVICE_NAME@$IP_ADDRESS "mkdir -p ${REMOTE_SAVED_MODELS}"
+
 for seed in "${SEEDS[@]}"; do
     for model in "${MODEL_NAMES[@]}"; do
         for dataset in "${DATASET_NAMES[@]}"; do
-
             for window in "${windows_list[@]}"; do
-                echo "##### Copying model files for window ${window} and num_vars ${num_vars} to $DEVICE_NAME@$IP_ADDRESS ####"
-                #cLSTM_aiops_ws_8_seed_1_numvars_30_lower_decoder.npy
-                #cLSTM_aiops_ws_8_seed_1_numvars_30_lower_encoder.npy
-                #cLSTM_aiops_ws_8_seed_1_numvars_30_recon_mean.npy
-                #cLSTM_aiops_ws_8_seed_1_numvars_30_recon_std.npy
-                #cLSTM_aiops_ws_8_seed_1_numvars_30_recon_threshold.npy
-                #cLSTM_aiops_ws_8_seed_1_numvars_30_upper_decoder.npy
-                #cLSTM_aiops_ws_8_seed_1_numvars_30_upper_encoder.npy
-                #cLSTM_aiops_ws_8_seed_1_numvars_30_us_mean_decoder.npy
-                #cLSTM_aiops_ws_8_seed_1_numvars_30_us_mean_encoder.npy
-                #cLSTM_aiops_ws_8_seed_1_numvars_30_us_std_decoder.npy
-                #cLSTM_aiops_ws_8_seed_1_numvars_30_us_std_encoder.npy
-                #cLSTM_aiops_ws_8_seed_1_numvars_30.pt
-            
-                lower_decoder=${model}_${dataset}_ws_${window}_seed_${seed}_numvars_${num_vars}_lower_decoder.npy
-                lower_encoder=${model}_${dataset}_ws_${window}_seed_${seed}_numvars_${num_vars}_lower_encoder.npy
-                recon_mean=${model}_${dataset}_ws_${window}_seed_${seed}_numvars_${num_vars}_recon_mean.npy
-                recon_std=${model}_${dataset}_ws_${window}_seed_${seed}_numvars_${num_vars}_recon_std.npy
-                recon_threshold=${model}_${dataset}_ws_${window}_seed_${seed}_numvars_${num_vars}_recon_threshold.npy
-                upper_decoder=${model}_${dataset}_ws_${window}_seed_${seed}_numvars_${num_vars}_upper_decoder.npy
-                upper_encoder=${model}_${dataset}_ws_${window}_seed_${seed}_numvars_${num_vars}_upper_encoder.npy
-                us_mean_decoder=${model}_${dataset}_ws_${window}_seed_${seed}_numvars_${num_vars}_us_mean_decoder.npy
-                us_mean_encoder=${model}_${dataset}_ws_${window}_seed_${seed}_numvars_${num_vars}_us_mean_encoder.npy
-                us_std_decoder=${model}_${dataset}_ws_${window}_seed_${seed}_numvars_${num_vars}_us_std_decoder.npy
-                us_std_encoder=${model}_${dataset}_ws_${window}_seed_${seed}_numvars_${num_vars}_us_std_encoder.npy
-                model_file=${model}_${dataset}_ws_${window}_seed_${seed}_numvars_${num_vars}.pt
-
+                echo "##### Copying model files for $model ($dataset, window ${window}) to $DEVICE_NAME@$IP_ADDRESS ####"
 
                 models_to_copy=(
-                    "$lower_decoder"
-                    "$lower_encoder"
-                    "$recon_mean"
-                    "$recon_std"
-                    "$recon_threshold"
-                    "$upper_decoder"
-                    "$upper_encoder"
-                    "$us_mean_decoder"
-                    "$us_mean_encoder"
-                    "$us_std_decoder"
-                    "$us_std_encoder"
-                    "$model_file"
+                    "${model}_${dataset}_ws_${window}_seed_${seed}_numvars_${num_vars}_lower_decoder.npy"
+                    "${model}_${dataset}_ws_${window}_seed_${seed}_numvars_${num_vars}_lower_encoder.npy"
+                    "${model}_${dataset}_ws_${window}_seed_${seed}_numvars_${num_vars}_recon_mean.npy"
+                    "${model}_${dataset}_ws_${window}_seed_${seed}_numvars_${num_vars}_recon_std.npy"
+                    "${model}_${dataset}_ws_${window}_seed_${seed}_numvars_${num_vars}_recon_threshold.npy"
+                    "${model}_${dataset}_ws_${window}_seed_${seed}_numvars_${num_vars}_upper_decoder.npy"
+                    "${model}_${dataset}_ws_${window}_seed_${seed}_numvars_${num_vars}_upper_encoder.npy"
+                    "${model}_${dataset}_ws_${window}_seed_${seed}_numvars_${num_vars}_us_mean_decoder.npy"
+                    "${model}_${dataset}_ws_${window}_seed_${seed}_numvars_${num_vars}_us_mean_encoder.npy"
+                    "${model}_${dataset}_ws_${window}_seed_${seed}_numvars_${num_vars}_us_std_decoder.npy"
+                    "${model}_${dataset}_ws_${window}_seed_${seed}_numvars_${num_vars}_us_std_encoder.npy"
+                    "${model}_${dataset}_ws_${window}_seed_${seed}_numvars_${num_vars}.pt"
                 )
 
                 for model_file in "${models_to_copy[@]}"; do
-
-                    echo "Copying $model_file to $DEVICE_NAME@$IP_ADDRESS:/home/$DEVICE_NAME/RootCause-Analysis-Correlation-Attentive-Modeling/saved_models/"
-
-                    scp "/home/db2003/Desktop/Amr/(TSE) RootCause-Analysis-Correlation-Attentive-Modeling/saved_models/${model_file}" $DEVICE_NAME@$IP_ADDRESS:/home/$DEVICE_NAME/RootCause-Analysis-Correlation-Attentive-Modeling/saved_models/
+                    LOCAL_PATH="/home/db2003/Desktop/Amr/(TSE) RootCause-Analysis-Correlation-Attentive-Modeling/saved_models/${model_file}"
+                    if [ -f "$LOCAL_PATH" ]; then
+                        scp $SSH_OPTS "$LOCAL_PATH" $DEVICE_NAME@$IP_ADDRESS:${REMOTE_SAVED_MODELS}
+                    else
+                        echo "Warning: File $LOCAL_PATH does not exist, skipping."
+                    fi
                 done
             done
         done
+     Vespa
     done
 done
