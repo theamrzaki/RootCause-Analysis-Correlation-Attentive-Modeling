@@ -72,18 +72,19 @@ datasets=("wadi" "swat")
 results_csv_wadi="Ablations_WADI_window8_MLP.csv" 
 results_csv_swat="Ablations_SWAT_window8.csv"
 seeds=(1)
-window_size=(8)
+window_size_item=8
 batch_size=512
 
 for seed in "${seeds[@]}"; do
     for dataset in "${datasets[@]}"; do
-
-        if dataset == "wadi"; then
+        if [[ "$dataset" == "wadi" ]]; then
+            echo "Running experiments for WADI dataset"
             results_csv=$results_csv_wadi
             beta_default=0.005
-            context_default="gate"
+            context_default="linear_attn"
             epochs=50
-        else # SWAT
+        else
+            echo "Running experiments for SWAT dataset"
             results_csv=$results_csv_swat
             beta_default=0.005
             context_default="linear_attn"
