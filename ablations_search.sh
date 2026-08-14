@@ -3,9 +3,7 @@ conda activate RCAEval
 
 lrs=("1e-4")
 
-BETA_VAL=0.005
-LAMBDA_VAL=0.5
-GAMMA_VAL=0.5
+
 
 #-------------------------------------------------------------------
 #-----------------------------vlinear-------------------------------
@@ -26,6 +24,8 @@ run_deep_models() {
     local temporal_mixer=${10}
 
     local batch_size=${11}
+    local disable_orthogonal_projection=${12}
+    local epochs=${13}
     local main_model="aerca_based"
     local hidden_layer_size=128
 
@@ -57,8 +57,9 @@ run_deep_models() {
         --window_size=$window_size_item \
 
         --training_aerca=1\
-        --epochs=50 \
+        --epochs=$epochs \
         --results_csv=$results_csv \
+        --disable_orth_proj=$disable_orthogonal_projection \
 
         --hidden_layer_size=$hidden_layer_size"
 
@@ -67,74 +68,50 @@ run_deep_models() {
 }
 
 
-#-------------------SMD-----------------------
-
-# Focused ablation:
-#
-# Baseline:
-# mul + linear_attn + max + symmetric + linear + TM=1
-#
-# Latent:
-# gate, add
-#
-# Context:
-# gate
-#
-# Pool:
-# split_diff, split_max
-#
-# Predictor:
-# mlp
-
-
-dataset="wadi"
-results_csv="Ablations_WADI_window8_MLP.csv"
-
+datasets=("wadi" "swat")
+results_csv_wadi="Ablations_WADI_window8_MLP.csv" 
+results_csv_swat="Ablations_SWAT_window8.csv"
 seeds=(1)
 window_size=(8)
-
-# ============================================================
-# Focused MLP ablation
-#
-# Fixed:
-#   latent_mode    = mul
-#   coeff_mode     = symmetric
-#   temporal_mixer = 1
-#
-# Vary:
-#   context = linear_attn / gate
-#   pool    = max / split_diff / split_max
-#   predictor = mlp
-#
-# Configurations:
-#   1. linear_attn + max        + mlp
-#   2. linear_attn + split_diff + mlp
-#   3. linear_attn + split_max  + mlp
-#   4. gate        + max        + mlp
-#   5. gate        + split_diff + mlp
-# ============================================================
-
 batch_size=512
 
-seeds=(1)
 for seed in "${seeds[@]}"; do
-    for window_size_item in "${window_size[@]}"; do
+    for dataset in "${datasets[@]}"; do
+
+        if dataset == "wadi"; then
+            results_csv=$results_csv_wadi
+            beta_default=0.005
+            context_default="gate"
+            epochs=50
+        else # SWAT
+            results_csv=$results_csv_swat
+            beta_default=0.005
+            context_default="linear_attn"
+            epochs=200
+        fi
+
+
+        BETA_VAL=$beta_default
+        LAMBDA_VAL=0.5
+        GAMMA_VAL=0.5
 
         # --------------------------------------------------
         # Baseline
         # --------------------------------------------------
-        run_deep_models \
-            0 \
-            $seed \
-            $window_size_item \
-            "vlinear" \
-            "mul" \
-            "linear_attn" \
-            "max" \
-            "symmetric" \
-            "linear" \
-            1 \
-            $batch_size
+        ##run_deep_models \
+        ##    0 \
+        ##    $seed \
+        ##    $window_size_item \
+        ##    "vlinear" \
+        ##    "mul" \
+        ##    "linear_attn" \
+        ##    "max" \
+        ##    "symmetric" \
+        ##    "linear" \
+        ##    1 \
+        ##    $batch_size \
+        ##    0 \
+        ##    $epochs
 
         # --------------------------------------------------
         # Latent construction ablation
@@ -152,10 +129,10 @@ for seed in "${seeds[@]}"; do
         #        "symmetric" \
         #        "linear" \
         #        1 \
-        #        $batch_size
-#
-        #done
-#
+        #        $batch_size \
+        #        0 \
+        #        $epochs
+
         ## --------------------------------------------------
         ## Context ablation
         ## --------------------------------------------------
@@ -170,8 +147,49 @@ for seed in "${seeds[@]}"; do
         #    "symmetric" \
         #    "linear" \
         #    1 \
-        #    $batch_size
-#
+        #    $batch_size \
+        #    0 \
+        #    $epochs
+
+        ## --------------------------------------------------
+        ## Context ablation (with no temporal mixer)
+        ## --------------------------------------------------
+        run_deep_models \
+            0 \
+            $seed \
+            $window_size_item \
+            "vlinear" \
+            "mul" \
+            $context_default \
+            "max" \
+            "symmetric" \
+            "linear" \
+            0 \
+            $batch_size\
+            0 \
+            $epochs
+
+
+        ## --------------------------------------------------
+        ## Context ablation (with no orthogonal projection)
+        ## --------------------------------------------------
+        run_deep_models \
+            0 \
+            $seed \
+            $window_size_item \
+            "vlinear" \
+            "mul" \
+            $context_default \
+            "max" \
+            "symmetric" \
+            "linear" \
+            1 \
+            $batch_size \
+            1 \ 
+            $epochs
+
+
+
         ## --------------------------------------------------
         ## Prediction head ablation
         ## --------------------------------------------------
@@ -181,12 +199,80 @@ for seed in "${seeds[@]}"; do
         #    $window_size_item \
         #    "vlinear" \
         #    "mul" \
-        #    "linear_attn" \
+        #    $context_default \
         #    "max" \
         #    "symmetric" \
         #    "mlp" \
         #    1 \
-        #    $batch_size
+        #    $batch_size \
+        #    0 \
+        #   $epochs
+
+
+        # --------------------------------------------------
+        # Ablation of the loss function components
+        # --------------------------------------------------
+        #No Beta
+        BETA_VAL=0
+        LAMBDA_VAL=0.5
+        GAMMA_VAL=0.5
+
+        run_deep_models \
+            0 \
+            $seed \
+            $window_size_item \
+            "vlinear" \
+            "mul" \
+            $context_default \
+            "max" \
+            "symmetric" \
+            "linear" \
+            1 \
+            $batch_size \
+            0 \
+            $epochs
+
+        #No Lambda
+        BETA_VAL=$beta_default
+        LAMBDA_VAL=0
+        GAMMA_VAL=0.5
+
+        run_deep_models \
+            0 \
+            $seed \
+            $window_size_item \
+            "vlinear" \
+            "mul" \
+            $context_default \
+            "max" \
+            "symmetric" \
+            "linear" \
+            1 \
+            $batch_size \
+            0 \
+            $epochs
+
+        #No Gamma
+        BETA_VAL=$beta_default
+        LAMBDA_VAL=0.5
+        GAMMA_VAL=0
+
+        run_deep_models \
+            0 \
+            $seed \
+            $window_size_item \
+            "vlinear" \
+            "mul" \
+            $context_default \
+            "max" \
+            "symmetric" \
+            "linear" \
+            1 \
+            $batch_size \
+            0 \
+            $epochs
 
     done
 done
+
+
