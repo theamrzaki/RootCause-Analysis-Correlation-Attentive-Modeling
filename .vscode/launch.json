@@ -25,7 +25,7 @@
 
                 "--lr", "1e-4",
                 "--seed", "1",
-                "--dataset", "wadi",
+                "--dataset", "batadal",
                 "--window_size", "8",
 
                 "--latent_mode", "mul",
@@ -34,9 +34,9 @@
                 "--coeff_mode", "symmetric",
                 "--predictor", "linear",
 
-                "--training_aerca", "0",
+                "--training_aerca", "1",
                 "--epochs", "200",
-                "--results_csv", "RQ_1_SWAT_ExpandedWindows.csv",
+                "--results_csv", "RQ_1_BATADAL_ExpandedWindows.csv",
 
                 "--hidden_layer_size", "128"
             ],
