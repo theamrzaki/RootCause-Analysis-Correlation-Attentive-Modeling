@@ -178,7 +178,7 @@ temporal_mixer=(1) #0
 
 dataset="batadal"
 results_csv="RQ_1_BATADAL_NoDownsampling_batch512_window8.csv"
-seeds=(1) # 2 3
+seeds=(2 3) # 2 3
 window_size_item=16
 epochs=200
 for seed in "${seeds[@]}"; do
