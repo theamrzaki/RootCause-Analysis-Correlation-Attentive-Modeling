@@ -4,6 +4,7 @@ import torch
 
 from layers.vlinear_arch import vlinear
 from layers.cLSTM import cLSTM
+from layers.cMLP import cMLP
 from layers.CUTS_PLUS import CUTS_PLUS_Wrapper
 class SENNGC(nn.Module):
     def __init__(self, num_vars: int, order: int, hidden_layer_size: int, num_hidden_layers: int,
@@ -35,7 +36,7 @@ class SENNGC(nn.Module):
             # move to device
             self.coeff_nets.to(device)
      
-        if args["coeff_architecture"] not in  ["ht","epsilon_diagnosis","rcd","TemporalGNN","cross_time_freq","cross_attention_single_coeff_network","TemporalGNN_Attention","trend_seasonal","rcd","TemporalGNN_Attention_fourier","TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced","causalrca","cuts_mlp","cuts_lstm","GVAR","vlinear","nsigma","baro","circa","torai","cLSTM","CUTS_PLUS"]:
+        if args["coeff_architecture"] not in  ["ht","epsilon_diagnosis","rcd","TemporalGNN","cross_time_freq","cross_attention_single_coeff_network","TemporalGNN_Attention","trend_seasonal","rcd","TemporalGNN_Attention_fourier","TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced","causalrca","cuts_mlp","cuts_lstm","GVAR","vlinear","nsigma","baro","circa","torai","cLSTM","cMLP","CUTS_PLUS"]:
             total_params = sum(p.numel() for net in self.coeff_nets for p in net.parameters())
             print(f"Total parameters for {order} lags: {total_params}")
         
@@ -52,6 +53,13 @@ class SENNGC(nn.Module):
         if args["coeff_architecture"] == "cLSTM":
             self.coeff_net = cLSTM(num_vars, hidden_layer_size)
 
+        if args["coeff_architecture"] == "cMLP":
+            self.coeff_net = cMLP(
+                num_series=num_vars,
+                lag=order-1,#as in vlinear, we use order-1
+                hidden=[hidden_layer_size],
+                activation='relu'
+            )
         if args["coeff_architecture"] == "CUTS_PLUS":
             # Time branch: separate MLP for each lag
             self.coeff_net = CUTS_PLUS_Wrapper(
@@ -61,7 +69,7 @@ class SENNGC(nn.Module):
                 device=device,
                 options = args  # default to None if not specified
             )
-        if args["coeff_architecture"] in ["CUTS_PLUS","cLSTM","vlinear"]:
+        if args["coeff_architecture"] in ["CUTS_PLUS","cLSTM","cMLP","vlinear"]:
             self.coeff_net.to(device)
         # Some bookkeeping
         self.num_vars = num_vars
@@ -121,5 +129,5 @@ class SENNGC(nn.Module):
         elif self.args["coeff_architecture"] in ["vlinear","CUTS_PLUS"]:
             return self.forward_temporal(inputs)
         
-        elif self.args["coeff_architecture"] in ["cLSTM"]:
+        elif self.args["coeff_architecture"] in ["cLSTM","cMLP"]:
             return self.forward_simple_nextstep(inputs), None, None

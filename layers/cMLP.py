@@ -4,65 +4,158 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class LSTM(nn.Module):
-    def __init__(self, num_series, hidden):
+def activation_helper(activation, dim=None):
+    if activation == 'sigmoid':
+        act = nn.Sigmoid()
+    elif activation == 'tanh':
+        act = nn.Tanh()
+    elif activation == 'relu':
+        act = nn.ReLU()
+    elif activation == 'leakyrelu':
+        act = nn.LeakyReLU()
+    elif activation is None:
+        def act(x):
+            return x
+    else:
+        raise ValueError('unsupported activation: %s' % activation)
+    return act
+
+class MLP(nn.Module):
+    def __init__(self, num_series, lag, hidden, activation='relu'):
         super().__init__()
 
-        self.lstm = nn.LSTM(
-            input_size=num_series,
-            hidden_size=hidden,
-            batch_first=True
-        )
+        self.activation = activation_helper(activation)
 
-        self.proj = nn.Conv1d(hidden, 1, kernel_size=1)
+        # Input:
+        #   [B, T, P]
+        #
+        # After transpose:
+        #   [B, P, T]
+        #
+        # Conv1d:
+        #   in_channels  = P
+        #   kernel_size  = lag
+        #
+        # This learns from the previous `lag` time points.
+        layers = [
+            nn.Conv1d(
+                in_channels=num_series,
+                out_channels=hidden[0],
+                kernel_size=lag
+            )
+        ]
 
-    def forward(self, X, hidden=None):
+        for d_in, d_out in zip(
+            hidden,
+            hidden[1:] + [1]
+        ):
+            layers.append(
+                nn.Conv1d(
+                    in_channels=d_in,
+                    out_channels=d_out,
+                    kernel_size=1
+                )
+            )
+
+        self.layers = nn.ModuleList(layers)
+
+    def forward(self, X):
         # X: [B, T, P]
+        X = X.transpose(2, 1)  # [B, P, T]
 
-        if hidden is None:
-            B = X.size(0)
-            h0 = torch.zeros(1, B, self.lstm.hidden_size, device=X.device)
-            c0 = torch.zeros(1, B, self.lstm.hidden_size, device=X.device)
-            hidden = (h0, c0)
+        for i, layer in enumerate(self.layers):
+            if i != 0:
+                X = self.activation(X)
 
-        out, hidden = self.lstm(X, hidden)  # [B, T, H]
+            X = layer(X)
 
-        out = out.transpose(1, 2)           # [B, H, T]
-        out = self.proj(out)                # [B, 1, T]
-        out = out.transpose(1, 2)           # [B, T, 1]
+        # [B, 1, T-lag+1] -> [B, T-lag+1, 1]
+        return X.transpose(2, 1)
 
-        return out, hidden
 
-class cLSTM(nn.Module):
-    def __init__(self, num_series, hidden):
+class cMLP(nn.Module):
+    def __init__(
+        self,
+        num_series,
+        lag,
+        hidden,
+        activation='relu'
+    ):
         super().__init__()
 
         self.p = num_series
+        self.lag = lag
 
-        # one LSTM per variable
+        # One MLP for each target variable
         self.networks = nn.ModuleList([
-            LSTM(num_series, hidden) for _ in range(num_series)
+            MLP(
+                num_series=num_series,
+                lag=lag,
+                hidden=hidden,
+                activation=activation
+            )
+            for _ in range(num_series)
         ])
 
-    def forward(self, X, hidden=None):
+    def forward(self, X):
         """
         X: [B, T, P]
-        returns:
-            preds: [B, T, P]
+
+        Returns:
+            preds_last: [B, P]
         """
 
-        if hidden is None:
-            hidden = [None] * self.p
+        # Each network predicts one variable:
+        #
+        # network_i(X):
+        #   [B, T, P] -> [B, T-lag+1, 1]
+        #
+        outputs = [
+            network(X)
+            for network in self.networks
+        ]
 
-        outputs = []
-        new_hidden = []
+        # [B, T-lag+1, P]
+        preds = torch.cat(outputs, dim=2)
 
-        for i in range(self.p):
-            out_i, h_i = self.networks[i](X, hidden[i])
-            outputs.append(out_i)
-            new_hidden.append(h_i)
+        # Same interface as your cLSTM:
+        # only return prediction at the last time step
+        preds_last = preds[:, -1, :]  # [B, P]
 
-        preds = torch.cat(outputs, dim=2)  # [B, T, P]
-        preds_last = preds[:, -1, :]       # [B, P]
+        return preds_last, None
 
-        return preds_last, new_hidden
+    def GC(self, threshold=True, ignore_lag=True):
+        """
+        Extract learned Granger causality.
+
+        Returns:
+            ignore_lag=True:
+                [P, P]
+
+            ignore_lag=False:
+                [P, P, lag]
+        """
+
+        if ignore_lag:
+            GC = [
+                torch.norm(
+                    net.layers[0].weight,
+                    dim=(0, 2)
+                )
+                for net in self.networks
+            ]
+        else:
+            GC = [
+                torch.norm(
+                    net.layers[0].weight,
+                    dim=0
+                )
+                for net in self.networks
+            ]
+
+        GC = torch.stack(GC)
+
+        if threshold:
+            return (GC > 0).int()
+        else:
+            return GC

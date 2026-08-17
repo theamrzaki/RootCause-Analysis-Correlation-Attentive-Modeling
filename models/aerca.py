@@ -70,8 +70,8 @@ class AERCA(nn.Module):
         # For nexts: (B, num_vars)
         self.nexts_proj = nn.Linear(self.num_modalities * self.num_vars_mod, self.num_vars).to(device)
 
-        self.models_encoder_only = ["GVAR","vlinear","cLSTM","CUTS_PLUS"] 
-        self.models_simple_next_step = ["cLSTM"]
+        self.models_encoder_only = ["GVAR","vlinear","cLSTM","cMLP","CUTS_PLUS"] 
+        self.models_simple_next_step = ["cLSTM","cMLP"]
         if(self.options["coeff_architecture"] in self.models_encoder_only):
             self._log_and_print('Number of parameters in encoder: {}', self._count_parameters(self.encoder))
             self.total_params = (self._count_parameters(self.encoder)  )
@@ -301,6 +301,10 @@ class AERCA(nn.Module):
         group_norm = torch.norm(W, dim=0, p=2)
         return torch.sum(group_norm)
 
+    def _sparsity_loss_cMLP(self, W, alpha):
+        group_norm = torch.norm(W, dim=(0, 2), p=2)
+        return torch.sum(group_norm)
+    
     def _smoothness_loss(self, coeffs):
 
         # -------------------------
@@ -430,7 +434,15 @@ class AERCA(nn.Module):
                     net.lstm.weight_ih_l0,
                     torch.tensor(self.encoder_alpha, device=net.lstm.weight_ih_l0.device)
                 )
-
+        if self.options["coeff_architecture"] == "cMLP":
+            for net in self.encoder.coeff_net.networks:
+                loss_encoder_coeffs += self._sparsity_loss_cMLP(
+                    net.layers[0].weight,
+                    torch.tensor(
+                        self.encoder_alpha,
+                        device=net.layers[0].weight.device
+                    )
+                )
         loss_decoder_coeffs = self._sparsity_loss(decoder_coeffs, self.decoder_alpha) if self.options["coeff_architecture"] not in self.models_encoder_only else torch.tensor(0.0)
         #logging.info('Decoder coeffs loss: %s', loss_decoder_coeffs.item())
 
