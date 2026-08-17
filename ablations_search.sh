@@ -26,7 +26,7 @@ run_deep_models() {
     local epochs=${13}
 
     local main_model="aerca_based"
-    local hidden_layer_size=128
+    local hidden_layer_size=256
 
     echo "Running arch=$arch | latent=$latent_mode | context=$context | pool=$pool | seed=$seed | window=$window_size_item | coeff_mode=$coeff_mode | predictor=$predictor | temporal_mixer=$temporal_mixer"
 
@@ -66,10 +66,10 @@ run_deep_models() {
 datasets=("BATADAL") # "swat"
 results_csv_wadi="Ablations_WADI_window8_MLP.csv" 
 results_csv_swat="Ablations_SWAT_window8.csv"
-results_csv_batadal="3_Ablations_BATADAL_window8.csv"
+results_csv_batadal="3_Ablations_BATADAL_window8_samelosses.csv"
 seeds=(1 2 3)
 window_size_item=16
-batch_size=512
+batch_size=256
 
 for seed in "${seeds[@]}"; do
     for dataset in "${datasets[@]}"; do
@@ -77,6 +77,7 @@ for seed in "${seeds[@]}"; do
             echo "Running experiments for WADI dataset"
             results_csv=$results_csv_wadi
             beta_default=0.005
+            lambda_default=0.5
             context_default="linear_attn"
             latent_default="mul"
             epochs=50
@@ -84,6 +85,7 @@ for seed in "${seeds[@]}"; do
             echo "Running experiments for SWAT dataset"
             results_csv=$results_csv_swat
             beta_default=0.005
+            lambda_default=0.5
             context_default="linear_attn"
             latent_default="mul"
             epochs=200
@@ -91,13 +93,14 @@ for seed in "${seeds[@]}"; do
             echo "Running experiments for BATADAL dataset"
             results_csv=$results_csv_batadal
             beta_default=0.005
+            lambda_default=0.5
             context_default="linear_attn"
             latent_default="mul"
             epochs=200
         fi
 
         BETA_VAL=$beta_default
-        LAMBDA_VAL=0.5
+        LAMBDA_VAL=$lambda_default
         GAMMA_VAL=0.5
 
         # --------------------------------------------------

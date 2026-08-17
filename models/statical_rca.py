@@ -4,6 +4,9 @@ from sklearn.discriminant_analysis import StandardScaler
 from sklearn.preprocessing import QuantileTransformer, RobustScaler
 import inspect
 from tqdm import tqdm
+from RCAEval.io.time_series import (
+    preprocess
+)
 
 from utils.utils import (topk, topk_at_step)
 class StatisticalRCA:
@@ -74,30 +77,190 @@ class StatisticalRCA:
         return StatisticalRCA._run_pyrca_loop(xs, labels, RCD, RCDConfig, bins=bins, gamma=gamma)
 
     @staticmethod
-    def evaluate_nsigma(xs, labels, n=3):
-        """Classical statistical baseline: flags any sensor exceeding N standard deviations."""
+    def evaluate_e_diagnosis(
+        xs, labels, dataset=None, scalar_type="Robust", seq_len=1, **kwargs
+    ):
+        from RCAEval.e2e.pyrca.analyzers.epsilon_diagnosis import EpsilonDiagnosis
+
+        alpha = 0.01
+
         k_all = []
         k_at_step_all = []
 
         all_scores = []
         all_labels = []
+
         num_vars = xs[0].shape[1]
 
         for i in range(len(xs)):
-            x = xs[i]
-            mean = np.mean(x, axis=0)
-            std = np.std(x, axis=0) + 1e-9
-            
-            # Simple z-score: how far is the last point from the window mean
-            z_scores = np.abs((x[-1] - mean) / std)
-            z_scores = np.expand_dims(z_scores, axis=0)
-            
-            current_labels = np.max(labels[i], axis=0, keepdims=True)
-            k_all.append(topk(z_scores, current_labels, threshold=n))
-            k_at_step_all.append(topk_at_step(z_scores, current_labels))
-            all_scores.append(z_scores)
+
+            window_data = xs[i]  # [Window_Size, Num_Vars]
+
+            # ============================================================
+            # BARO-style split:
+            # first 50% = normal context
+            # last 50%  = anomalous/current period
+            # ============================================================
+            split_idx = int(0.5 * len(window_data))
+
+            normal_part = window_data[:split_idx]
+            anomal_part = window_data[split_idx:]
+
+            # ------------------------------------------------------------
+            # Optional sequence aggregation
+            # ------------------------------------------------------------
+            if seq_len > 1:
+                normal_len = (len(normal_part) // seq_len) * seq_len
+                anomal_len = (len(anomal_part) // seq_len) * seq_len
+
+                normal_part = (
+                    normal_part[:normal_len]
+                    .reshape(-1, seq_len, num_vars)
+                    .mean(axis=1)
+                )
+
+                anomal_part = (
+                    anomal_part[:anomal_len]
+                    .reshape(-1, seq_len, num_vars)
+                    .mean(axis=1)
+                )
+
+            # ============================================================
+            # Convert to DataFrames because EpsilonDiagnosis expects
+            # a dataframe with column names
+            # ============================================================
+            columns = [f"node_{j}" for j in range(num_vars)]
+
+            normal_df = pd.DataFrame(
+                normal_part,
+                columns=columns
+            )
+
+            anomal_df = pd.DataFrame(
+                anomal_part,
+                columns=columns
+            )
+
+            # ============================================================
+            # Preprocessing
+            # ============================================================
+            normal_df = preprocess(
+                data=normal_df,
+                dataset=dataset,
+                dk_select_useful=kwargs.get(
+                    "dk_select_useful", False
+                ),
+            )
+
+            anomal_df = preprocess(
+                data=anomal_df,
+                dataset=dataset,
+                dk_select_useful=kwargs.get(
+                    "dk_select_useful", False
+                ),
+            )
+
+            # ------------------------------------------------------------
+            # Keep only common variables
+            # ------------------------------------------------------------
+            intersects = [
+                x for x in normal_df.columns
+                if x in anomal_df.columns
+            ]
+
+            normal_df = normal_df[intersects]
+            anomal_df = anomal_df[intersects]
+
+            # ------------------------------------------------------------
+            # Make both sides equal length
+            # ------------------------------------------------------------
+            min_length = min(
+                normal_df.shape[0],
+                anomal_df.shape[0]
+            )
+
+            normal_df = normal_df.tail(min_length)
+            anomal_df = anomal_df.head(min_length)
+
+            # ============================================================
+            # EpsilonDiagnosis
+            # ============================================================
+            model = EpsilonDiagnosis(
+                config=EpsilonDiagnosis.config_class(
+                    alpha=alpha
+                )
+            )
+
+            model.train(normal_df)
+
+            results = model.find_root_causes(anomal_df)
+
+            ranks = results.to_dict()["root_cause_nodes"]
+
+            # Sort by EpsilonDiagnosis score
+            ranks = sorted(
+                ranks,
+                key=lambda x: x[1],
+                reverse=True
+            )
+
+            # ============================================================
+            # Convert node names → score vector
+            # ============================================================
+            score_dict = {
+                node: score
+                for node, score in ranks
+            }
+
+            z_scores_final = np.array([
+                score_dict.get(node, 0.0)
+                for node in normal_df.columns
+            ]).reshape(1, -1)
+
+            # ============================================================
+            # Labels for this window
+            # ============================================================
+            current_labels = np.max(
+                labels[i],
+                axis=0,
+                keepdims=True
+            )
+
+            # Skip windows without anomalies
+            if np.sum(current_labels) == 0:
+                continue
+
+            # ============================================================
+            # Top-k evaluation
+            # ============================================================
+            k_all.append(
+                topk(
+                    z_scores_final,
+                    current_labels,
+                    threshold=0.5
+                )
+            )
+
+            k_at_step_all.append(
+                topk_at_step(
+                    z_scores_final,
+                    current_labels
+                )
+            )
+
+            all_scores.append(z_scores_final)
             all_labels.append(current_labels)
-        return StatisticalRCA._summarize(k_all, k_at_step_all, all_scores=all_scores, all_labels=all_labels)
+
+        # ================================================================
+        # Same summary interface as evaluate_baro()
+        # ================================================================
+        return StatisticalRCA._summarize(
+            k_all,
+            k_at_step_all,
+            all_scores=all_scores,
+            all_labels=all_labels
+        )
+
 
     @staticmethod
     def evaluate_baro(xs, labels, scalar_type="Robust", seq_len=1):

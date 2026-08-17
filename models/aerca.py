@@ -993,15 +993,17 @@ class AERCA(nn.Module):
         coeff_architecture = self.options["coeff_architecture"]
 
         # 1. Baseline check
-        if coeff_architecture in ["rcd", "baro", "nsigma", "torai"]:
+        if coeff_architecture in ["rcd", "baro", "nsigma", "torai", "e_diagnosis"]:
             if coeff_architecture == "rcd":
                 res = StatisticalRCA.evaluate_rcd(xs, labels)
             elif coeff_architecture == "baro":
                 res = StatisticalRCA.evaluate_baro(xs, labels)
             elif coeff_architecture == "nsigma":
-                res = StatisticalRCA.evaluate_nsigma(xs, labels)
+                res = StatisticalRCA.evaluate_baro(xs, labels, scalar_type="Standard")
             elif coeff_architecture == "torai":
                 res = StatisticalRCA.evaluate_torai(xs, labels)
+            elif coeff_architecture == "e_diagnosis":
+                res = StatisticalRCA.evaluate_e_diagnosis(xs, labels)
 
             if res:
                 k_at_step_all = res["avg_k_at_step"]
