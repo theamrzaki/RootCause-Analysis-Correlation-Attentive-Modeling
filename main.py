@@ -4,8 +4,8 @@ import logging
 import argparse
 import numpy as np
 
-from datasets import linear, lotka_volterra, lorenz96, swat, nonlinear, msds, smd, wadi 
-from args import linear_args, lotka_volterra_args, lorenz96_args, swat_args, msds_args, nonlinear_args, smd_args, wadi_args, aiops_args, gaia_args, msds_multi_modal_args
+from datasets import linear, lotka_volterra, lorenz96, swat, nonlinear, msds, wadi, batadal
+from args import linear_args, lotka_volterra_args, lorenz96_args, swat_args, msds_args, nonlinear_args, wadi_args, batadal_args
 from models import aerca
 from utils import utils
 import warnings
@@ -69,16 +69,16 @@ def main(argv):
             "log_file": "nonlinear.log",
             "use_slice": True
         },
-        "smd": {
-            "args": smd_args.create_arg_parser,
-            "dataset_class": smd.SMD,
-            "log_file": "smd.log",
-            "use_slice": False
-        },
         "wadi": {
             "args": wadi_args.create_arg_parser,
             "dataset_class": wadi.WADI,
             "log_file": "wadi.log",
+            "use_slice": False
+        },
+        "batadal": {
+            "args": batadal_args.create_arg_parser,
+            "dataset_class": batadal.BATADAL,
+            "log_file": "batadal.log",
             "use_slice": False
         }
     }

@@ -712,6 +712,9 @@ class WADI:
         # This matches the load_data behavior in your smd.py and swat.py
         device = 'cpu'
         self.pipeline_sanity_check()
+        if self.options.get('disable_orth_proj', False):
+            print("Orthogonal projection disabled. Skipping transformation.")
+            return None
         return self.apply_orthogonal_transform(save_path=orth_matrix_dir, device=device)
     
 
