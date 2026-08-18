@@ -10,7 +10,9 @@ GAMMA_VAL=0.5
 #-------------------------------------------------------------------
 #-------------------------deep models-------------------------------
 #-------------------------------------------------------------------
+
 run_deep_models() {
+    echo "received parameters: $@"
     local preprocessing_data=$1
     local seed=$2
     local window_size_item=$3
@@ -25,7 +27,8 @@ run_deep_models() {
     local batch_size=${11}
 
     local main_model="aerca_based"
-    local hidden_layer_size=128
+    local epochs=${12}
+    local hidden_layer_size=${13}
 
 
     echo "Running: dataset=$dataset | seed=$seed | arch=$arch | window_size=$window_size_item | latent_mode=$latent_mode | context=$context | pool=$pool | coeff_mode=$coeff_mode | predictor=$predictor | temporal_mixer=$temporal_mixer"
@@ -48,6 +51,7 @@ run_deep_models() {
                                     --dataset="$dataset" \
                                     --window_size="$window_size_item" \
                                     --batch_size="$batch_size" \
+                                    --epochs="$epochs" \
 
                                     --latent_mode=$latent_mode \
                                     --context=$context \
@@ -58,7 +62,6 @@ run_deep_models() {
 
 
                                     --training_aerca=0 \
-                                    --epochs=200 \
                                     --results_csv="$results_csv" \
 
                                     --hidden_layer_size="$hidden_layer_size" \
@@ -68,7 +71,6 @@ run_deep_models() {
                         
             
 }
-
 #-------------------swat-----------------------
 
 
@@ -76,7 +78,7 @@ latent_mode=("mul")
 context=("linear_attn") 
 pool=("max") 
 coeff_mode=("symmetric") 
-predictor=("linear") 
+predictor=("mlp") 
 temporal_mixer=(1) 
 
 dataset="swat"
@@ -84,12 +86,77 @@ results_csv="RQ_2_SWAT_RaspberryPi_Larger.csv"
 seeds=(1) 
 window_size_item=8
 batch_size=512
-
+epochs=200
+hidden_layer_size=128
 for seed in "${seeds[@]}"; do
     preprocessing_data=0
-    run_deep_models $preprocessing_data $seed $window_size_item "GVAR" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size
-    run_deep_models $preprocessing_data $seed $window_size_item "cLSTM" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size
-    run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size
-    run_deep_models $preprocessing_data $seed $window_size_item "vlinear" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size
+    #run_deep_models $preprocessing_data $seed $window_size_item "GVAR" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size
+    #run_deep_models $preprocessing_data $seed $window_size_item "cLSTM" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size
+    #run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size
+    run_deep_models $preprocessing_data $seed $window_size_item "vlinear" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
 done
 
+
+
+
+##-------------------WADI-----------------------
+
+
+#latent_mode=("mul") #"gate"
+#context=("gate") #"none" "gate" 
+#pool=("max") # "split_max" "split_diff"
+#coeff_mode=("symmetric") # "cosine" "bipartite" 
+#predictor=("linear") #"mlp" "linear"
+#temporal_mixer=(1) #0 
+#
+#batch_size=512
+#dataset="wadi"
+#results_csv="RQ_1_WADI_RealNoDownsampling.csv"
+#window_size_item=8
+#epochs=50
+#seeds=(1)
+#hidden_layer_size=128
+#for seed in "${seeds[@]}"; do
+#    preprocessing_data=0
+#    run_deep_models $preprocessing_data $seed $window_size_item "vlinear" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
+#    #run_deep_models $preprocessing_data $seed $window_size_item "GVAR" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
+#    #run_deep_models $preprocessing_data $seed $window_size_item "deep_mlp" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
+#    #run_experiment_baselines $preprocessing_data $seed $window_size_item
+#    #run_deep_models $preprocessing_data $seed $window_size_item "cMLP" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
+#    #run_deep_models $preprocessing_data $seed $window_size_item "cLSTM" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
+#    #run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
+#done
+#
+#
+#
+#
+##-------------------batadal-----------------------
+#
+#
+#latent_mode=("mul") #"gate"
+#context=("linear_attn") #"none" "gate" 
+#pool=("max") # "split_max" "split_diff"
+#coeff_mode=("symmetric") # "cosine" "bipartite" 
+#predictor=("linear") #"mlp" "linear"
+#temporal_mixer=(1) #0 
+#
+#dataset="batadal"
+#results_csv="RQ_1_BATADAL_NoDownsampling_batch512_window8.csv"
+#seeds=(1) # 2 3
+#window_size_item=16
+#epochs=200
+#batch_size=256
+#hidden_layer_size=256
+#for seed in "${seeds[@]}"; do
+#    preprocessing_data=0
+#    run_deep_models $preprocessing_data $seed $window_size_item "vlinear" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
+#    #preprocessing_data=0
+#    #run_deep_models $preprocessing_data $seed $window_size_item "GVAR" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
+#    #run_experiment_baselines $preprocessing_data $seed $window_size_item
+#    #run_deep_models $preprocessing_data $seed $window_size_item "cLSTM" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
+#    #run_deep_models $preprocessing_data $seed $window_size_item "cMLP" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
+#    #run_deep_models $preprocessing_data $seed $window_size_item "deep_mlp" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
+#    #run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
+#done
+#
+#

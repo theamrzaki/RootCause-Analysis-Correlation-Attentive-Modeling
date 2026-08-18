@@ -410,7 +410,7 @@ class AERCA(nn.Module):
         return loss, losses_to_log
     
     def _training(self, xs):
-        if self.options["dataset_name"] in ["swat","smd","wadi"]:
+        if self.options["dataset_name"] in ["swat","wadi","batadal"]:
             self._training_batches_swat(xs, self.options.get("batch_size"))
         else:
             raise ValueError(f"Unknown dataset {self.options['dataset']} for training")
