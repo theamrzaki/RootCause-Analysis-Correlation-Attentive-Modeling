@@ -128,10 +128,10 @@ def main(argv):
         print('Loading existing data...')
         orth_transformer = data_class.load_data()
         import hashlib
-        sample_data = np.array(data_class.data_dict['x_n_list'][0])
-        data_hash = hashlib.md5(sample_data.tobytes()).hexdigest()
-        with open(os.path.join(logging_dir, 'data_hash.txt'), 'a') as f:
-            f.write(f"Data Hash for loading sample: {data_hash}\n")
+        sample_data = None# np.array(data_class.data_dict['x_n_list'][0])
+        #data_hash = hashlib.md5(sample_data.tobytes()).hexdigest()
+        #with open(os.path.join(logging_dir, 'data_hash.txt'), 'a') as f:
+        #    f.write(f"Data Hash for loading sample: {data_hash}\n")
 
     # Instantiate the iTransformer model using the common set of parameters.
     
@@ -195,7 +195,7 @@ def main(argv):
         aerca_model._get_root_cause_threshold_decoder(xs_val)
         if "include_logs_and_traces" in options and options["include_logs_and_traces"]:
             aerca_model._get_root_cause_threshold_encoder_multi_modality(xs_val)
-    aerca_model.example_normal_window = data_class.data_dict['x_n_list'][0]
+    #aerca_model.example_normal_window = data_class.data_dict['x_n_list'][0]
     # Testing phase for causal discovery (applies only if slicing is used).
     if mapping["use_slice"]:
         test_causal = data_class.data_dict['x_n_list'][options['training_size']:]

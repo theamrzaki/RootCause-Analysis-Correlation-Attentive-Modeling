@@ -23,6 +23,7 @@ run_deep_models() {
     local predictor=$9
     local temporal_mixer=${10}
     local batch_size=${11}
+    local epochs=${12}
 
     local main_model="aerca_based"
     local hidden_layer_size=128
@@ -58,7 +59,7 @@ run_deep_models() {
 
 
                                     --training_aerca=0 \
-                                    --epochs=200 \
+                                    --epochs=$epochs \
                                     --results_csv="$results_csv" \
 
                                     --hidden_layer_size="$hidden_layer_size" \
@@ -72,24 +73,54 @@ run_deep_models() {
 #-------------------swat-----------------------
 
 
+#latent_mode=("mul") 
+#context=("linear_attn") 
+#pool=("max") 
+#coeff_mode=("symmetric") 
+#predictor=("linear") 
+#temporal_mixer=(1) 
+#
+#dataset="swat"
+#results_csv="RQ_2_SWAT_RaspberryPi_Smaller.csv"
+#seeds=(1) 
+#window_size_item=8
+#batch_size=512
+#
+#for seed in "${seeds[@]}"; do
+#    preprocessing_data=0
+#    run_deep_models $preprocessing_data $seed $window_size_item "GVAR" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size
+#    run_deep_models $preprocessing_data $seed $window_size_item "cLSTM" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size
+#    run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size
+#    run_deep_models $preprocessing_data $seed $window_size_item "vlinear" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size
+#done
+
+
+
+
+
+#-------------------WADI-----------------------
+BETA_VAL=0.01
+LAMBDA_VAL=0.5
+GAMMA_VAL=0.5
+
 latent_mode=("mul") 
-context=("linear_attn") 
+context=("gate") 
 pool=("max") 
 coeff_mode=("symmetric") 
 predictor=("linear") 
 temporal_mixer=(1) 
 
-dataset="swat"
-results_csv="RQ_2_SWAT_RaspberryPi_Larger.csv"
+dataset="wadi"
+results_csv="RQ_2_WADI_RaspberryPi_Smaller.csv"
 seeds=(1) 
 window_size_item=8
 batch_size=512
-
+epochs=50
 for seed in "${seeds[@]}"; do
     preprocessing_data=0
-    run_deep_models $preprocessing_data $seed $window_size_item "GVAR" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size
-    run_deep_models $preprocessing_data $seed $window_size_item "cLSTM" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size
-    run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size
-    run_deep_models $preprocessing_data $seed $window_size_item "vlinear" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size
+    run_deep_models $preprocessing_data $seed $window_size_item "GVAR" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs
+    run_deep_models $preprocessing_data $seed $window_size_item "cLSTM" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs
+    run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs
+    run_deep_models $preprocessing_data $seed $window_size_item "vlinear" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs
 done
 

@@ -13,10 +13,11 @@ def create_arg_parser():
     # Dataset arguments
     parser.add_argument('--preprocessing_data', type=int, default=1, help='Flag for preprocessing data (default: 1)')
     parser.add_argument('--data_dir', type=str, default=os.path.join(os.getcwd(), 'datasets', 'wadi'), help='Data directory (default: ./datasets/wadi)')
-    parser.add_argument('--num_vars', type=int, default=123, help='Number of variables (default: 123)')
+    parser.add_argument('--num_vars', type=int, default=127, help='Number of variables (default: 123)')
     parser.add_argument('--causal_quantile', type=float, default=0.70, help='Causal quantile (default: 0.70)')
     parser.add_argument('--shuffle', type=int, default=1, help='Flag for shuffling data (default: 1)')
     parser.add_argument('--main_model', type=str, default='aerca', help='Main model to use (default: aerca)')
+    parser.add_argument('--include_logs_and_traces', type=int, default=0, help='Flag for including logs and traces (default: 0)')
 
     # Meta arguments
     parser.add_argument('--seed', type=int, default=4, help='Random seed (default: 4)')
@@ -25,6 +26,7 @@ def create_arg_parser():
 
     # AERCA arguments
     parser.add_argument('--window_size', type=int, default=1, help='Window size (default: 1)')
+    parser.add_argument('--batch_size', type=int, default=128, help='Batch size (default: 128)')
     parser.add_argument('--stride', type=int, default=1, help='Stride (default: 1)')
     parser.add_argument('--encoder_alpha', type=float, default=1.0, help='Encoder alpha (default: 0.5)')
     parser.add_argument('--decoder_alpha', type=float, default=1.0, help='Decoder alpha (default: 0.5)')
@@ -49,6 +51,14 @@ def create_arg_parser():
     parser.add_argument('--mean_std_recon_loss', type=int, default=0, help='Patience for early stopping (default: 50)')
     parser.add_argument('--AMOC_Loss', type=int, default=0, help='Minimum delta for early stopping (default: 1e-4)')
 
+    #SFlexRCA arguments 
+    parser.add_argument('--latent_mode', type=str, default='mul', choices=['mul','add','gate'])
+    parser.add_argument('--temporal_mixer', type=int, default=0, choices=[0,1])
+    parser.add_argument('--coeff_mode', type=str, default='bipartite', choices=['symmetric','bipartite','cosine'])
+    parser.add_argument('--pool', type=str, default='split_diff', choices=['mean','max','mean_max','split_mean','split_max','split_diff'])
+    parser.add_argument('--context', type=str, default='gate', choices=['none','layernorm','residual','gate','linear_attn'])
+    parser.add_argument('--predictor', type=str, default='mlp', choices=['mlp','linear'])
+
     # Dual KL arguments
     parser.add_argument('--correlated_KL', type=int, default=0, help='Flag for correlated KL (default: 1)')
     parser.add_argument('--lambda_indep', type=float, default=1.0, help='Lambda for independence (default: 1.0)')
@@ -61,7 +71,9 @@ def create_arg_parser():
     parser.add_argument('--num_attention_heads', type=int, default=2, help='Number of attention heads (default: 4)')
     parser.add_argument('--outer_heads_num', type=int, default=2, help='Number of outer attention heads (default: 4)')
     parser.add_argument('--outer_hidden_dim', type=int, default=128, help='Outer hidden dimension (default: 64)')
-    
+    parser.add_argument('--use_MoM', type=str, default="tinyMoM", help='Flag for using MoM (default: 0)')
+
+
     # Attention arguments
     parser.add_argument('--global_attention_over_all_lag', type=str)
     parser.add_argument('--local_attention_per_lag', type=int, default=0, help='Flag for using local attention per lag (default: 0)')
