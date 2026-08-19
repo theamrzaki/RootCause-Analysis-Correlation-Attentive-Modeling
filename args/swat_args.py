@@ -19,7 +19,8 @@ def create_arg_parser():
     parser.add_argument('--main_model', type=str, default='aerca', help='Main model to use (default: aerca)')
     parser.add_argument('--include_logs_and_traces', type=int, default=0, help='Flag for including logs and traces (default: 0)')
     parser.add_argument('--disable_orth_proj', type=int, default=0, help='Flag for running case study (default: 1)')
-
+    parser.add_argument('--exp_name', type=str, default='default_experiment', help='Experiment name (default: default_experiment)')
+    
     # Meta arguments
     parser.add_argument('--seed', type=int, default=4, help='Random seed (default: 4)')
     parser.add_argument('--device', type=str, default='cuda', help='Device to use (default: cuda)')

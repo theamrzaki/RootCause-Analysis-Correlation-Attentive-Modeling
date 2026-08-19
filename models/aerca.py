@@ -189,7 +189,10 @@ class AERCA(nn.Module):
         self.num_candidates = num_candidates
 
         # Create an absolute path for saving models and thresholds
-        self.save_dir = os.path.join(os.getcwd(), 'saved_models')
+        if self.options["exp_name"] != "":
+            self.save_dir = os.path.join(os.getcwd(), 'saved_models', self.options["exp_name"])
+        else:
+            self.save_dir = os.path.join(os.getcwd(), 'saved_models','')
         os.makedirs(self.save_dir, exist_ok=True)
         correlated_KL =  "correlated_&_normal" if self.options['correlated_KL'] == 1 else "normal_KL"
         family_of_exp = data_name + str(self.options["coeff_architecture"]) + '_(no mean)_' + correlated_KL

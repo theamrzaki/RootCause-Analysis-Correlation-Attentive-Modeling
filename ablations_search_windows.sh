@@ -32,6 +32,7 @@ run_deep_models() {
     local hidden_layer_size=${15}
     local epochs=${16}
 
+    local exp_name=${17}
     echo "Running arch=$arch | latent=$latent_mode | context=$context | pool=$pool | seed=$seed | window=$window_size_item | coeff_mode=$coeff_mode | predictor=$predictor | temporal_mixer=$temporal_mixer"
 
 
@@ -62,23 +63,25 @@ run_deep_models() {
         --training_aerca=1 \
         --epochs=$epochs \
         --results_csv=$results_csv \
-
+        
+        --exp_name=$exp_name \
+        
         --hidden_layer_size=$hidden_layer_size"
 
 
     eval $cmd
 }
 
-
+exp_name="Ablations_windows"
 #-------------------Datasets (SWaT, WADI)-----------------------
 
 seed=1
 
 dataset="wadi"
-results_csv="Ablations_wadi_windows.csv"
+results_csv="Ablations_wadi_windows_new.csv"
 
-seeds=(2 3)
-window_size=(6 12) #4 8 16
+seeds=(1)
+window_size=(4 8 12 16)
 
 latent_mode="mul"
 context="gate"
@@ -95,7 +98,7 @@ epochs=50
 for seed in "${seeds[@]}"; do
     for window_size_item in "${window_size[@]}"; do
 
-            beta=0.01
+            beta=0.005
             gamma=0.5
             lambda=0.5
 
@@ -119,7 +122,8 @@ for seed in "${seeds[@]}"; do
                 $gamma \
                 $batch_size \
                 $hidden_layer_size \
-                $epochs
+                $epochs \
+                $exp_name
 
         
     done
@@ -130,16 +134,16 @@ done
 
 
 dataset="swat"
-results_csv="Ablations_swat_windows.csv"
+results_csv="Ablations_swat_windows_new.csv"
 
-seeds=(1 2 3)
-window_size=(6 12) #4 8 16
+seeds=(1)
+window_size=(4 8 12 16) #4 8 16
 
 latent_mode="mul"
 context="linear_attn"
 pool="max"
 coeff_mode="symmetric"
-predictor="linear"
+predictor="mlp"
 temporal_mixer=1
 
 # Data has already been preprocessed.
@@ -174,7 +178,8 @@ for seed in "${seeds[@]}"; do
                 $gamma \
                 $batch_size \
                 $hidden_layer_size \
-                $epochs
+                $epochs \
+                $exp_name
 
         
     done
