@@ -1,8 +1,8 @@
 #!/bin/bash
-#IP_ADDRESS="130.63.252.156" #db2003smaller
-IP_ADDRESS="130.63.101.32"
-#DEVICE_NAME="db2003smaller"
-DEVICE_NAME="db2003larger"
+IP_ADDRESS="130.63.255.228" #db2003smaller
+#IP_ADDRESS="130.63.101.32"
+DEVICE_NAME="db2003smaller"
+#DEVICE_NAME="db2003larger"
 
 
 # 1. Generate SSH key only if it doesn't already exist
