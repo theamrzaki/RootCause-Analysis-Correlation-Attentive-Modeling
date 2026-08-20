@@ -80,7 +80,7 @@ seed=1
 dataset="wadi"
 results_csv="Ablations_wadi_windows_new.csv"
 
-seeds=(2 3)
+seeds=()
 window_size=(4 8 12 16)
 
 latent_mode="mul"
@@ -136,7 +136,7 @@ done
 dataset="swat"
 results_csv="Ablations_swat_windows_new.csv"
 
-seeds=(2 3)
+seeds=()
 window_size=(4 8 12 16) #4 8 16
 
 latent_mode="mul"
@@ -198,53 +198,54 @@ done
 
 
 
-#dataset="BATADAL"
-#results_csv="4_Ablations_batadal_windows.csv"
-#
-#seeds=(1 2 3)
-#window_size=(4 8 16 24 32) #4 16)
-#
-#latent_mode="mul"
-#context="linear_attn"
-#pool="max"
-#coeff_mode="symmetric"
-#predictor="linear"
-#temporal_mixer=1
-#
-## Data has already been preprocessed.
-#preprocessing_data=1
-#batch_size=512
-#hidden_layer_size=128
-#epochs=200
-#for seed in "${seeds[@]}"; do
-#    for window_size_item in "${window_size[@]}"; do
-#
-#            beta=0.005
-#            gamma=0.5
-#            lambda=0.5
-#
-#            echo "================================================"
-#            echo "window_size_item: $window_size_item"
-#            echo "================================================"
-#
-#            run_deep_models \
-#                $preprocessing_data \
-#                $seed \
-#                $window_size_item \
-#                "vlinear" \
-#                $latent_mode \
-#                $context \
-#                $pool \
-#                $coeff_mode \
-#                $predictor \
-#                $temporal_mixer \
-#                $beta \
-#                $lambda \
-#                $gamma \
-#                $batch_size \
-#                $hidden_layer_size \
-#                $epochs
-#
-#        
-#    done
-#done
+dataset="BATADAL"
+results_csv="Ablations_batadal_windows_new.csv"
+
+seeds=(1 2 3)
+window_size=(4 8 16 24 32) #4 16)
+
+latent_mode="mul"
+context="linear_attn"
+pool="max"
+coeff_mode="symmetric"
+predictor="linear"
+temporal_mixer=1
+
+# Data has already been preprocessed.
+preprocessing_data=0
+batch_size=512
+hidden_layer_size=128
+epochs=200
+for seed in "${seeds[@]}"; do
+    for window_size_item in "${window_size[@]}"; do
+
+            beta=0.005
+            gamma=0.5
+            lambda=0.5
+
+            echo "================================================"
+            echo "window_size_item: $window_size_item"
+            echo "================================================"
+
+            run_deep_models \
+                $preprocessing_data \
+                $seed \
+                $window_size_item \
+                "vlinear" \
+                $latent_mode \
+                $context \
+                $pool \
+                $coeff_mode \
+                $predictor \
+                $temporal_mixer \
+                $beta \
+                $lambda \
+                $gamma \
+                $batch_size \
+                $hidden_layer_size \
+                $epochs\
+                $exp_name
+
+        
+    done
+done
