@@ -80,7 +80,7 @@ seed=1
 dataset="wadi"
 results_csv="Ablations_wadi_windows_new.csv"
 
-seeds=(1)
+seeds=(2 3)
 window_size=(4 8 12 16)
 
 latent_mode="mul"
@@ -136,7 +136,7 @@ done
 dataset="swat"
 results_csv="Ablations_swat_windows_new.csv"
 
-seeds=(1)
+seeds=(2 3)
 window_size=(4 8 12 16) #4 8 16
 
 latent_mode="mul"
