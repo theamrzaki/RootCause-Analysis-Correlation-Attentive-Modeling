@@ -26,7 +26,8 @@ run_deep_models() {
     local epochs=${13}
 
     local main_model="aerca_based"
-    local hidden_layer_size=256
+    local hidden_layer_size=${14}
+    local exp_name=${15}
 
     echo "Running arch=$arch | latent=$latent_mode | context=$context | pool=$pool | seed=$seed | window=$window_size_item | coeff_mode=$coeff_mode | predictor=$predictor | temporal_mixer=$temporal_mixer"
 
@@ -35,6 +36,8 @@ run_deep_models() {
         --encoder_lambda=$LAMBDA_VAL --decoder_lambda=$LAMBDA_VAL \
         --beta=$BETA_VAL \
 
+        --exp_name=$exp_name \
+        
         --main_model=$main_model \
         --coeff_architecture=$arch \
 
@@ -63,14 +66,13 @@ run_deep_models() {
     eval $cmd
 }
 
-datasets=("BATADAL") # "swat"
-results_csv_wadi="Ablations_WADI_window8_MLP.csv" 
-results_csv_swat="Ablations_SWAT_window8.csv"
+datasets=("wadi") # "swat"
+results_csv_wadi="3_Ablations_WADI_window8_MLP.csv" 
+results_csv_swat="3_Ablations_SWAT_window8.csv"
 results_csv_batadal="3_Ablations_BATADAL_window8_samelosses.csv"
-seeds=(1 2 3)
-window_size_item=16
-batch_size=256
+seeds=(2)
 
+exp_name="Ablations"
 for seed in "${seeds[@]}"; do
     for dataset in "${datasets[@]}"; do
         if [[ "$dataset" == "wadi" ]]; then
@@ -81,6 +83,9 @@ for seed in "${seeds[@]}"; do
             context_default="linear_attn"
             latent_default="mul"
             epochs=50
+            window_size_item=8
+            batch_size=512
+            hidden_layer_size=128
         elif [[ "$dataset" == "swat" ]]; then
             echo "Running experiments for SWAT dataset"
             results_csv=$results_csv_swat
@@ -89,6 +94,9 @@ for seed in "${seeds[@]}"; do
             context_default="linear_attn"
             latent_default="mul"
             epochs=200
+            window_size_item=8
+            batch_size=512
+            hidden_layer_size=128
         else
             echo "Running experiments for BATADAL dataset"
             results_csv=$results_csv_batadal
@@ -97,6 +105,9 @@ for seed in "${seeds[@]}"; do
             context_default="linear_attn"
             latent_default="mul"
             epochs=200
+            window_size_item=16
+            batch_size=256
+            hidden_layer_size=256
         fi
 
         BETA_VAL=$beta_default
@@ -119,7 +130,9 @@ for seed in "${seeds[@]}"; do
             1 \
             $batch_size \
             0 \
-            $epochs
+            $epochs \
+            $hidden_layer_size \
+            $exp_name
 
         # --------------------------------------------------
         # Latent construction ablation
@@ -138,7 +151,9 @@ for seed in "${seeds[@]}"; do
                 1 \
                 $batch_size \
                 0 \
-                $epochs
+                $epochs \
+                $hidden_layer_size \
+                $exp_name
         done
         
         # --------------------------------------------------
@@ -157,7 +172,9 @@ for seed in "${seeds[@]}"; do
             1 \
             $batch_size \
             0 \
-            $epochs
+            $epochs \  
+            $hidden_layer_size \ 
+            $exp_name
 
         # --------------------------------------------------
         # Context ablation (with no temporal mixer)
@@ -175,7 +192,9 @@ for seed in "${seeds[@]}"; do
             0 \
             $batch_size \
             0 \
-            $epochs
+            $epochs \   
+            $hidden_layer_size \
+            $exp_name
 
         # --------------------------------------------------
         # Context ablation (with no orthogonal projection)
@@ -193,7 +212,9 @@ for seed in "${seeds[@]}"; do
             1 \
             $batch_size \
             1 \
-            $epochs
+            $epochs \
+            $hidden_layer_size \
+            $exp_name
 
         # --------------------------------------------------
         # Prediction head ablation
@@ -211,7 +232,9 @@ for seed in "${seeds[@]}"; do
             1 \
             $batch_size \
             0 \
-            $epochs
+            $epochs \
+            $hidden_layer_size \
+            $exp_name
 
         # --------------------------------------------------
         # Ablation of the loss function components
@@ -234,7 +257,9 @@ for seed in "${seeds[@]}"; do
             1 \
             $batch_size \
             0 \
-            $epochs
+            $epochs \
+            $hidden_layer_size \
+            $exp_name
 
         # No Lambda
         BETA_VAL=$beta_default
@@ -254,7 +279,9 @@ for seed in "${seeds[@]}"; do
             1 \
             $batch_size \
             0 \
-            $epochs
+            $epochs \
+            $hidden_layer_size \
+            $exp_name
 
         # No Gamma
         BETA_VAL=$beta_default
@@ -274,7 +301,9 @@ for seed in "${seeds[@]}"; do
             1 \
             $batch_size \
             0 \
-            $epochs
+            $epochs \
+            $hidden_layer_size \
+            $exp_name
 
     done
 done
