@@ -37,7 +37,7 @@ run_deep_models() {
         --beta=$BETA_VAL \
 
         --exp_name=$exp_name \
-        
+
         --main_model=$main_model \
         --coeff_architecture=$arch \
 
@@ -70,7 +70,7 @@ datasets=("wadi") # "swat"
 results_csv_wadi="3_Ablations_WADI_window8_MLP.csv" 
 results_csv_swat="3_Ablations_SWAT_window8.csv"
 results_csv_batadal="3_Ablations_BATADAL_window8_samelosses.csv"
-seeds=(2)
+seeds=(3)
 
 exp_name="Ablations"
 for seed in "${seeds[@]}"; do
