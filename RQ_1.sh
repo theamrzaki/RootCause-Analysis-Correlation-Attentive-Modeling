@@ -150,7 +150,7 @@ temporal_mixer=(1) #0
 
 dataset="swat"
 results_csv="RQ_1_SWAT_NoDownsampling_batch512_window8.csv"
-seeds=(2 3) # 2 3
+seeds=(1) # 2 3
 window_size_item=8
 batch_size=512
 epochs=200
