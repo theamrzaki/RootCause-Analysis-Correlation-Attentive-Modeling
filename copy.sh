@@ -51,9 +51,9 @@ num_vars=43
 
 
 # --- COPY MODEL FILES ---
-MODEL_NAMES=("cLSTM" "GVAR" "CUTS_PLUS" "vlinear") #"vlinear"
+MODEL_NAMES=("cMLP") #"vlinear"
 DATASET_NAMES=("batadal")
-SEEDS=(2 3)
+SEEDS=(3)
 
 REMOTE_SAVED_MODELS="/home/$DEVICE_NAME/RootCause-Analysis-Correlation-Attentive-Modeling/saved_models/"
 ssh $SSH_OPTS $DEVICE_NAME@$IP_ADDRESS "mkdir -p ${REMOTE_SAVED_MODELS}"
@@ -80,7 +80,7 @@ for seed in "${SEEDS[@]}"; do
                 )
 
                 for model_file in "${models_to_copy[@]}"; do
-                    LOCAL_PATH="/home/db2003/Desktop/Amr/(TSE) RootCause-Analysis-Correlation-Attentive-Modeling/saved_models/${model_file}"
+                    LOCAL_PATH="/home/db2003/Desktop/Amr/(TSE) RootCause-Analysis-Correlation-Attentive-Modeling/saved_models/default_experiment/${model_file}"
                     if [ -f "$LOCAL_PATH" ]; then
                         scp $SSH_OPTS "$LOCAL_PATH" $DEVICE_NAME@$IP_ADDRESS:${REMOTE_SAVED_MODELS}
                     else
