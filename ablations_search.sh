@@ -66,7 +66,7 @@ run_deep_models() {
     eval $cmd
 }
 
-datasets=("swat") # "swat"
+datasets=("batadal") # "swat"
 results_csv_wadi="3_Ablations_WADI_window8_MLP.csv" 
 results_csv_swat="3_Ablations_SWAT_window8.csv"
 results_csv_batadal="3_Ablations_BATADAL_window8_samelosses.csv"
@@ -100,7 +100,7 @@ for seed in "${seeds[@]}"; do
         else
             echo "Running experiments for BATADAL dataset"
             results_csv=$results_csv_batadal
-            beta_default=0.005
+            beta_default=0
             lambda_default=0.5
             context_default="linear_attn"
             latent_default="mul"
@@ -159,46 +159,46 @@ for seed in "${seeds[@]}"; do
         # --------------------------------------------------
         # Context ablation
         # --------------------------------------------------
-        run_deep_models \
-            0 \
-            $seed \
-            $window_size_item \
-            "vlinear" \
-            $latent_default \
-            "gate" \
-            "max" \
-            "symmetric" \
-            "linear" \
-            1 \
-            $batch_size \
-            0 \
-            $epochs \
-            $hidden_layer_size \
-            $exp_name
-
-        ## --------------------------------------------------
-        ## Context ablation (with no temporal mixer)
-        ## --------------------------------------------------
         #run_deep_models \
         #    0 \
         #    $seed \
         #    $window_size_item \
         #    "vlinear" \
         #    $latent_default \
-        #    $context_default \
+        #    "gate" \
         #    "max" \
         #    "symmetric" \
         #    "linear" \
-        #    0 \
+        #    1 \
         #    $batch_size \
         #    0 \
-        #    $epochs \   
+        #    $epochs \
         #    $hidden_layer_size \
         #    $exp_name
 
-        # --------------------------------------------------
-        # Context ablation (with no orthogonal projection)
-        # --------------------------------------------------
+        ## --------------------------------------------------
+        ## Context ablation (with no temporal mixer)
+        ## --------------------------------------------------
+        run_deep_models \
+            0 \
+            $seed \
+            $window_size_item \
+            "vlinear" \
+            $latent_default \
+            $context_default \
+            "max" \
+            "symmetric" \
+            "linear" \
+            0 \
+            $batch_size \
+            0 \
+            $epochs \
+            $hidden_layer_size \
+            $exp_name
+
+         #--------------------------------------------------
+         #Context ablation (with no orthogonal projection)
+         #--------------------------------------------------
         #run_deep_models \
         #    0 \
         #    $seed \
@@ -216,9 +216,9 @@ for seed in "${seeds[@]}"; do
         #    $hidden_layer_size \
         #    $exp_name
 
-        # --------------------------------------------------
-        # Prediction head ablation
-        # --------------------------------------------------
+         #--------------------------------------------------
+         #Prediction head ablation
+         #--------------------------------------------------
         #run_deep_models \
         #    0 \
         #    $seed \

@@ -1,8 +1,8 @@
 #!/bin/bash
-IP_ADDRESS="130.63.255.228" #db2003smaller
-#IP_ADDRESS="130.63.101.32"
-DEVICE_NAME="db2003smaller"
-#DEVICE_NAME="db2003larger"
+#IP_ADDRESS="130.63.255.228" #db2003smaller
+IP_ADDRESS="130.63.102.34"
+#DEVICE_NAME="db2003smaller"
+DEVICE_NAME="db2003larger"
 
 
 # 1. Generate SSH key only if it doesn't already exist
@@ -22,9 +22,9 @@ SSH_OPTS="-o IdentitiesOnly=yes -i ~/.ssh/id_rsa"
 sudo chown -R $(whoami) "/home/db2003/Desktop/Amr/(TSE) RootCause-Analysis-Correlation-Attentive-Modeling/saved_models/"
 
 DATASET_ROOT="/home/db2003/Desktop/Amr/(TSE) RootCause-Analysis-Correlation-Attentive-Modeling/datasets"
-dataset="swat"
-windows_list=(8)
-num_vars=51
+dataset="batadal"
+windows_list=(16)
+num_vars=43
 
 # --- COPY DATASET FILES ---
 #for window in "${windows_list[@]}"; do
@@ -52,7 +52,7 @@ num_vars=51
 
 # --- COPY MODEL FILES ---
 MODEL_NAMES=("cLSTM" "GVAR" "CUTS_PLUS" "vlinear") #"vlinear"
-DATASET_NAMES=("swat")
+DATASET_NAMES=("batadal")
 SEEDS=(2 3)
 
 REMOTE_SAVED_MODELS="/home/$DEVICE_NAME/RootCause-Analysis-Correlation-Attentive-Modeling/saved_models/"
