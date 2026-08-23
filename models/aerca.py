@@ -72,16 +72,16 @@ class AERCA(nn.Module):
         # For nexts: (B, num_vars)
         self.nexts_proj = nn.Linear(self.num_modalities * self.num_vars_mod, self.num_vars).to(device)
 
-        self.models_encoder_only = ["GVAR","vlinear","cLSTM","CUTS_PLUS","Eadro","Anofusion"] 
-        self.models_simple_next_step = ["cLSTM","Eadro","Anofusion"]#TODO i need to reenable the sparsity, make it simple vector sparisty for cLSTM -> already done 
+        self.models_encoder_only = ["GVAR","vlinear","cLSTM","cMLP","CUTS_PLUS","Eadro","Anofusion"] 
+        self.models_simple_next_step = ["cLSTM","cMLP","Eadro","Anofusion"]#TODO i need to reenable the sparsity, make it simple vector sparisty for cLSTM -> already done 
         if(self.options["coeff_architecture"] in self.models_encoder_only):
             self._log_and_print('Number of parameters in encoder: {}', self._count_parameters(self.encoder))
             self.total_params = (self._count_parameters(self.encoder)  )
             self.flops = self._compute_flops(self.encoder, torch.randn(1, window_size, num_vars).to(device))
 
         if(self.options["coeff_architecture"] in ["deep_mlp"]):
-            self.decoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, args=options, device=device).to(device)
-            self.decoder_prev = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, args=options, device=device).to(device)
+            self.decoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, args=options,graph_structure=graph_structure,  device=device).to(device)
+            self.decoder_prev = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, args=options, graph_structure=graph_structure, device=device).to(device)
             self._log_and_print('Number of parameters in encoder: {}', self._count_parameters(self.encoder))
             self._log_and_print('Number of parameters in decoder: {}', self._count_parameters(self.decoder))
             self._log_and_print('Number of parameters in decoder_prev: {}', self._count_parameters(self.decoder_prev))
@@ -235,6 +235,10 @@ class AERCA(nn.Module):
         group_norm = torch.norm(W, dim=0, p=2)
         return torch.sum(group_norm)
 
+    def _sparsity_loss_cMLP(self, W, alpha):
+        group_norm = torch.norm(W, dim=(0, 2), p=2)
+        return torch.sum(group_norm)
+
     def _smoothness_loss(self, coeffs):
 
         # -------------------------
@@ -304,10 +308,10 @@ class AERCA(nn.Module):
         else:
             return us, coeffs, nexts, winds, attn_weights, preds
 
-    def decoding_2decoders(self, us, winds, add_u=True):
+    def decoding_2decoders(self, nexts, winds, add_u=True):
         #u_windows = sliding_window_view_torch(us, self.window_size + 1)
-        u_winds = us[:, :-1, :]
-        u_next = us[:, -1, :]
+        u_winds = winds
+        u_next = nexts
 
         preds, coeffs,_ = self.decoder(u_winds)
         prev_preds, prev_coeffs,_ = self.decoder_prev(winds)
@@ -318,9 +322,9 @@ class AERCA(nn.Module):
             nexts_hat = preds + prev_preds
         return nexts_hat, coeffs, prev_coeffs
 
-    def decoding(self, us, winds, add_u=True,aux_vars=None):
+    def decoding(self, us, nexts, winds, add_u=True,aux_vars=None):
         if self.options["coeff_architecture"] in ["deep_mlp"]:
-            return self.decoding_2decoders(us, winds, add_u=add_u)
+            return self.decoding_2decoders(nexts, winds, add_u=add_u)
 
     def forward(self, x,add_u=True):
         us, encoder_coeffs, nexts, winds, attn_weights, preds = self.encoding(x)
@@ -345,7 +349,7 @@ class AERCA(nn.Module):
             decoder_coeffs = torch.tensor([])
             prev_coeffs = torch.tensor([])
         else:
-            nexts_hat, decoder_coeffs, prev_coeffs = self.decoding(us, winds, add_u=add_u)
+            nexts_hat, decoder_coeffs, prev_coeffs = self.decoding(us, nexts,winds, add_u=add_u)
         return nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us, attn_weights
     
     def _training_step(self, x, add_u=True):
@@ -365,6 +369,15 @@ class AERCA(nn.Module):
                     torch.tensor(self.encoder_alpha, device=net.lstm.weight_ih_l0.device)
                 )
 
+        if self.options["coeff_architecture"] == "cMLP":
+            for net in self.encoder.coeff_net.networks:
+                loss_encoder_coeffs += self._sparsity_loss_cMLP(
+                    net.layers[0].weight,
+                    torch.tensor(
+                        self.encoder_alpha,
+                        device=net.layers[0].weight.device
+                    )
+            )
         loss_decoder_coeffs = self._sparsity_loss(decoder_coeffs, self.decoder_alpha) if self.options["coeff_architecture"] not in self.models_encoder_only else torch.tensor(0.0)
         logging.info('Decoder coeffs loss: %s', loss_decoder_coeffs.item())
 
@@ -1280,7 +1293,7 @@ class AERCA(nn.Module):
                 [k_at_step_all[0], k_at_step_all[2], k_at_step_all[4], k_at_step_all[9]],
                 k_at_step_all,
                 self.total_params,
-                self.flops,
+                0,#flops are not computed for now
                 self.options.get("results_csv"),
                 extra_metrics={
                     "mrr": mrr,
