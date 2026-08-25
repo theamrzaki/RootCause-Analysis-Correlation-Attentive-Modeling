@@ -66,11 +66,11 @@ run_deep_models() {
     eval $cmd
 }
 
-datasets=("batadal") # "swat"
+datasets=("swat") # "swat"
 results_csv_wadi="3_Ablations_WADI_window8_MLP.csv" 
 results_csv_swat="3_Ablations_SWAT_window8.csv"
 results_csv_batadal="3_Ablations_BATADAL_window8_samelosses.csv"
-seeds=(1 2 3)
+seeds=(1)
 
 exp_name="Ablations"
 for seed in "${seeds[@]}"; do
@@ -117,22 +117,22 @@ for seed in "${seeds[@]}"; do
         ## --------------------------------------------------
         ## Baseline
         ## --------------------------------------------------
-        #run_deep_models \
-        #    0 \
-        #    $seed \
-        #    $window_size_item \
-        #    "vlinear" \
-        #    "mul" \
-        #    "linear_attn" \
-        #    "max" \
-        #    "symmetric" \
-        #    "linear" \
-        #    1 \
-        #    $batch_size \
-        #    0 \
-        #    $epochs \
-        #    $hidden_layer_size \
-        #    $exp_name
+        run_deep_models \
+            0 \
+            $seed \
+            $window_size_item \
+            "vlinear" \
+            "mul" \
+            "linear_attn" \
+            "max" \
+            "symmetric" \
+            "linear" \
+            1 \
+            $batch_size \
+            0 \
+            $epochs \
+            $hidden_layer_size \
+            $exp_name
 #
         ## --------------------------------------------------
         ## Latent construction ablation
@@ -262,48 +262,48 @@ for seed in "${seeds[@]}"; do
         #    $exp_name
         #
         # No Lambda
-        BETA_VAL=0.005
-        LAMBDA_VAL=0
-        GAMMA_VAL=0.5
-        #
-        run_deep_models \
-            0 \
-            $seed \
-            $window_size_item \
-            "vlinear" \
-            "mul" \
-            $context_default \
-            "max" \
-            "symmetric" \
-            "linear" \
-            1 \
-            $batch_size \
-            0 \
-            $epochs \
-            $hidden_layer_size \
-            $exp_name
+        #BETA_VAL=0.005
+        #LAMBDA_VAL=0
+        #GAMMA_VAL=0.5
+        ##
+        #run_deep_models \
+        #    0 \
+        #    $seed \
+        #    $window_size_item \
+        #    "vlinear" \
+        #    "mul" \
+        #    $context_default \
+        #    "max" \
+        #    "symmetric" \
+        #    "linear" \
+        #    1 \
+        #    $batch_size \
+        #    0 \
+        #    $epochs \
+        #    $hidden_layer_size \
+        #    $exp_name
         #
         # No Gamma
-        BETA_VAL=0.005
-        LAMBDA_VAL=0.5
-        GAMMA_VAL=0
-        #
-        run_deep_models \
-            0 \
-            $seed \
-            $window_size_item \
-            "vlinear" \
-            "mul" \
-            $context_default \
-            "max" \
-            "symmetric" \
-            "linear" \
-            1 \
-            $batch_size \
-            0 \
-            $epochs \
-            $hidden_layer_size \
-            $exp_name
+        #BETA_VAL=0.005
+        #LAMBDA_VAL=0.5
+        #GAMMA_VAL=0
+        ##
+        #run_deep_models \
+        #    0 \
+        #    $seed \
+        #    $window_size_item \
+        #    "vlinear" \
+        #    "mul" \
+        #    $context_default \
+        #    "max" \
+        #    "symmetric" \
+        #    "linear" \
+        #    1 \
+        #    $batch_size \
+        #    0 \
+        #    $epochs \
+        #    $hidden_layer_size \
+        #    $exp_name
 
     done
 done
