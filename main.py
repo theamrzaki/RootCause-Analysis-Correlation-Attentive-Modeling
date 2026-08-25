@@ -195,10 +195,22 @@ def main(argv):
         aerca_model._training_batches(batched_training_data, batch_size=1000)
         print('Done training')
         """
+        print('1. Start calculating thresholds for reconstruction and root cause analysis...')
         xs_val = training_data[int(0.8 * len(training_data)):]
-        aerca_model._get_recon_threshold(xs_val)
-        aerca_model._get_root_cause_threshold_encoder(xs_val)
-        aerca_model._get_root_cause_threshold_decoder(xs_val)
+        print(f"2. Validation data size: {len(xs_val)}")
+
+        if dataset_name == 'wadi':
+            #as evaluation takes a long time (especially for CUTS_PLUS), we combine all thresholds into one function to speed up the process 
+            # doesn't affect any collected metric
+            print('3.4.5. Start calculating thresholds for reconstruction and root cause analysis...')
+            aerca_model._get_thresholds(xs_val)
+        else:
+            aerca_model._get_recon_threshold(xs_val)
+            print(f"3. Reconstruction threshold: {aerca_model.recon_threshold}")
+            aerca_model._get_root_cause_threshold_encoder(xs_val)
+            print(f"4. Root cause threshold (encoder): {aerca_model.root_cause_threshold_encoder}")
+            aerca_model._get_root_cause_threshold_decoder(xs_val)
+            print(f"5. Root cause threshold (decoder): {aerca_model.root_cause_threshold_decoder}")
         if "include_logs_and_traces" in options and options["include_logs_and_traces"]:
             aerca_model._get_root_cause_threshold_encoder_multi_modality(xs_val)
     aerca_model.example_normal_window = data_class.data_dict['x_n_list'][0]

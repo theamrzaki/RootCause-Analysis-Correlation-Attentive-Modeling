@@ -23,8 +23,8 @@ sudo chown -R $(whoami) "/home/db2003/Desktop/Amr/(TSE) RootCause-Analysis-Corre
 
 DATASET_ROOT="/home/db2003/Desktop/Amr/(TSE) RootCause-Analysis-Correlation-Attentive-Modeling/datasets"
 dataset="batadal"
-windows_list=(16)
-num_vars=43
+windows_list=(8)
+num_vars=127
 
 # --- COPY DATASET FILES ---
 #for window in "${windows_list[@]}"; do
@@ -51,8 +51,8 @@ num_vars=43
 
 
 # --- COPY MODEL FILES ---
-MODEL_NAMES=("GVAR" "CUTS_PLUS" "vlinear" "cLSTM" "cMLP" "deep_mlp") #"vlinear"
-DATASET_NAMES=("batadal")
+MODEL_NAMES=("deep_mlp" "cMLP") # "GVAR" "CUTS_PLUS" "vlinear" "cLSTM"   "deep_mlp" "cMLP"
+DATASET_NAMES=("wadi")
 SEEDS=(1 2 3)
 
 REMOTE_SAVED_MODELS="/home/$DEVICE_NAME/RootCause-Analysis-Correlation-Attentive-Modeling/saved_models/"
@@ -80,7 +80,7 @@ for seed in "${SEEDS[@]}"; do
                 )
 
                 for model_file in "${models_to_copy[@]}"; do
-                    LOCAL_PATH="/home/db2003/Desktop/Amr/(TSE) RootCause-Analysis-Correlation-Attentive-Modeling/saved_models/default_experiment/${model_file}"
+                    LOCAL_PATH="/home/db2003/Desktop/Amr/(TSE) RootCause-Analysis-Correlation-Attentive-Modeling/saved_models/${model_file}"
                     if [ -f "$LOCAL_PATH" ]; then
                         scp $SSH_OPTS "$LOCAL_PATH" $DEVICE_NAME@$IP_ADDRESS:${REMOTE_SAVED_MODELS}
                     else

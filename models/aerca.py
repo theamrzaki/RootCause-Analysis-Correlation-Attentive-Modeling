@@ -788,7 +788,7 @@ class AERCA(nn.Module):
         self.eval()#(1,10000,10)
         losses_list = []
         with torch.no_grad():
-            for x in xs:
+            for x in tqdm(xs, desc="Calculating reconstruction threshold"):
                 loss, nexts_hat, nexts, encoder_coeffs, decoder_coeffs, kl_div, preprocessed_label, us,_ = self._testing_step(x, add_u=False)
                 loss_arr = self.mse_loss_wo_reduction(nexts_hat, nexts).cpu().numpy().ravel()
                 losses_list.append(loss_arr)
@@ -804,7 +804,7 @@ class AERCA(nn.Module):
         self.eval()
         us_list = []
         with torch.no_grad():
-            for x in xs:
+            for x in tqdm(xs, desc="Calculating root cause thresholds (encoder)"):
                 us = self._testing_step(x)[-2]
                 us_list.append(us.cpu().numpy())
         if "include_logs_and_traces" in self.options and self.options["include_logs_and_traces"] == 1:
@@ -821,34 +821,11 @@ class AERCA(nn.Module):
         np.save(os.path.join(self.save_dir, f'{self.model_name}_us_mean_encoder.npy'), self.us_mean_encoder)
         np.save(os.path.join(self.save_dir, f'{self.model_name}_us_std_encoder.npy'), self.us_std_encoder)
 
-    def _get_root_cause_threshold_encoder_multi_modality(self, xs):
-        self.eval()
-        us_list = []
-        with torch.no_grad():
-            for x in xs:
-                us = self._testing_step(x)[-2]
-                us_list.append(us.cpu().numpy())
-                # us shape: (1, num_vars, latent_dim)
-
-        # (N, num_vars, latent_dim)
-        us_all = np.concatenate(us_list, axis=0)
-
-        # Reduce latent dim → (N, num_vars) score per var per sample
-        us_all_scores = np.linalg.norm(us_all, axis=-1)
-
-        # Stats per variable over N samples → shape (num_vars,)
-        self.us_mean_encoder = np.median(us_all_scores, axis=0)
-        self.us_std_encoder  = np.std(us_all_scores, axis=0)
-
-        np.save(os.path.join(self.save_dir, f'{self.model_name}_us_mean_encoder.npy'), self.us_mean_encoder)
-        np.save(os.path.join(self.save_dir, f'{self.model_name}_us_std_encoder.npy'),  self.us_std_encoder)
-
-
     def _get_root_cause_threshold_decoder(self, xs):
         self.eval()
         diff_list = []
         with torch.no_grad():
-            for x in xs:
+            for x in tqdm(xs, desc="Calculating root cause thresholds (decoder)"):
                 _, nexts_hat, nexts, _, _, _, _, _, _ = self._testing_step(x, add_u=False)
                 diff = (nexts - nexts_hat).cpu().numpy().ravel()
                 diff_list.append(diff)
@@ -862,24 +839,65 @@ class AERCA(nn.Module):
         np.save(os.path.join(self.save_dir, f'{self.model_name}_us_mean_decoder.npy'), self.us_mean_decoder)
         np.save(os.path.join(self.save_dir, f'{self.model_name}_us_std_decoder.npy'), self.us_std_decoder)
 
-
-    def _get_recon_threshold_batch(self, xs):
+    def _get_thresholds(self, xs):
         self.eval()
+        
         losses_list = []
+        us_list = []
+        diff_list = []
+
         with torch.no_grad():
-            for x in xs:
-                # x is now (window_size, P), expand to batch of 1
-                x_batch = x.unsqueeze(0) if torch.is_tensor(x) else torch.tensor(x).unsqueeze(0).float().to(self.device)
-                _, nexts_hat, nexts, _, _, _, _, _ = self._testing_step(x_batch, add_u=False)
+            #TODO just for testing limit xs 
+            ###########xs = xs[:100]
+            for x in tqdm(xs, desc="Calculating thresholds"):
+                loss, nexts_hat, nexts, encoder_coeffs, decoder_coeffs, kl_div, preprocessed_label, us, _ = self._testing_step(x, add_u=False)
+
                 loss_arr = self.mse_loss_wo_reduction(nexts_hat, nexts).cpu().numpy().ravel()
                 losses_list.append(loss_arr)
+
+                us_list.append(us.cpu().numpy())
+
+                diff = (nexts - nexts_hat).cpu().numpy().ravel()
+                diff_list.append(diff)
+
+        # Reconstruction threshold
         recon_losses = np.concatenate(losses_list)
         self.recon_threshold_value = np.quantile(recon_losses, self.recon_threshold)
         self.recon_mean = np.mean(recon_losses)
         self.recon_std = np.std(recon_losses)
+
         np.save(os.path.join(self.save_dir, f'{self.model_name}_recon_threshold.npy'), self.recon_threshold_value)
         np.save(os.path.join(self.save_dir, f'{self.model_name}_recon_mean.npy'), self.recon_mean)
         np.save(os.path.join(self.save_dir, f'{self.model_name}_recon_std.npy'), self.recon_std)
+
+        # Encoder root cause threshold
+        if "include_logs_and_traces" in self.options and self.options["include_logs_and_traces"] == 1:
+            self.num_vars = self.options["num_metrics"] + self.options["num_log_features"] + self.options["num_trace_features"]
+        else:
+            self.num_vars = self.options["num_vars"]
+
+        us_all = np.concatenate(us_list, axis=0).reshape(-1, self.num_vars)
+        self.lower_encoder = np.quantile(us_all, (1 - self.root_cause_threshold_encoder) / 2, axis=0)
+        self.upper_encoder = np.quantile(us_all, 1 - (1 - self.root_cause_threshold_encoder) / 2, axis=0)
+        self.us_mean_encoder = np.median(us_all, axis=0)
+        self.us_std_encoder = np.std(us_all, axis=0)
+
+        np.save(os.path.join(self.save_dir, f'{self.model_name}_lower_encoder.npy'), self.lower_encoder)
+        np.save(os.path.join(self.save_dir, f'{self.model_name}_upper_encoder.npy'), self.upper_encoder)
+        np.save(os.path.join(self.save_dir, f'{self.model_name}_us_mean_encoder.npy'), self.us_mean_encoder)
+        np.save(os.path.join(self.save_dir, f'{self.model_name}_us_std_encoder.npy'), self.us_std_encoder)
+
+        # Decoder root cause threshold
+        us_all = np.concatenate(diff_list, axis=0).reshape(-1, self.num_vars)
+        self.lower_decoder = np.quantile(us_all, (1 - self.root_cause_threshold_decoder) / 2, axis=0)
+        self.upper_decoder = np.quantile(us_all, 1 - (1 - self.root_cause_threshold_decoder) / 2, axis=0)
+        self.us_mean_decoder = np.mean(us_all, axis=0)
+        self.us_std_decoder = np.std(us_all, axis=0)
+
+        np.save(os.path.join(self.save_dir, f'{self.model_name}_lower_decoder.npy'), self.lower_decoder)
+        np.save(os.path.join(self.save_dir, f'{self.model_name}_upper_decoder.npy'), self.upper_decoder)
+        np.save(os.path.join(self.save_dir, f'{self.model_name}_us_mean_decoder.npy'), self.us_mean_decoder)
+        np.save(os.path.join(self.save_dir, f'{self.model_name}_us_std_decoder.npy'), self.us_std_decoder)
 
     def plot_case_study(self, z_scores, labels=None, attn_importance=None, mlp_scores=None, num_vars=None, threshold=0.1):
         """
