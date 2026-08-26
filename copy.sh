@@ -51,9 +51,9 @@ num_vars=43
 
 
 # --- COPY MODEL FILES ---
-MODEL_NAMES=("cMLP") # "GVAR" "CUTS_PLUS" "vlinear" "cLSTM"   "deep_mlp" "cMLP"
+MODEL_NAMES=("deep_mlp") # "GVAR" "CUTS_PLUS" "vlinear" "cLSTM"   "deep_mlp" "cMLP"
 DATASET_NAMES=("batadal")
-SEEDS=(3)
+SEEDS=(1 2 3)
 
 REMOTE_SAVED_MODELS="/home/$DEVICE_NAME/RootCause-Analysis-Correlation-Attentive-Modeling/saved_models/"
 ssh $SSH_OPTS $DEVICE_NAME@$IP_ADDRESS "mkdir -p ${REMOTE_SAVED_MODELS}"
