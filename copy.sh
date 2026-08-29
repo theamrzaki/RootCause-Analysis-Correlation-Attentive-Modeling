@@ -22,7 +22,7 @@ SSH_OPTS="-o IdentitiesOnly=yes -i ~/.ssh/id_rsa"
 sudo chown -R $(whoami) "/home/db2003/Desktop/Amr/(TSE) RootCause-Analysis-Correlation-Attentive-Modeling/saved_models/"
 
 DATASET_ROOT="/home/db2003/Desktop/Amr/(TSE) RootCause-Analysis-Correlation-Attentive-Modeling/datasets"
-dataset="batadal"
+dataset="wadi"
 windows_list=(8)
 num_vars=127
 
@@ -53,7 +53,7 @@ num_vars=127
 # --- COPY MODEL FILES ---
 MODEL_NAMES=("iTransformer" "TimeMixerpp") # "GVAR" "CUTS_PLUS" "vlinear" "cLSTM"   "deep_mlp" "cMLP"
 DATASET_NAMES=("wadi")
-SEEDS=(1)
+SEEDS=(1 2 3)
 
 REMOTE_SAVED_MODELS="/home/$DEVICE_NAME/RootCause-Analysis-Correlation-Attentive-Modeling/saved_models/"
 ssh $SSH_OPTS $DEVICE_NAME@$IP_ADDRESS "mkdir -p ${REMOTE_SAVED_MODELS}"

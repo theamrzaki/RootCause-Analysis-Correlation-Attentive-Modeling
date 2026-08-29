@@ -12,37 +12,34 @@ import numpy as np
 import os
 from numpy.linalg import eigh
 
-def build_orthogonal_basis(num_vars, basis_type):
-    t = np.linspace(-1, 1, num_vars)
-
+def build_orthogonal_basis(window_size, basis_type):
     if basis_type == "legendre":
-        from scipy.special import legendre
-        basis = np.array([
-            legendre(i)(t)
-            for i in range(num_vars)
-        ])
+        t = np.linspace(-1, 1, window_size)
+        from scipy.special import eval_legendre
+        basis = np.array([eval_legendre(i, t) for i in range(window_size)])
 
     elif basis_type == "chebyshev":
+        t = np.cos((2*np.arange(window_size)+1)*np.pi/(2*window_size))
         from numpy.polynomial.chebyshev import chebvander
-        basis = chebvander(t, num_vars - 1).T
+        basis = chebvander(t, window_size - 1).T
 
     elif basis_type == "hermite":
+        t = np.linspace(-4, 4, window_size)
         from numpy.polynomial.hermite import hermvander
-        basis = hermvander(t, num_vars - 1).T
+        basis = hermvander(t, window_size - 1).T
 
     elif basis_type == "laguerre":
+        t = np.linspace(0, 15, window_size)
         from numpy.polynomial.laguerre import lagvander
-        basis = lagvander(t, num_vars - 1).T
+        basis = lagvander(t, window_size - 1).T
 
     else:
         raise ValueError(f"Unknown basis: {basis_type}")
 
-    basis = torch.tensor(basis, dtype=torch.float32)
+    basis = torch.as_tensor(basis, dtype=torch.float32)
+    Q, _ = torch.linalg.qr(basis.T)
 
-    # Convert sampled basis to an orthonormal basis
-    Q, R = torch.linalg.qr(basis.T)
-
-    return Q
+    return Q.T
 
 class OrthTransform(nn.Module):
     def __init__(self, dataset_obj, save_path, time_lag, device):
@@ -160,10 +157,10 @@ class vlinear(nn.Module):
         self.orth_transformer = self.options.get("orth_transformer", None)
         if self.transformation == "learned":
             self.init_transform = nn.Parameter(
-                torch.randn(num_vars, num_vars)
+                torch.randn(self.order, self.order)
             )
         elif self.transformation in ["legendre", "laguerre", "chebyshev", "hermite"]:
-            self.register_buffer("basis", build_orthogonal_basis(num_vars, self.transformation))
+            self.register_buffer("basis", build_orthogonal_basis(self.order, self.transformation))
 
 
         # Latent construction
@@ -251,10 +248,11 @@ class vlinear(nn.Module):
         if self.transformation == "orthogonal" and self.orth_transformer is not None:
             x = self.orth_transformer(x)
         elif self.transformation == "learned":
-            x = torch.einsum("btp,pq->btq",x,self.init_transform)
+            x = torch.einsum("btp,ts->bsp", x, self.init_transform).transpose(1, 2)
         elif self.transformation in ["legendre", "laguerre", "chebyshev", "hermite"]:
-            basis = getattr(self, f"basis")
-            x = torch.einsum("btp,pq->btq",x,basis)
+            x = torch.einsum("btp,ts->bsp", x, self.basis).transpose(1, 2)
+        elif self.orth_transformer is None:#case of self.transformation == "none" --> just pass the input as is
+            x = x.transpose(1, 2)
 
         # B,P,T -> B,T,P,1
         x = x.transpose(1,2).unsqueeze(-1)
@@ -367,10 +365,9 @@ class vlinear(nn.Module):
         if self.transformation == "orthogonal" and self.orth_transformer is not None:
             pred = self.orth_transformer.inverse(pred)
         elif self.transformation == "learned":
-            pred = torch.einsum("btp,pq->btq",pred,self.init_transform.T)
+            pred = torch.einsum("btp,ts->bsp",pred.transpose(1, 2),self.init_transform.T)
         elif self.transformation in ["legendre", "laguerre", "chebyshev", "hermite"]:
-            basis = getattr(self, f"basis")
-            pred = torch.einsum("btp,pq->btq",pred,basis.T)
+            pred = torch.einsum("btp,ts->bsp",pred.transpose(1, 2),self.basis.T)
         else:
             pred = pred.transpose(1, 2)
 
