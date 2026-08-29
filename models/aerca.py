@@ -70,8 +70,8 @@ class AERCA(nn.Module):
         # For nexts: (B, num_vars)
         self.nexts_proj = nn.Linear(self.num_modalities * self.num_vars_mod, self.num_vars).to(device)
 
-        self.models_encoder_only = ["GVAR","vlinear","cLSTM","cMLP","CUTS_PLUS"] 
-        self.models_simple_next_step = ["cLSTM","cMLP"]
+        self.models_encoder_only = ["GVAR","vlinear","cLSTM","cMLP","CUTS_PLUS", "Fits", "Dlinear", "iTransformer", "TimeMixerpp"] 
+        self.models_simple_next_step = ["cLSTM","cMLP","Fits","Dlinear","iTransformer","TimeMixerpp"]
         if(self.options["coeff_architecture"] in self.models_encoder_only):
             self._log_and_print('Number of parameters in encoder: {}', self._count_parameters(self.encoder))
             self.total_params = (self._count_parameters(self.encoder)  )

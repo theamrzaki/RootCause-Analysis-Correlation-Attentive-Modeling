@@ -79,7 +79,7 @@ run_experiment_baselines() {
    local preprocessing_data=$1
    local seed=$2
    local window_size_item=$3
-   local coeff_architecture=("nsigma") #"baro" "torai" "rcd"
+   local coeff_architecture=("e_diagnosis") #"baro" "torai" "rcd"
    local main_model="aerca_based" 
    for arch in "${coeff_architecture[@]}"; do
        echo "Running: dataset=$dataset | seed=$seed | arch=$arch | window_size=$window_size_item"
@@ -121,7 +121,7 @@ dataset="wadi"
 results_csv="RQ_1_WADI_RealNoDownsampling.csv"
 window_size_item=8
 epochs=50
-seeds=(2)
+seeds=(2 3)
 hidden_layer_size=128
 BETA_VAL=0.005
 LAMBDA_VAL=0.5
@@ -137,6 +137,11 @@ for seed in "${seeds[@]}"; do
     #run_deep_models $preprocessing_data $seed $window_size_item "cLSTM" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
     #run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
     #run_experiment_baselines $preprocessing_data $seed $window_size_item
+
+    run_deep_models $preprocessing_data $seed $window_size_item "iTransformer" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
+    run_deep_models $preprocessing_data $seed $window_size_item "TimeMixerpp" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
+
+
 done
 
 
@@ -153,7 +158,7 @@ temporal_mixer=(1) #0
 
 dataset="swat"
 results_csv="RQ_1_SWAT_NoDownsampling_batch512_window8.csv"
-seeds=(1 2 3) # 2 3
+seeds=(3) # 2 3) # 2 3
 window_size_item=8
 batch_size=512
 epochs=200
@@ -171,6 +176,10 @@ for seed in "${seeds[@]}"; do
     #run_deep_models $preprocessing_data $seed $window_size_item "deep_mlp" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
     #run_deep_models $preprocessing_data $seed $window_size_item "cMLP" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
     #run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
+
+    run_deep_models $preprocessing_data $seed $window_size_item "iTransformer" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
+    run_deep_models $preprocessing_data $seed $window_size_item "TimeMixerpp" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
+
 done
 
 
@@ -190,7 +199,7 @@ temporal_mixer=(1) #0
 
 dataset="batadal"
 results_csv="RQ_1_BATADAL_NoDownsampling_batch512_window8.csv"
-seeds=(1 2 3) # 2 3
+seeds=(2 3) # 2 3
 window_size_item=16
 epochs=200
 batch_size=256
@@ -206,7 +215,10 @@ for seed in "${seeds[@]}"; do
     #run_experiment_baselines $preprocessing_data $seed $window_size_item
     #run_deep_models $preprocessing_data $seed $window_size_item "cLSTM" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
     #run_deep_models $preprocessing_data $seed $window_size_item "cMLP" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
-    run_deep_models $preprocessing_data $seed $window_size_item "deep_mlp" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
+    #run_deep_models $preprocessing_data $seed $window_size_item "deep_mlp" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
     #run_deep_models $preprocessing_data $seed $window_size_item "CUTS_PLUS" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
+    
+    run_deep_models $preprocessing_data $seed $window_size_item "iTransformer" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
+    run_deep_models $preprocessing_data $seed $window_size_item "TimeMixerpp" $latent_mode $context $pool $coeff_mode $predictor $temporal_mixer $batch_size $epochs $hidden_layer_size
 done
 
