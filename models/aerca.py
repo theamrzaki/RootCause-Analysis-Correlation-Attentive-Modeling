@@ -72,12 +72,12 @@ class AERCA(nn.Module):
         # For nexts: (B, num_vars)
         self.nexts_proj = nn.Linear(self.num_modalities * self.num_vars_mod, self.num_vars).to(device)
 
-        self.models_encoder_only = ["GVAR","vlinear","cLSTM","cMLP","CUTS_PLUS","Eadro","Anofusion"] 
-        self.models_simple_next_step = ["cLSTM","cMLP","Eadro","Anofusion"]#TODO i need to reenable the sparsity, make it simple vector sparisty for cLSTM -> already done 
+        self.models_encoder_only = ["GVAR","vlinear","cLSTM","cMLP","CUTS_PLUS", "Fits", "Dlinear", "iTransformer", "TimeMixerpp"] 
+        self.models_simple_next_step = ["cLSTM","cMLP","Fits","Dlinear","iTransformer","TimeMixerpp"]
         if(self.options["coeff_architecture"] in self.models_encoder_only):
             self._log_and_print('Number of parameters in encoder: {}', self._count_parameters(self.encoder))
             self.total_params = (self._count_parameters(self.encoder)  )
-            self.flops = self._compute_flops(self.encoder, torch.randn(1, window_size, num_vars).to(device))
+            #self.flops = self._compute_flops(self.encoder, torch.randn(1, window_size, num_vars).to(device))
 
         if(self.options["coeff_architecture"] in ["deep_mlp"]):
             self.decoder = SENNGC(num_vars, window_size, hidden_layer_size, num_hidden_layers, args=options,graph_structure=graph_structure,  device=device).to(device)
