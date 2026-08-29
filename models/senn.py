@@ -8,6 +8,10 @@ from layers.cMLP import cMLP
 from layers.CUTS_PLUS import CUTS_PLUS_Wrapper
 from layers.Eadro import MainModel as Eadro 
 from layers.Anofusion import AnoFusionWrapper as Anofusion
+
+from layers.iTransformer import Model as iTransformer
+from layers.TimeMixerpp import Model as TimeMixerpp
+
 class SENNGC(nn.Module):
     def __init__(self, num_vars: int, order: int, hidden_layer_size: int, num_hidden_layers: int,
                  graph_structure: torch.Tensor, 
@@ -36,7 +40,7 @@ class SENNGC(nn.Module):
                 modules.extend(nn.Sequential(nn.Linear(hidden_layer_size, num_vars**2), nn.Tanh()))
                 self.coeff_nets.append(nn.Sequential(*modules))
      
-        if args["coeff_architecture"] not in  ["ht","epsilon_diagnosis","rcd","TemporalGNN","cross_time_freq","cross_attention_single_coeff_network","TemporalGNN_Attention","trend_seasonal","rcd","TemporalGNN_Attention_fourier","TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced","causalrca","cuts_mlp","cuts_lstm","GVAR","vlinear","nsigma","baro","circa","torai","cLSTM","cMLP","CUTS_PLUS","Eadro","Anofusion"]:
+        if args["coeff_architecture"] not in  ["ht","epsilon_diagnosis","rcd","TemporalGNN","cross_time_freq","cross_attention_single_coeff_network","TemporalGNN_Attention","trend_seasonal","rcd","TemporalGNN_Attention_fourier","TemporalGNN_Attention_crossattn","TemporalGNN_Attention_crossattn_Legendre","TemporalGNN_Attention_crossattn_enhanced","causalrca","cuts_mlp","cuts_lstm","GVAR","vlinear","nsigma","baro","circa","torai","cLSTM","cMLP","CUTS_PLUS","Fits","Dlinear","iTransformer","TimeMixerpp"]:
             total_params = sum(p.numel() for net in self.coeff_nets for p in net.parameters())
             print(f"Total parameters for {order} lags: {total_params}")
         
@@ -65,48 +69,6 @@ class SENNGC(nn.Module):
                     device=device,
                     opt=args
                 )
-        if args["coeff_architecture"] == "Art": #works for multi-modality data
-            graph = graph_structure.to(device)
-            md = args["num_metrics"]
-            ld = args["num_log_features"]
-            td = args["num_trace_features"]
-            hidden_layer_size = args["hidden_layer_size"]
-            self.coeff_net = ARTWrapper(
-                adj=graph, 
-                raw_metric=md,
-                raw_logs=ld,
-                raw_traces=td,
-                feature_metric=hidden_layer_size,
-                feature_logs=hidden_layer_size,
-                feature_traces=hidden_layer_size
-            )   
-
-        if args["coeff_architecture"] == "Eadro": #works for multi-modality data
-            event_num = args['num_log_features']
-            metric_num = args['num_metrics']
-            node_num = args['num_trace_features']
-
-            self.coeff_net = Eadro(
-                event_num=event_num,
-                metric_num=metric_num,
-                node_num=node_num,
-                hidden_dim=hidden_layer_size,
-            )   
-
-        if args["coeff_architecture"] == "Anofusion": #works for multi-modality data
-            event_num = args['num_log_features']
-            metric_num = args['num_metrics']
-            node_num = args['num_trace_features']
-
-            self.coeff_net = Anofusion(
-				num_services=args["num_pods"],
-				window_size=args['window_size']-1,  # because we use K-1 lags as input
-				metric_dim=metric_num,
-				log_dim=event_num,
-				trace_dim=node_num,
-				hidden_dim= hidden_layer_size,  
-			)
-
                 
         if args["coeff_architecture"] == "cLSTM":
             self.coeff_net = cLSTM(num_vars, hidden_layer_size)
@@ -127,6 +89,64 @@ class SENNGC(nn.Module):
                 device=device,
                 options = args  # default to None if not specified
             )
+
+        
+        #Non Causal Architectures (FITS, DLinear, iTransformer, TimeMixerpp)
+        if args["coeff_architecture"] in ["Fits","Dlinear","iTransformer","TimeMixerpp"]:
+            class SimpleConfig:
+                """Lightweight config container (like an empty struct)."""
+                pass
+
+
+            config = SimpleConfig()
+
+            # ===== Basic Parameters =====
+            config.win_size = args["window_size"]             # Window size
+            config.DSR = 1                              # Downsampling rate
+            config.cutfreq = 0                          # Cut frequency for FITS (0 = auto)
+
+            if config.cutfreq == 0:
+                config.cutfreq = int((config.win_size / config.DSR) / 2)
+
+            assert (config.win_size / config.DSR) / 2 >= config.cutfreq, \
+                'cutfreq should be smaller than half of the window size after downsampling'
+
+            # ===== Sequence Parameters =====
+            config.seq_len = config.win_size // config.DSR -1
+            config.pred_len = 0                         # No prediction horizon for anomaly detection
+            config.individual = False
+            config.num_class = 1 #not used for anomaly detection
+            config.task_name = "anomaly_detection"
+            config.output_attention = True  # store_true equivalent (bool, not string)
+
+            # ===== Embedding Parameters =====
+            config.embed = "timeF"                      # Time features encoding: [timeF, fixed, learned]
+            config.freq = "h"                           # Frequency (hourly)
+            config.dropout = 0.1
+
+            # ===== Model Architecture =====
+            config.d_model = args["hidden_layer_size"]
+            config.factor = 1
+            config.n_heads = 8
+            config.d_ff = args["hidden_layer_size"]
+            config.enc_in = args["num_vars"]
+            config.activation = "gelu"
+            config.e_layers = 2
+            config.device = device
+            print("seq_len:", config.seq_len, "pred_len:", config.pred_len, "d_model:", config.d_model, "d_ff:", config.d_ff, "enc_in:", config.enc_in)
+    
+
+            if args["coeff_architecture"] == "Fits":
+                self.coeff_net = Fits(configs=config)
+            elif args["coeff_architecture"] == "Dlinear":
+                self.coeff_net = DLinear(configs=config)
+            elif args["coeff_architecture"] == "iTransformer":
+                self.coeff_net = iTransformer(configs=config)
+            elif args["coeff_architecture"] == "TimeMixerpp":
+                self.coeff_net = TimeMixerpp(configs=config)
+
+
+
         # Some bookkeeping
         self.num_vars = num_vars
         self.order = order
@@ -200,5 +220,5 @@ class SENNGC(nn.Module):
         elif self.args["coeff_architecture"] in ["vlinear","CUTS_PLUS"]:
             return self.forward_temporal(inputs)
         
-        elif self.args["coeff_architecture"] in ["cLSTM","cMLP","Eadro","Anofusion"]:
+        elif self.args["coeff_architecture"] in ["cLSTM","cMLP","Fits","Dlinear","iTransformer","TimeMixerpp"]:
             return self.forward_simple_nextstep(inputs), None, None
