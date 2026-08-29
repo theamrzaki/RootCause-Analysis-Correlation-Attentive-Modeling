@@ -74,7 +74,7 @@ results_csv_swat="4_Ablations_SWAT_projections.csv"
 results_csv_batadal="4_Ablations_BATADAL_projections.csv"
 seeds=(1)
 
-transformations=("learned" "legendre" "laguerre" "chebyshev" "hermite") # "legendre" "laguerre" "chebyshev" "hermite") #"none" "orthogonal" 
+transformations=("fourier")  #"learned" "legendre" "laguerre" "chebyshev" "hermite" #"none" "orthogonal" 
 exp_name="Ablations"
 for seed in "${seeds[@]}"; do
     for transformation in "${transformations[@]}"; do

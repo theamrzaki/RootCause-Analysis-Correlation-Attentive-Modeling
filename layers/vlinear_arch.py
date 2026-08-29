@@ -41,6 +41,28 @@ def build_orthogonal_basis(window_size, basis_type):
 
     return Q.T
 
+def build_fourier_basis(temporal_length):
+    t = torch.arange(temporal_length, dtype=torch.float32)
+    basis = [torch.ones(temporal_length) / np.sqrt(temporal_length)]
+
+    for k in range(1, temporal_length // 2 + 1):
+        if k < temporal_length / 2:
+            basis.append(
+                np.sqrt(2 / temporal_length) *
+                torch.cos(2 * np.pi * k * t / temporal_length)
+            )
+            basis.append(
+                np.sqrt(2 / temporal_length) *
+                torch.sin(2 * np.pi * k * t / temporal_length)
+            )
+        else:
+            basis.append(
+                torch.cos(2 * np.pi * k * t / temporal_length) /
+                np.sqrt(temporal_length)
+            )
+
+    return torch.stack(basis[:temporal_length])
+
 class OrthTransform(nn.Module):
     def __init__(self, dataset_obj, save_path, time_lag, device):
         super().__init__()
@@ -161,7 +183,8 @@ class vlinear(nn.Module):
             )
         elif self.transformation in ["legendre", "laguerre", "chebyshev", "hermite"]:
             self.register_buffer("basis", build_orthogonal_basis(self.order, self.transformation))
-
+        elif self.transformation == "fourier":
+            self.register_buffer("basis", build_fourier_basis(self.order))
 
         # Latent construction
         self.embedding = nn.Parameter(
@@ -249,7 +272,7 @@ class vlinear(nn.Module):
             x = self.orth_transformer(x)
         elif self.transformation == "learned":
             x = torch.einsum("btp,ts->bsp", x, self.init_transform).transpose(1, 2)
-        elif self.transformation in ["legendre", "laguerre", "chebyshev", "hermite"]:
+        elif self.transformation in ["legendre", "laguerre", "chebyshev", "hermite", "fourier"]:
             x = torch.einsum("btp,ts->bsp", x, self.basis).transpose(1, 2)
         elif self.orth_transformer is None:#case of self.transformation == "none" --> just pass the input as is
             x = x.transpose(1, 2)
@@ -366,7 +389,7 @@ class vlinear(nn.Module):
             pred = self.orth_transformer.inverse(pred)
         elif self.transformation == "learned":
             pred = torch.einsum("btp,ts->bsp",pred.transpose(1, 2),self.init_transform.T)
-        elif self.transformation in ["legendre", "laguerre", "chebyshev", "hermite"]:
+        elif self.transformation in ["legendre", "laguerre", "chebyshev", "hermite", "fourier"]:
             pred = torch.einsum("btp,ts->bsp",pred.transpose(1, 2),self.basis.T)
         else:
             pred = pred.transpose(1, 2)
