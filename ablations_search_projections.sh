@@ -68,11 +68,11 @@ run_deep_models() {
     eval $cmd
 }
 
-datasets=("swat" "wadi") # "swat" "wadi"
+datasets=("batadal" "swat" "wadi") # "swat" "wadi"
 results_csv_wadi="4_Ablations_WADI_projections.csv" 
 results_csv_swat="4_Ablations_SWAT_projections.csv"
 results_csv_batadal="4_Ablations_BATADAL_projections.csv"
-seeds=(1)
+seeds=(2 3)
 
 transformations=("none" "learned" "legendre" "laguerre" "chebyshev" "hermite" "fourier" "orthogonal")  #"none" "learned" "legendre" "laguerre" "chebyshev" "hermite" "fourier" "orthogonal" 
 exp_name="Ablations"
