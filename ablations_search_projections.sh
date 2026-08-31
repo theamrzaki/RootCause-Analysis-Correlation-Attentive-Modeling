@@ -29,6 +29,8 @@ run_deep_models() {
     local hidden_layer_size=${14}
     local exp_name=${15}
     local transformation=${16}
+    local plot_latents=${17}
+
     echo "Running seed: $seed | dataset: $dataset | transformation: $transformation"
 
     cmd="python3 main.py \
@@ -63,19 +65,21 @@ run_deep_models() {
         --disable_orth_proj=$disable_orthogonal_projection \
         --hidden_layer_size=$hidden_layer_size\
 
-        --transformation=$transformation"
+        --transformation=$transformation\
+        --plot_latents=$plot_latents"
 
     eval $cmd
 }
 
-datasets=("batadal" "swat" "wadi") # "swat" "wadi"
+datasets=("batadal") # "swat" "wadi") # "swat" "wadi"
 results_csv_wadi="4_Ablations_WADI_projections.csv" 
 results_csv_swat="4_Ablations_SWAT_projections.csv"
 results_csv_batadal="4_Ablations_BATADAL_projections.csv"
-seeds=(2 3)
+seeds=(1)
 
-transformations=("none" "learned" "legendre" "laguerre" "chebyshev" "hermite" "fourier" "orthogonal")  #"none" "learned" "legendre" "laguerre" "chebyshev" "hermite" "fourier" "orthogonal" 
+transformations=("learned" "legendre" "laguerre" "chebyshev" "hermite" "fourier"  "none" "orthogonal") # "none" "learned" "legendre" "laguerre" "chebyshev" "hermite" "fourier" "orthogonal") 
 exp_name="Ablations"
+plot_latents=1
 for seed in "${seeds[@]}"; do
     for transformation in "${transformations[@]}"; do
         for dataset in "${datasets[@]}"; do
@@ -157,7 +161,8 @@ for seed in "${seeds[@]}"; do
                 $epochs \
                 $hidden_layer_size \
                 $exp_name \
-                $transformation
+                $transformation \
+                $plot_latents
 
         done
     done

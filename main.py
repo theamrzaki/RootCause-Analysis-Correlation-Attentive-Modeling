@@ -177,7 +177,7 @@ def main(argv):
             training_data = data_class.data_dict['x_n_list']
         print('Start training AERCA model...')
         
-        aerca_model._training(training_data)
+        aerca_model._training(training_data, return_latents=options['plot_latents'])
         print('Done training')
 
         """

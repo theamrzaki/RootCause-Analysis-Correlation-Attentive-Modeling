@@ -170,11 +170,14 @@ class SENNGC(nn.Module):
 
         return preds, torch.cat(coeffs, dim=1), None
 
-    def forward_temporal(self, inputs: torch.Tensor):
+    def forward_temporal(self, inputs: torch.Tensor, return_latents=False):
         """
         inputs: (B, order, num_vars)
         TemporalGNN processes the entire lag sequence recurrently.
         """
+        if return_latents:
+            preds, coeffs, attn_weights, latents = self.coeff_net(inputs, return_latents=return_latents)  # let TemporalGNN return preds + coeffs
+            return preds, coeffs, attn_weights, latents
         preds, coeffs, attn_weights = self.coeff_net(inputs)  # let TemporalGNN return preds + coeffs
         return preds, coeffs, attn_weights
         
@@ -185,11 +188,13 @@ class SENNGC(nn.Module):
         preds,_ = self.coeff_net(inputs)
         return preds
     
-    def forward(self, inputs: torch.Tensor):
+    def forward(self, inputs: torch.Tensor, return_latents=False):
         if self.args["coeff_architecture"] == "deep_mlp" or self.args["coeff_architecture"] == "GVAR":
             return self.forward_normal(inputs)
 
         elif self.args["coeff_architecture"] in ["vlinear","CUTS_PLUS"]:
+            if return_latents:
+                return self.forward_temporal(inputs, return_latents=return_latents)
             return self.forward_temporal(inputs)
         
         elif self.args["coeff_architecture"] in ["cLSTM","cMLP","Fits","Dlinear","iTransformer","TimeMixerpp"]:

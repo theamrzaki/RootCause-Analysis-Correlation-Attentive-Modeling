@@ -259,7 +259,7 @@ class vlinear(nn.Module):
 
 
 
-    def forward(self, x):
+    def forward(self, x, return_latents=False):
         B,T,P = x.shape
 
         # Normalization
@@ -269,16 +269,16 @@ class vlinear(nn.Module):
         # Orthogonal space
         # Transformation
         if self.transformation == "orthogonal" and self.orth_transformer is not None:
-            x = self.orth_transformer(x)
+            x_proj = self.orth_transformer(x)
         elif self.transformation == "learned":
-            x = torch.einsum("btp,ts->bsp", x, self.init_transform).transpose(1, 2)
+            x_proj = torch.einsum("btp,ts->bsp", x, self.init_transform).transpose(1, 2)
         elif self.transformation in ["legendre", "laguerre", "chebyshev", "hermite", "fourier"]:
-            x = torch.einsum("btp,ts->bsp", x, self.basis).transpose(1, 2)
+            x_proj = torch.einsum("btp,ts->bsp", x, self.basis).transpose(1, 2)
         elif self.orth_transformer is None:#case of self.transformation == "none" --> just pass the input as is
-            x = x.transpose(1, 2)
+            x_proj = x.transpose(1, 2)
 
         # B,P,T -> B,T,P,1
-        x = x.transpose(1,2).unsqueeze(-1)
+        x = x_proj.transpose(1,2).unsqueeze(-1)
 
         # Latent generation
         if self.latent_mode == "mul":
@@ -394,4 +394,9 @@ class vlinear(nn.Module):
         else:
             pred = pred.transpose(1, 2)
 
+        # Return latents if flag is set
+        if return_latents:
+            # Option A: Transformed projected space (B, T, P) -> (B, T * P)
+            latents = x_proj.reshape(B, -1)
+            return pred[:, -1, :], coeff, coeff[:, 0], latents
         return pred[:,-1,:], coeff, coeff[:,0]

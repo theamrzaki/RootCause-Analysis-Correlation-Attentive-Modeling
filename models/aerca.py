@@ -342,7 +342,7 @@ class AERCA(nn.Module):
 
         return torch.norm(coeffs[:, 1:] - coeffs[:, :-1], dim=1).mean()
 
-    def encoding(self, xs):
+    def encoding(self, xs, return_latents=False):
         
         if "include_logs_and_traces" in self.options and self.options["include_logs_and_traces"]:
                 if isinstance(xs, np.ndarray):
@@ -369,12 +369,19 @@ class AERCA(nn.Module):
 
         winds = torch.tensor(winds).float().to(self.device)
         nexts = torch.tensor(nexts).float().to(self.device)
-        preds, coeffs, attn_weights = self.encoder(winds)
+        if return_latents:
+            preds, coeffs, attn_weights, latents = self.encoder(winds, return_latents=return_latents)
+        else:
+            preds, coeffs, attn_weights = self.encoder(winds)
         us = preds - nexts                    # shape: (B, hidden_size)
 
         if self.options["coeff_architecture"] in self.models_encoder_only:
+            if return_latents:
+                return us, coeffs, nexts, winds[:-self.window_size], attn_weights, preds, latents
             return us, coeffs, nexts, winds[:-self.window_size], attn_weights, preds
         else:
+            if return_latents:
+                return us, coeffs, nexts, winds, attn_weights, preds, latents
             return us, coeffs, nexts, winds, attn_weights, preds
 
     def decoding_2decoders(self, nexts, winds, add_u=True):
@@ -395,8 +402,11 @@ class AERCA(nn.Module):
         if self.options["coeff_architecture"] in ["deep_mlp"]:
             return self.decoding_2decoders(nexts, winds, add_u=add_u)
 
-    def forward(self, x,add_u=True):
-        us, encoder_coeffs, nexts, winds, attn_weights, preds = self.encoding(x)
+    def forward(self, x,add_u=True, return_latents=False):
+        if return_latents:
+            us, encoder_coeffs, nexts, winds, attn_weights, preds, latents = self.encoding(x, return_latents=return_latents)
+        else:
+            us, encoder_coeffs, nexts, winds, attn_weights, preds = self.encoding(x)
         try:
             if "include_logs_and_traces" in self.options and self.options["include_logs_and_traces"]:
                 if self.options["coeff_architecture"] in self.models_simple_next_step:
@@ -419,10 +429,16 @@ class AERCA(nn.Module):
             prev_coeffs = torch.tensor([])
         else:
             nexts_hat, decoder_coeffs, prev_coeffs = self.decoding(us, nexts,winds, add_u=add_u)
+
+        if return_latents:
+            return nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us, attn_weights, latents
         return nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us, attn_weights
     
-    def _training_step(self, x, add_u=True):
-        nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us, attns = self.forward(x, add_u=add_u)
+    def _training_step(self, x, add_u=True, return_latents=False):
+        if return_latents:
+            nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us, attns, latents = self.forward(x, add_u=add_u, return_latents=return_latents)
+        else:
+            nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us, attns = self.forward(x, add_u=add_u, return_latents=return_latents)
         loss_recon = self.mse_loss(nexts_hat, nexts)
         #logging.info('Reconstruction loss: %s', loss_recon.item())
 
@@ -487,16 +503,17 @@ class AERCA(nn.Module):
         tensorboard_log = {f'training_step/{key}': value for key, value in losses_to_log.items()}
         for key, value in tensorboard_log.items():
             self.writer.add_scalar(key, value, self.current_epoch)
-
+        if return_latents:
+            return loss, losses_to_log, latents
         return loss, losses_to_log
     
-    def _training(self, xs):
+    def _training(self, xs, return_latents=False):
         if self.options["dataset_name"] in ["swat","wadi","batadal"]:
-            self._training_batches_swat(xs, self.options.get("batch_size"))
+            self._training_batches_swat(xs, self.options.get("batch_size"),return_latents=return_latents)
         else:
             raise ValueError(f"Unknown dataset {self.options['dataset']} for training")
         
-    def _training_batches_swat(self, xs, batch_size=256):
+    def _training_batches_swat(self, xs, batch_size=256, return_latents=False):
         import time
         import numpy as np
         import psutil
@@ -722,7 +739,49 @@ class AERCA(nn.Module):
                 map_location=self.device,
             )
         )
+        # =========================================================
+        # Single-pass latent extraction for t-SNE plot post-training
+        # =========================================================
+        if return_latents:
+            self.eval()
+            latents_list = []
+            
+            # Non-shuffled loader for clean forward pass
+            eval_loader = DataLoader(
+                TensorDataset(xs_train),
+                batch_size=batch_size,
+                shuffle=False
+            )
+            
+            with torch.no_grad():
+                for (x_batch,) in eval_loader:
+                    x_batch = x_batch.to(self.device, non_blocking=True)
+                    _, _, latents = self._training_step(x_batch, return_latents=True)
+                    latents_list.append(latents.cpu().numpy())
 
+            all_latents = np.concatenate(latents_list, axis=0)
+            n_samples = all_latents.shape[0]
+
+            from sklearn.manifold import TSNE
+            import matplotlib.pyplot as plt
+
+            perp = min(30, max(1, n_samples - 1))
+            tsne = TSNE(n_components=2, perplexity=perp, random_state=42)
+            z_2d = tsne.fit_transform(all_latents)
+
+            out_dir = "./results_journal/tsne"
+            os.makedirs(out_dir, exist_ok=True)
+
+            plt.figure(figsize=(6, 5))
+            plt.scatter(z_2d[:, 0], z_2d[:, 1], c="#1f77b4", alpha=0.5, s=15, edgecolors="none")
+            plt.title(f"t-SNE Space for {self.options.get('dataset_name')} using {self.options.get('transformation')} projection")
+            plt.xlabel("t-SNE Dim 1")
+            plt.ylabel("t-SNE Dim 2")
+            plt.tight_layout()
+            
+            save_path = os.path.join(out_dir, f"{self.model_name}_{self.options.get('transformation')}_tsne.pdf")
+            plt.savefig(save_path, dpi=300)
+            plt.close()
         logging.info("Training complete")
 
 
@@ -1022,7 +1081,7 @@ class AERCA(nn.Module):
         return total_bytes / (1024 ** 2)
     
 
-    def _testing_root_cause(self, xs, labels, alpha: float = 0.5, use_attention_fusion: bool = False):
+    def _testing_root_cause(self, xs, labels, alpha: float = 0.5, use_attention_fusion: bool = False, return_latents: bool = False):
         coeff_architecture = self.options["coeff_architecture"]
 
         # 1. Baseline check
