@@ -321,6 +321,14 @@ def main(argv):
             )
             print(f"Case study artifacts saved to: {case_save_dir}")
 
+    if options.get("plot_latents"):
+        if mapping["use_slice"]:
+            training_data = data_class.data_dict['x_n_list'][:options['training_size']]
+        else:
+            training_data = data_class.data_dict['x_n_list']
+        print("Running transformation analysis...")
+        aerca_model.generate_tsne_plot(training_data,batch_size=options['batch_size'])
+        print("Transformation analysis completed.")
     print('done')
 
 

@@ -182,6 +182,8 @@ class AERCA(nn.Module):
         #self.decoder.to(self.device)
         #self.decoder_prev.to(self.device)
         self.model_name =  self.options["coeff_architecture"] + '_' + data_name + '_ws_' + str(window_size) + '_seed_' + str(self.options['seed']) + '_numvars_' + str(num_vars) 
+        if self.options["exp_name"] == "Ablations_Projections":
+            self.model_name += '_transformation_' + self.options["transformation"]
         
         self.causal_quantile = causal_quantile
         self.risk = risk
@@ -739,52 +741,62 @@ class AERCA(nn.Module):
                 map_location=self.device,
             )
         )
-        # =========================================================
-        # Single-pass latent extraction for t-SNE plot post-training
-        # =========================================================
-        if return_latents:
-            self.eval()
-            latents_list = []
-            
-            # Non-shuffled loader for clean forward pass
-            eval_loader = DataLoader(
-                TensorDataset(xs_train),
-                batch_size=batch_size,
-                shuffle=False
-            )
-            
-            with torch.no_grad():
-                for (x_batch,) in eval_loader:
-                    x_batch = x_batch.to(self.device, non_blocking=True)
-                    _, _, latents = self._training_step(x_batch, return_latents=True)
-                    latents_list.append(latents.cpu().numpy())
-
-            all_latents = np.concatenate(latents_list, axis=0)
-            n_samples = all_latents.shape[0]
-
-            from sklearn.manifold import TSNE
-            import matplotlib.pyplot as plt
-
-            perp = min(30, max(1, n_samples - 1))
-            tsne = TSNE(n_components=2, perplexity=perp, random_state=42)
-            z_2d = tsne.fit_transform(all_latents)
-
-            out_dir = "./results_journal/tsne"
-            os.makedirs(out_dir, exist_ok=True)
-
-            plt.figure(figsize=(6, 5))
-            plt.scatter(z_2d[:, 0], z_2d[:, 1], c="#1f77b4", alpha=0.5, s=15, edgecolors="none")
-            plt.title(f"t-SNE Space for {self.options.get('dataset_name')} using {self.options.get('transformation')} projection")
-            plt.xlabel("t-SNE Dim 1")
-            plt.ylabel("t-SNE Dim 2")
-            plt.tight_layout()
-            
-            save_path = os.path.join(out_dir, f"{self.model_name}_{self.options.get('transformation')}_tsne.pdf")
-            plt.savefig(save_path, dpi=300)
-            plt.close()
         logging.info("Training complete")
 
+    def generate_tsne_plot(self, xs, batch_size=256, out_dir="./results_journal/tsne"):
+        """
+        Extracts latent representations using a pre-trained model checkpoint 
+        and saves a clean t-SNE projection PDF without internal titles or axis labels.
+        """
+        from torch.utils.data import DataLoader, TensorDataset
+        from sklearn.manifold import TSNE
+        import matplotlib.pyplot as plt
+        checkpoint_path = os.path.join(self.save_dir, f"{self.model_name}.pt")
+        if not os.path.exists(checkpoint_path):
+            raise FileNotFoundError(f"Model checkpoint not found at {checkpoint_path}")
 
+        # 1. Load trained model weights
+        self.load_state_dict(torch.load(checkpoint_path, map_location=self.device))
+        self.eval()
+
+        # 2. Extract Latents on CPU/GPU
+        xs_tensor = torch.tensor(xs, dtype=torch.float32)
+        eval_loader = DataLoader(
+            TensorDataset(xs_tensor),
+            batch_size=batch_size,
+            shuffle=False
+        )
+
+        latents_list = []
+        with torch.no_grad():
+            for (x_batch,) in tqdm(eval_loader, desc="Extracting Latents"):
+                x_batch = x_batch.to(self.device, non_blocking=True)
+                _, _, latents = self._training_step(x_batch, return_latents=True)
+                latents_list.append(latents.cpu().numpy())
+
+        all_latents = np.concatenate(latents_list, axis=0)
+        n_samples = all_latents.shape[0]
+
+        # 3. Fit t-SNE Manifold
+        perp = min(30, max(1, n_samples - 1))
+        tsne = TSNE(n_components=2, perplexity=perp, random_state=42)
+        z_2d = tsne.fit_transform(all_latents)
+
+        # 4. Generate Clean Publication Figure (No titles/axis ticks)
+        os.makedirs(out_dir, exist_ok=True)
+        plt.figure(figsize=(4, 4))
+        plt.scatter(z_2d[:, 0], z_2d[:, 1], c="#1f77b4", alpha=0.5, s=5, edgecolors="none")
+        
+        plt.xticks([])
+        plt.yticks([])
+        plt.tight_layout()
+
+        transformation = self.options.get("transformation")
+        save_path = os.path.join(out_dir, f"{self.model_name}_{transformation}_tsne_2.pdf")
+        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        plt.close()
+
+        print(f"t-SNE figure saved to {save_path}")
 
     def _testing_step(self, x, label=None, add_u=True):
         nexts_hat, nexts, encoder_coeffs, decoder_coeffs, prev_coeffs, kl_div, us, attn_weights = self.forward(x, add_u=add_u)
@@ -1459,10 +1471,10 @@ class AERCA(nn.Module):
                     # -------------------------
                     # TRAINING efficiency (NEW)
                     # -------------------------
-                    "train_total_time": self.training_metrics["total_train_time"],
-                    "train_avg_epoch_time": self.training_metrics["avg_epoch_time"],
-                    "train_throughput": self.training_metrics["train_throughput"],
-                    "train_peak_mem_mb": self.training_metrics["peak_mem_mb"],
+                    "train_total_time": self.training_metrics["total_train_time"] if self.options.get("training_aerca") else 0.0,
+                    "train_avg_epoch_time": self.training_metrics["avg_epoch_time"] if self.options.get("training_aerca") else 0.0,
+                    "train_throughput": self.training_metrics["train_throughput"] if self.options.get("training_aerca") else 0.0,
+                    "train_peak_mem_mb": self.training_metrics["peak_mem_mb"] if self.options.get("training_aerca") else 0.0,
                 },
             )
         else:
