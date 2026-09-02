@@ -25,6 +25,141 @@ import psutil
 import threading    
 from fvcore.nn import FlopCountAnalysis
 
+import os
+import time
+
+import subprocess
+import re
+
+
+def get_pi5_power_w():
+    """
+    Estimate Raspberry Pi 5 instantaneous power from PMIC ADC telemetry.
+
+    Uses:
+        vcgencmd pmic_read_adc
+
+    Computes the sum of V * I for PMIC-monitored power rails.
+
+    Note:
+        This is PMIC rail power, not exact USB-C input power.
+        The Raspberry Pi documentation notes that USB current bypasses
+        the PMIC measurement and therefore this should not be interpreted
+        as the complete source/input power of the board.
+    """
+    try:
+        result = subprocess.run(
+            ["vcgencmd", "pmic_read_adc"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+
+        output = result.stdout
+
+        # Store measured current and voltage by rail name
+        currents = {}
+        voltages = {}
+
+        for line in output.splitlines():
+
+            # Example:
+            # VDD_CORE_A current(7)=1.22341000A
+            current_match = re.match(
+                r"^\s*(\S+)_A\s+current\(\d+\)=([0-9.eE+-]+)A",
+                line
+            )
+
+            if current_match:
+                rail = current_match.group(1)
+                current_a = float(current_match.group(2))
+                currents[rail] = current_a
+                continue
+
+            # Example:
+            # VDD_CORE_V volt(15)=0.83164750V
+            voltage_match = re.match(
+                r"^\s*(\S+)_V\s+volt\(\d+\)=([0-9.eE+-]+)V",
+                line
+            )
+
+            if voltage_match:
+                rail = voltage_match.group(1)
+                voltage_v = float(voltage_match.group(2))
+                voltages[rail] = voltage_v
+
+        # Calculate power for rails where both V and I are available
+        total_power_w = 0.0
+
+        for rail in currents:
+            if rail in voltages:
+                total_power_w += (
+                    voltages[rail] * currents[rail]
+                )
+
+        return total_power_w
+
+    except Exception as e:
+        print("POWER SENSOR ERROR:", repr(e))
+        return float("nan")
+
+import threading
+import time
+import numpy as np
+
+class PowerMonitor:
+    def __init__(self, sampling_interval=0.05):
+        self.interval = sampling_interval
+        self.power_samples = []
+        self.stop_event = threading.Event()
+        self.thread = None
+
+    def _read_current_power(self) -> float:
+        """
+        Replace this function with your sensor read call:
+        - Pi 5 PMIC reading
+        - INA219 I2C sensor reading
+        - External USB Meter via Serial (e.g., UM25C / KM001C)
+        """
+        # Example using INA219 sensor over I2C:
+        # return ina.power / 1000.0  # Returns Watts
+        return get_pi5_power_w()
+
+    def _poll(self):
+        while not self.stop_event.is_set():
+            p = self._read_current_power()
+            self.power_samples.append((time.perf_counter(), p))
+            time.sleep(self.interval)
+
+    def start(self):
+        self.power_samples.clear()
+        self.stop_event.clear()
+        self.thread = threading.Thread(target=self._poll)
+        self.thread.start()
+
+    def stop(self):
+        self.stop_event.set()
+        if self.thread:
+            self.thread.join()
+
+    def get_metrics(self):
+        if len(self.power_samples) < 2:
+            return {"avg_power_w": 0.0, "total_energy_j": 0.0, "joules_per_sample": 0.0}
+        
+        times = [t for t, _ in self.power_samples]
+        powers = [p for _, p in self.power_samples]
+        
+        # Compatible trapezoidal integration for NumPy 1.x and 2.x
+        integration_fn = getattr(np, "trapezoid", getattr(np, "trapz", None))
+        total_energy_j = float(integration_fn(powers, times))
+        avg_power_w = float(np.mean(powers))
+        
+        print(f"Power Monitoring Metrics: Avg Power = {avg_power_w:.4f} W, Total Energy = {total_energy_j:.4f} J")
+        return {
+            "avg_power_w": avg_power_w,
+            "total_energy_j": total_energy_j
+        }
+
 class AERCA(nn.Module):
     def __init__(self, num_vars: int, hidden_layer_size: int, num_hidden_layers: int, device: torch.device,
                  window_size: int, stride: int = 1, encoder_alpha: float = 0.5, decoder_alpha: float = 0.5,
@@ -1077,6 +1212,9 @@ class AERCA(nn.Module):
         mrr_list = []
         hr1_list, hr3_list, hr5_list, hr10_list = [], [], [], []
 
+        power_mon = PowerMonitor(sampling_interval=0.02) # 20ms resolution
+        power_mon.start()
+
         # 3. Inference Loop
         with torch.no_grad():
             for i in tqdm(range(len(xs)), desc="Inference"):
@@ -1098,6 +1236,16 @@ class AERCA(nn.Module):
                     attn_mean = attn_weights.mean(dim=0).cpu().numpy()
                     attn_list.append(attn_mean)
 
+        # 3. Stop Monitor & Calculate Metrics
+        power_mon.stop()
+        power_metrics = power_mon.get_metrics()
+
+        
+        total_samples = len(xs)
+        print("total samples:", total_samples)
+        joules_per_sample = power_metrics["total_energy_j"] / total_samples if total_samples > 0 else 0.0
+        print("Total energy consumed (J):", power_metrics["total_energy_j"])
+        print("Joules per sample:", joules_per_sample)
         # 4. Global POT Threshold Calculation
         us_all = np.concatenate(us_list, axis=0) #(1430,30)
         us_all_z_score = (-(us_all - self.us_mean_encoder) / self.us_std_encoder)# (1430,30)
@@ -1309,6 +1457,9 @@ class AERCA(nn.Module):
                     "model_mem_mb": model_mem_mb,
                     "peak_mem_mb": peak_mem_mb,
 
+                    "avg_power_w": power_metrics["avg_power_w"],
+                    "total_energy_j": power_metrics["total_energy_j"],
+                    "joules_per_sample": joules_per_sample,
 
                     # -------------------------
                     # TRAINING efficiency (NEW)
@@ -1486,200 +1637,6 @@ class AERCA(nn.Module):
             # labels used internally
             "labels": current_labels,
         }
-      
-    def _testing_root_cause_services_metrics(self, xs, labels, alpha: float = 0.5, use_attention_fusion: bool = False):
-        # 0. Feature Mapping Setup
-        mapping_path = '/home/db2003/Desktop/Amr/Tests/Medicine/dataset/aiops22-pre/初赛评分数据/idx_to_feature.json'
-        with open(mapping_path, 'r') as f:
-            self.idx_to_feature = json.load(f)
-        feature_names = [self.idx_to_feature[str(i)] for i in range(self.num_vars)]
-
-        coeff_architecture = self.options["coeff_architecture"]
-        # 1. Baseline check
-        if coeff_architecture in ["rcd", "baro", "nsigma", "torai"]:
-            if coeff_architecture == "rcd":
-                res = StatisticalRCA.evaluate_rcd(xs, labels)
-            elif coeff_architecture == "baro":
-                res = StatisticalRCA.evaluate_baro(xs, labels)
-            elif coeff_architecture == "nsigma":
-                res = StatisticalRCA.evaluate_nsigma(xs, labels)
-            elif coeff_architecture == "torai":
-                res = StatisticalRCA.evaluate_torai(xs, labels)
-            if res:
-                k_at_step_all = res["avg_k_at_step"]
-                self._log_and_print('Root cause analysis AC@1: {:.5f}', k_at_step_all[0])
-                self._log_and_print('Root cause analysis AC@3: {:.5f}', k_at_step_all[2])
-                self._log_and_print('Root cause analysis AC@10: {:.5f}', k_at_step_all[9])
-                
-                # Write results for the RQ tables
-                write_results(self.options, self.local_model_name, 
-                              [k_at_step_all[0], k_at_step_all[2], k_at_step_all[4], k_at_step_all[9]], 
-                              k_at_step_all, 0, self.options.get("results_csv"))
-            return res
-
-
-        # 2. Model Loading & Setup
-        self.load_state_dict(torch.load(os.path.join(self.save_dir, f'{self.model_name}.pt'), map_location=self.device))
-        self.eval()
-        
-        self.us_mean_encoder = np.load(os.path.join(self.save_dir, f'{self.model_name}_us_mean_encoder.npy'))
-        self.us_std_encoder = np.load(os.path.join(self.save_dir, f'{self.model_name}_us_std_encoder.npy'))
-
-        us_list = []        
-        us_sample_list = [] 
-        attn_list = []
-        
-        # 3. Inference Loop
-        with torch.no_grad():
-            for i in tqdm(range(len(xs)), desc="Inference"):
-                x = xs[i]
-                label = labels[i]
-                _, _, _, _, _, _, _, us, attn_weights = self._testing_step(x, label, add_u=False)
-                u_numpy = us.cpu().numpy() 
-                us_sample_list.append(u_numpy)
-                us_list.append(u_numpy)
-                if use_attention_fusion:
-                    attn_mean = attn_weights.mean(dim=0).cpu().numpy()
-                    attn_list.append(attn_mean)
-
-        # 4. Global POT Threshold Calculation
-        us_all = np.concatenate(us_list, axis=0) 
-        us_all_z_score = (-(us_all - self.us_mean_encoder) / self.us_std_encoder)
-        
-        us_all_z_score_pot = []
-        for i in range(self.num_vars):
-            col_data = us_all_z_score[:, i]
-            col_data = col_data[np.isfinite(col_data)]
-            if col_data.size == 0:
-                us_all_z_score_pot.append(0.0)
-                continue
-            try:
-                pot_val, _ = pot(col_data, self.risk, self.initial_level, self.num_candidates)
-            except:
-                pot_val = np.mean(col_data) + 3 * np.std(col_data)
-            us_all_z_score_pot.append(pot_val)
-        us_all_z_score_pot = np.array(us_all_z_score_pot)
-
-        # 5. Top-K Evaluation (Faithful to Original Loop)
-        k_all = []
-        k_at_step_all = []
-        
-        # Sub-level tracking
-        results = {
-            "service": {"top1": 0, "top3": 0, "top5": 0, "top10": 0},
-            "metric": {"top1": 0, "top3": 0, "top5": 0, "top10": 0},
-            "node": {"top1": 0, "top3": 0, "top5": 0, "top10": 0}
-        }
-        
-        valid_samples = 0
-        for i in tqdm(range(len(xs)), desc="Top-K Evaluation"):
-            us_sample = us_sample_list[i]
-            z_scores = (-(us_sample - self.us_mean_encoder) / self.us_std_encoder)
-            
-            if use_attention_fusion:
-                attn_per_lag = attn_list[i].mean(axis=2)
-                attn_importance = attn_per_lag.mean(axis=0)
-                attn_importance = np.expand_dims(attn_importance, axis=0).repeat(z_scores.shape[0], axis=0)
-                z_scores = alpha * z_scores + (1 - alpha) * attn_importance
-
-            current_labels = np.max(labels[i], axis=0, keepdims=True)
-            
-            # Ground Truth Check for valid_samples count
-            if np.sum(current_labels) == 0: continue
-            valid_samples += 1
-
-            try:
-                # Original Top-K Logic (Faithful)
-                k_lst = topk(z_scores, current_labels, us_all_z_score_pot)
-                k_at_step = topk_at_step(z_scores, current_labels)
-                k_all.append(k_lst)
-                k_at_step_all.append(k_at_step)
-
-                # --- Faithfully Integrated Multi-Level Logic ---
-                gt_indices = np.where(current_labels[0] > 0)[0]
-                gt_completes = [feature_names[idx] for idx in gt_indices]
-
-                # Parsing helper based on: node.service-id-metric
-                def parse(name):
-                    node = name.split('.')[0]
-                    service = name.split('.')[1].split("-")[0]
-
-                    # preserve fault keyword explicitly
-                    lower = name.lower()
-
-                    if "cpu" in lower:
-                        metric = "cpu"
-                    elif "mem" in lower:
-                        metric = "mem"
-                    elif "disk" in lower or "io" in lower:
-                        metric = "disk"
-                    elif "socket" in lower:
-                        metric = "socket"
-                    elif "lat" in lower or "delay" in lower:
-                        metric = "delay"
-                    elif "loss" in lower:
-                        metric = "loss"
-                    else:
-                        metric = "unknown"
-
-                    return node, service, metric
-
-                gt_nodes = set(parse(m)[0] for m in gt_completes)
-                gt_services = set(parse(m)[1] for m in gt_completes)
-                gt_metrics = set(parse(m)[2] for m in gt_completes)
-
-                sorted_indices = np.argsort(z_scores[0])[::-1]
-                ranked_completes = [feature_names[idx] for idx in sorted_indices]
-
-                # Ranked Sub-lists
-                seen_n, r_nodes = set(), []
-                seen_s, r_services = set(), []
-                seen_m, r_metrics = set(), []
-
-                for m in ranked_completes:
-                    n, s, met = parse(m)
-                    if n not in seen_n: r_nodes.append(n); seen_n.add(n)
-                    if s not in seen_s: r_services.append(s); seen_s.add(s)
-                    if met not in seen_m: r_metrics.append(met); seen_m.add(met)
-
-                for k in [1, 3, 5, 10]:
-                    if any(n in gt_nodes for n in r_nodes[:k]): results["node"][f"top{k}"] += 1
-                    if any(s in gt_services for s in r_services[:k]): results["service"][f"top{k}"] += 1
-                    if any(m in gt_metrics for m in r_metrics[:k]): results["metric"][f"top{k}"] += 1
-
-            except Exception as e:
-                self._log_and_print(f"Error for sample {i}: {str(e)}")
-                continue
-
-        # 6. Result Aggregation (Faithful Output)
-        self._log_and_print("RCA Coverage: {}/{} ({:.2f}%)", valid_samples, len(xs), (valid_samples/len(xs))*100)
-        
-        if valid_samples > 0:
-            k_at_step_all = np.array(k_at_step_all).mean(axis=0)
-            
-            # 6a. Original Logs
-            self._log_and_print('--- COMPLETE LEVEL RCA ---')
-            self._log_and_print('Root cause analysis AC@1: {:.5f}', k_at_step_all[0])
-            self._log_and_print('Root cause analysis AC@3: {:.5f}', k_at_step_all[2])
-            self._log_and_print('Root cause analysis AC@5: {:.5f}', k_at_step_all[4])
-            self._log_and_print('Root cause analysis AC@10: {:.5f}', k_at_step_all[9])
-
-            # 6b. New Sub-Level Logs
-            for track in ["node", "service", "metric"]:
-                self._log_and_print(f'\n--- {track.upper()} LEVEL RCA ---')
-                for k in [1, 3, 5, 10]:
-                    acc = results[track][f"top{k}"] / valid_samples
-                    self._log_and_print(f'AC@{k}: {acc:.5f}')
-            
-            write_results(self.options, self.local_model_name, [k_at_step_all[0], k_at_step_all[2], k_at_step_all[4], k_at_step_all[9]], 
-                          k_at_step_all, self.total_params, self.options.get("results_csv")+"_microservice",
-                          metric_results={k: v / valid_samples for k, v in results["metric"].items()},
-                          node_results={k: v / valid_samples for k, v in results["node"].items()},
-                          service_results={k: v / valid_samples for k, v in results["service"].items()},
-                          RCA_coverage=(valid_samples/len(xs))*100)
-        else:
-            self._log_and_print("Zero valid samples found.")
-
     def plot_case(self,z_scores, labels, t_idx=None):
         """
         z_scores: shape (T, P)

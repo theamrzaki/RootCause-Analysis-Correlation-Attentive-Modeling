@@ -538,6 +538,10 @@ def write_results(args, local_model_name, ac_at,k_at_step_all, total_params,flop
         "temporal_mixer": args['temporal_mixer'] if 'temporal_mixer' in args else 0,
 
         "disable_orth_proj": args['disable_orth_proj'] if 'disable_orth_proj' in args else 0,
+
+        "avg_power_w": extra_metrics["avg_power_w"],
+        "total_energy_j": extra_metrics["total_energy_j"],
+        "joules_per_sample": extra_metrics["joules_per_sample"]
     }
     
 
