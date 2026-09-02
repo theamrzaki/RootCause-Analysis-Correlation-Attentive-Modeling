@@ -14,22 +14,22 @@
 2. [System Configuration](#system-configuration)
 3. [Installation](#installation)
 4. [Usage](#usage)
-    - [Cloning the Repository](#cloning-the-repository)
-    - [Running the Code](#running-the-code)
-    - [Command-Line Options](#command-line-options)
 5. [Datasets](#datasets)
 
 ---
 
 ## 📘 Overview
-    The SFlexRCA is a lightweight, scalable, and flexible root cause analysis framework designed for Industrial Internet of Things (IIoT) edge systems. It addresses the challenges of high-dimensional sensor telemetry and fault propagation in interconnected components by transforming multivariate telemetry into compact orthogonal representations and applying shared lightweight linear modeling. This approach avoids the need for explicit graph construction, message passing, and per-variable or lag-specific parameter growth. 
 
-    SFlexRCA has been evaluated on three publicly available IIoT datasets (BATADAL, SWAT, and WADI) and has demonstrated superior performance in terms of RCA accuracy, training and inference time, training memory, and edge energy consumption compared to various statistical, causal, and non-causal baselines. The framework has also been deployed on Raspberry Pi 3 and Raspberry Pi 5 to assess its practical suitability for resource-constrained IIoT edge environments.
+The SFlexRCA is a lightweight, scalable, and flexible root cause analysis framework designed for Industrial Internet of Things (IIoT) edge systems. It addresses the challenges of high-dimensional sensor telemetry and fault propagation in interconnected components by transforming multivariate telemetry into compact orthogonal representations and applying shared lightweight linear modeling. This approach avoids the need for explicit graph construction, message passing, and per-variable or lag-specific parameter growth. 
+
+SFlexRCA has been evaluated on three publicly available IIoT datasets (BATADAL, SWAT, and WADI) and has demonstrated superior performance in terms of RCA accuracy, training and inference time, training memory, and edge energy consumption compared to various statistical, causal, and non-causal baselines. The framework has also been deployed on Raspberry Pi 3 and Raspberry Pi 5 to assess its practical suitability for resource-constrained IIoT edge environments.
+
 ---
 
 ## 🧰 System Configuration
 
 All experiments are conducted using multiple random seeds on a Linux workstation equipped with an Intel(R) Core(TM) i9-10900K CPU @ 3.70GHz (20 cores), 32~GB RAM, and an NVIDIA GeForce RTX 3070 GPU with 8~GB memory, running Ubuntu 22.04.2 LTS. The implementation uses Python 3.10.12, PyTorch 2.7.1+cu126 with CUDA 12.6, and PyTorch Geometric 2.6.1.
+
 ---
 
 ## ⚙️ Installation
