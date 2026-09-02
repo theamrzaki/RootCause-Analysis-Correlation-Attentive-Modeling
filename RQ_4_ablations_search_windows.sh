@@ -79,7 +79,7 @@ exp_name="Ablations_windows"
 dataset="wadi"
 results_csv="Ablations_wadi_windows_new.csv"
 
-seeds=(1 2 3)
+seeds=()
 window_size=(4 8 12 16)
 
 latent_mode="mul"
@@ -135,7 +135,7 @@ done
 dataset="swat"
 results_csv="Ablations_swat_windows_new.csv"
 
-seeds=(1 2 3)
+seeds=()
 window_size=(4 8 12 16) #4 8 16
 
 latent_mode="mul"
@@ -198,7 +198,7 @@ done
 
 
 dataset="BATADAL"
-results_csv="Ablations_batadal_windows_new_beta_0.csv"
+results_csv="Ablations_batadal_windows_256.csv"
 
 seeds=(1 2 3)
 window_size=(4 8 16 24 32) #4 16)
@@ -213,7 +213,7 @@ temporal_mixer=1
 # Data has already been preprocessed.
 preprocessing_data=0
 batch_size=512
-hidden_layer_size=128
+hidden_layer_size=256
 epochs=200
 for seed in "${seeds[@]}"; do
     for window_size_item in "${window_size[@]}"; do
