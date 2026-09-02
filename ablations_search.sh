@@ -47,6 +47,7 @@ run_deep_models() {
         --coeff_mode=$coeff_mode \
         --predictor=$predictor \
         --temporal_mixer=$temporal_mixer \
+        --transformation=orthogonal\
 
         --use_MoM=0 \
         --preprocessing_data=$preprocessing_data \
@@ -66,11 +67,11 @@ run_deep_models() {
     eval $cmd
 }
 
-datasets=("swat" "wadi") # "swat"
+datasets=("wadi") # "swat"
 results_csv_wadi="3_Ablations_WADI_window8_MLP.csv" 
 results_csv_swat="3_Ablations_SWAT_window8.csv"
 results_csv_batadal="3_Ablations_BATADAL_window8_samelosses.csv"
-seeds=(2 3)
+seeds=(2)
 
 exp_name="Ablations"
 for seed in "${seeds[@]}"; do
@@ -159,42 +160,42 @@ for seed in "${seeds[@]}"; do
         # --------------------------------------------------
         # Context ablation
         # --------------------------------------------------
-        #run_deep_models \
-        #    0 \
-        #    $seed \
-        #    $window_size_item \
-        #    "vlinear" \
-        #    $latent_default \
-        #    "gate" \
-        #    "max" \
-        #    "symmetric" \
-        #    "linear" \
-        #    1 \
-        #    $batch_size \
-        #    0 \
-        #    $epochs \
-        #    $hidden_layer_size \
-        #    $exp_name
-
-        ## --------------------------------------------------
-        ## Context ablation (with no temporal mixer)
-        ## --------------------------------------------------
         run_deep_models \
             0 \
             $seed \
             $window_size_item \
             "vlinear" \
             $latent_default \
-            $context_default \
+            "gate" \
             "max" \
             "symmetric" \
             "linear" \
-            0 \
+            1 \
             $batch_size \
             0 \
             $epochs \
             $hidden_layer_size \
             $exp_name
+
+        ## --------------------------------------------------
+        ## Context ablation (with no temporal mixer)
+        ## --------------------------------------------------
+        #run_deep_models \
+        #    0 \
+        #    $seed \
+        #    $window_size_item \
+        #    "vlinear" \
+        #    $latent_default \
+        #    $context_default \
+        #    "max" \
+        #    "symmetric" \
+        #    "linear" \
+        #    0 \
+        #    $batch_size \
+        #    0 \
+        #    $epochs \
+        #    $hidden_layer_size \
+        #    $exp_name
 
          #--------------------------------------------------
          #Context ablation (with no orthogonal projection)
