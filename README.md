@@ -5,6 +5,9 @@
 
 # SFlexRCA: Lightweight, Scalable, and Flexible Root Cause Analysis for IIoT Edge Systems
 
+<div align="center">
+  <img src="https://github.com/theamrzaki/RootCause-Analysis-Correlation-Attentive-Modeling/blob/CrGSTA/other/SFlexRCA core-1.png" alt="AERCA Poster" />
+</div>
 
 ---
 
@@ -86,7 +89,16 @@ To replicate RQ2, please refer to the respective branches.
 - (from-raspberrypi-larger)
 - (from-raspberrypi-smaller)
 
+to generate the tables and the plots for RQ1,RQ2,RQ3,RQ4,RQ5 use 
 
+```bash
+    python3 "Scripts/RQ1 (accuracy).py"
+    python3 "Scripts/RQ2 (efficiency).py"
+    python3 "Scripts/RQ3 (ablations).py"
+    python3 "Scripts/RQ4 (windows).py"
+    python3 "Scripts/RQ5 (projections).py"
+
+```
 
 ---
 
