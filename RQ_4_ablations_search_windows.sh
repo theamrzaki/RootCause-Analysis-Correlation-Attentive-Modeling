@@ -198,10 +198,10 @@ done
 
 
 dataset="BATADAL"
-results_csv="Ablations_batadal_windows_256.csv"
+results_csv="Ablations_batadal_windows_256_256.csv"
 
 seeds=(1 2 3)
-window_size=(4 8 16 24 32) #4 16)
+window_size=(4 8 16 24) #4 16)
 
 latent_mode="mul"
 context="linear_attn"
@@ -212,7 +212,7 @@ temporal_mixer=1
 
 # Data has already been preprocessed.
 preprocessing_data=0
-batch_size=512
+batch_size=256
 hidden_layer_size=256
 epochs=200
 for seed in "${seeds[@]}"; do
