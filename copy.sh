@@ -1,6 +1,6 @@
 #!/bin/bash
-IP_ADDRESS="130.63.254.143" #db2003smaller
-#IP_ADDRESS="130.63.102.34"
+IP_ADDRESS="130.63.254.225" #db2003smaller
+#IP_ADDRESS="130.63.103.178"
 DEVICE_NAME="db2003smaller"
 #DEVICE_NAME="db2003larger"
 
@@ -22,37 +22,37 @@ SSH_OPTS="-o IdentitiesOnly=yes -i ~/.ssh/id_rsa"
 sudo chown -R $(whoami) "/home/db2003/Desktop/Amr/(TSE) RootCause-Analysis-Correlation-Attentive-Modeling/saved_models/"
 
 DATASET_ROOT="/home/db2003/Desktop/Amr/(TSE) RootCause-Analysis-Correlation-Attentive-Modeling/datasets"
-dataset="wadi"
-windows_list=(8)
-num_vars=127
+dataset="batadal"
+windows_list=(16)
+num_vars=43
 
 # --- COPY DATASET FILES ---
-#for window in "${windows_list[@]}"; do
-#    echo "---- Copying dataset files for window ${window} and num_vars ${num_vars} to $DEVICE_NAME@$IP_ADDRESS ----"
-#    
-#    # FIXED: Replaced '#' typo with '_' in the target path
-#    REMOTE_DATASET_DIR="/home/$DEVICE_NAME/RootCause-Analysis-Correlation-Attentive-Modeling/datasets/${dataset}/window_${window}_vars_${num_vars}"
-#
-#    ssh $SSH_OPTS $DEVICE_NAME@$IP_ADDRESS "mkdir -p ${REMOTE_DATASET_DIR}/orth_transform_meta"
-#
-#    data_files=(
-#        "${DATASET_ROOT}/${dataset}/window_${window}_vars_${num_vars}/label_list.npy"
-#        "${DATASET_ROOT}/${dataset}/window_${window}_vars_${num_vars}/x_ab_list.npy"
-#        "${DATASET_ROOT}/${dataset}/window_${window}_vars_${num_vars}/x_n_list.npy"
-#    )
-#
-#    for data_file in "${data_files[@]}"; do
-#        scp $SSH_OPTS "$data_file" $DEVICE_NAME@$IP_ADDRESS:${REMOTE_DATASET_DIR}/
-#    done
-#
-#    orth_data_file="${DATASET_ROOT}/${dataset}/window_${window}_vars_${num_vars}/orth_transform_meta/swat_q_matrix_lag${window}.npy"
-#    scp $SSH_OPTS "$orth_data_file" $DEVICE_NAME@$IP_ADDRESS:${REMOTE_DATASET_DIR}/orth_transform_meta/
-#done
+for window in "${windows_list[@]}"; do
+    echo "---- Copying dataset files for window ${window} and num_vars ${num_vars} to $DEVICE_NAME@$IP_ADDRESS ----"
+    
+    # FIXED: Replaced '#' typo with '_' in the target path
+    REMOTE_DATASET_DIR="/home/$DEVICE_NAME/RootCause-Analysis-Correlation-Attentive-Modeling/datasets/${dataset}/window_${window}_vars_${num_vars}"
+
+    ssh $SSH_OPTS $DEVICE_NAME@$IP_ADDRESS "mkdir -p ${REMOTE_DATASET_DIR}/orth_transform_meta"
+
+    data_files=(
+        "${DATASET_ROOT}/${dataset}/window_${window}_vars_${num_vars}/label_list.npy"
+        "${DATASET_ROOT}/${dataset}/window_${window}_vars_${num_vars}/x_ab_list.npy"
+        "${DATASET_ROOT}/${dataset}/window_${window}_vars_${num_vars}/x_n_list.npy"
+    )
+
+    for data_file in "${data_files[@]}"; do
+        scp $SSH_OPTS "$data_file" $DEVICE_NAME@$IP_ADDRESS:${REMOTE_DATASET_DIR}/
+    done
+
+    orth_data_file="${DATASET_ROOT}/${dataset}/window_${window}_vars_${num_vars}/orth_transform_meta/swat_q_matrix_lag${window}.npy"
+    scp $SSH_OPTS "$orth_data_file" $DEVICE_NAME@$IP_ADDRESS:${REMOTE_DATASET_DIR}/orth_transform_meta/
+done
 
 
 # --- COPY MODEL FILES ---
-MODEL_NAMES=("iTransformer" "TimeMixerpp") # "GVAR" "CUTS_PLUS" "vlinear" "cLSTM"   "deep_mlp" "cMLP"
-DATASET_NAMES=("wadi")
+MODEL_NAMES=("GVAR" "CUTS_PLUS" "cLSTM") # "GVAR" "CUTS_PLUS" "vlinear" "cLSTM"   "deep_mlp" "cMLP" "iTransformer" "TimeMixerpp"
+DATASET_NAMES=("batadal") # "swat" "wadi" "batadal"
 SEEDS=(1 2 3)
 
 REMOTE_SAVED_MODELS="/home/$DEVICE_NAME/RootCause-Analysis-Correlation-Attentive-Modeling/saved_models/"
@@ -80,7 +80,7 @@ for seed in "${SEEDS[@]}"; do
                 )
 
                 for model_file in "${models_to_copy[@]}"; do
-                    LOCAL_PATH="/home/db2003/Desktop/Amr/(TSE) RootCause-Analysis-Correlation-Attentive-Modeling/saved_models/${model_file}"
+                    LOCAL_PATH="/home/db2003/Desktop/Amr/(TSE) RootCause-Analysis-Correlation-Attentive-Modeling/saved_models/default_experiment/${model_file}"
                     if [ -f "$LOCAL_PATH" ]; then
                         scp $SSH_OPTS "$LOCAL_PATH" $DEVICE_NAME@$IP_ADDRESS:${REMOTE_SAVED_MODELS}
                     else
